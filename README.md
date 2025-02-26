@@ -12,6 +12,13 @@
 - **DataSHIELD Integration**: Secure server-side implementation compatible with DataSHIELD's privacy-preserving framework
 - **Flexible Configuration**: Customizable job submission parameters (memory, CPUs, time limits, etc.)
 - **Local Fallback**: Gracefully falls back to local execution when HPC resources are unavailable
+- **Python Integration**: Seamlessly execute Python code and modules, with support for image processing via Pillow
+
+## Documentation
+
+- [Usage Guide](docs/usage.md) - Comprehensive documentation for using dsHPC
+- [Developer Integration Guide](docs/developer_guide.md) - Guide for DataSHIELD package developers who want to integrate dsHPC
+- [Docker Setup](docker/) - Example Dockerfile to set up all dsHPC requirements dsHPC in a rock instance
 
 ## Installation
 
@@ -40,24 +47,50 @@ This creates the necessary database connections and checks for available job sch
 Submit a function to be executed on the HPC cluster:
 
 ```r
-# Simple example
+# Simple example with function reference
 job <- dsHPC.submit(
-  func_name = "mean",
+  func = mean,
   args = list(x = c(1, 2, 3, 4, 5))
 )
 
-# More complex example with custom Slurm options
-job <- dsHPC.submit(
+# Using a function name
+job <- dsHPC.submit_by_name(
   func_name = "kmeans",
   args = list(x = my_data_matrix, centers = 3),
-  package = "stats",
-  required_packages = c("stats"),
+  package = "stats"
+)
+
+# With custom Slurm options
+job <- dsHPC.submit(
+  func = kmeans,
+  args = list(x = my_data_matrix, centers = 3),
   slurm_opts = list(
     partition = "normal",
     memory = "8G",
     time = "02:00:00",
     cpus = 2
   )
+)
+```
+
+### Python Integration
+
+Submit Python code or functions:
+
+```r
+# Submit a Python function from a module
+job <- dsHPC.submit_python(
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = c(1, 2, 3, 4, 5))
+)
+
+# Submit arbitrary Python code
+job <- dsHPC.submit_python(
+  python_code = "
+import numpy as np
+result = np.mean([1, 2, 3, 4, 5])
+"
 )
 ```
 
@@ -74,11 +107,15 @@ status <- dsHPC.status(job$job_id)
 Get the result of a completed job:
 
 ```r
-# Non-blocking (returns NULL if not completed)
+# Get the result (returns NULL if not completed)
 result <- dsHPC.result(job$job_id)
 
-# Blocking (waits for job completion)
-result <- dsHPC.result(job$job_id, wait_for_completion = TRUE)
+# Check status and get result
+status <- dsHPC.status(job$job_id, return_result = TRUE)
+if (status$status == "COMPLETED") {
+  result <- status$result
+  print(result)
+}
 ```
 
 ### Job Management
@@ -105,77 +142,60 @@ Clean up old cached results:
 dsHPC.clean_cache(days_to_keep = 14)
 ```
 
-## DataSHIELD Integration
-
-For DataSHIELD environments, use the DataSHIELD-specific functions:
-
-```r
-# Initialize in DataSHIELD environment
-dsHPC.ds.init()
-
-# Submit a job in DataSHIELD environment
-job <- dsHPC.ds.submit(
-  func_name = "kmeans",
-  args = list(x = my_data_matrix, centers = 3),
-  package = "stats"
-)
-```
-
-## Function Wrapping
-
-Create a wrapped version of a function that will automatically be executed via HPC:
-
-```r
-# Create a wrapped version of the kmeans function
-kmeans_hpc <- dsHPC.wrap_function(
-  func = kmeans,
-  package = "stats",
-  required_packages = c("stats"),
-  slurm_opts = list(memory = "8G", cpus = 2)
-)
-
-# Use the wrapped function as normal
-result <- kmeans_hpc(x = my_data, centers = 3)
-```
-
-## Architecture
-
-The package consists of several key components:
-
-1. **Core Interface**: Main functions for job submission and management
-2. **Database Management**: SQLite-based storage for job information and result caching
-3. **Scheduler Interface**: Functions that interact with HPC job schedulers
-
 ## For Developers
 
 Other DataSHIELD server-side packages can leverage dsHPC by:
 
 1. Adding dsHPC as a dependency
 2. Using `dsHPC.submit()` to execute computationally intensive functions
-3. Using `dsHPC.wrap_function()` to create HPC-enabled versions of existing functions
 
 Example of integration in another package:
 
 ```r
 # In your package's function
 my_intensive_analysis <- function(data, ...) {
-  # Initialize dsHPC if not already done
-  if (is.null(getOption("dsHPC.config"))) {
-    dsHPC::dsHPC.init()
+  # Check if dsHPC is available
+  if (requireNamespace("dsHPC", quietly = TRUE) && !is.null(getOption("dsHPC.config"))) {
+    # Define the computation function
+    compute_function <- function(data, ...) {
+      # Intensive computation
+      result <- # ...
+      return(result)
+    }
+    
+    # Submit to HPC
+    job <- dsHPC::dsHPC.submit(
+      func = compute_function,
+      args = list(data = data, ...),
+      use_cache = TRUE
+    )
+    
+    # Wait for and return the result
+    if (job$status == "COMPLETED" || job$status == "CACHED") {
+      return(job$result)
+    } else {
+      # Wait for job completion
+      while (TRUE) {
+        status <- dsHPC::dsHPC.status(job$job_id, return_result = TRUE)
+        if (status$status %in% c("COMPLETED", "CACHED")) {
+          return(status$result)
+        } else if (status$status == "FAILED") {
+          stop("Job failed: ", status$error_message)
+        }
+        Sys.sleep(2)
+      }
+    }
+  } else {
+    # Fallback to local computation
+    warning("dsHPC not available, computing locally")
+    # Local computation code
   }
-  
-  # Submit the actual analysis function to HPC
-  job <- dsHPC::dsHPC.submit(
-    func_name = "actual_analysis",
-    args = list(data = data, ...),
-    package = "myPackage"
-  )
-  
-  # Wait for and return the result
-  dsHPC::dsHPC.result(job$job_id, wait_for_completion = TRUE)
 }
 ```
+
+For more advanced integration patterns, see the [Developer Integration Guide](docs/developer_guide.md).
 
 ## License
 
 This package is licensed under the [MIT License](LICENSE).
+
