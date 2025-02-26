@@ -1,0 +1,31 @@
+Package: dsHPC
+Title: DataSHIELD Interface for High-Performance Computing
+Version: 0.0.0.9000
+Authors@R:
+    c(person("David", "Sarrat González", , "david.sarrat@isglobal.org", role = c("aut", "cre")),
+      person("Xavier", "Escribà-Montagut", , "xavier.escriba@isglobal.org", role = c("aut")),
+      person("Juan R", "González", , "juanr.gonzalez@isglobal.org", role = c("aut")))
+Description: Provides server-side DataSHIELD functions for submitting, managing, and monitoring
+    High Performance Computing (HPC) jobs. This package offers an interface to the job scheduler 
+    Slurm, caches results to avoid redundant computations, and provides tools for job lifecycle 
+    management. Designed to be used by other DataSHIELD server-side packages.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports:
+    RSQLite,
+    DBI,
+    digest,
+    jsonlite,
+    stringr,
+    uuid,
+    base64enc
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    covr,
+    opal
+Config/testthat/edition: 3
+VignetteBuilder: knitr
