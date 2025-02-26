@@ -8,7 +8,7 @@ init_db_connection(db_path = NULL)
 }
 \arguments{
 \item{db_path}{Character string specifying the path to the SQLite database file.
-If NULL (default), uses the package's default location.}
+If NULL (default), uses the package's default location at ~/.dsHPC/dsHPC.sqlite.}
 }
 \value{
 A DBI connection object to the database.
@@ -18,5 +18,8 @@ This file contains functions for interacting with the SQLite database
 that stores job information and results for caching purposes.
 
 Creates and initializes the SQLite database for storing job information.
+This function ensures that the database filename contains "dsHPC" to avoid
+conflicts with other SQLite databases. If a custom path is provided without
+"dsHPC" in the name, it will be renamed and a warning will be issued.
 }
 \keyword{internal}

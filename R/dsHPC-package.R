@@ -12,7 +12,7 @@
 #'   \item Submit R functions to be executed on HPC clusters
 #'   \item Job status monitoring and management
 #'   \item Efficient caching of results based on function+arguments hashing
-#'   \item DataSHIELD-specific interfaces for secure server-side operations
+#'   \item Secure server-side operations within the DataSHIELD framework
 #'   \item Function wrapping utilities to simplify HPC interactions
 #' }
 #' 
@@ -22,11 +22,6 @@
 #' 2. Submit a job with \code{dsHPC.submit()}
 #' 3. Check job status with \code{dsHPC.status()}
 #' 4. Retrieve results with \code{dsHPC.result()}
-#' 
-#' @section DataSHIELD Integration:
-#' 
-#' For DataSHIELD environments, use the \code{dsHPC.ds.*} functions, which
-#' provide DataSHIELD-compatible interfaces to the core functionality.
 #' 
 #' @examples
 #' \dontrun{

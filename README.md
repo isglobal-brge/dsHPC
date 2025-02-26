@@ -2,23 +2,23 @@
 
 ## Overview
 
-`dsHPC` is a server-side DataSHIELD package that enables the execution of High-Performance Computing (HPC) jobs. It provides a standardized interface for submitting, monitoring, and retrieving results from jobs running on HPC resources, with built-in caching to avoid redundant computations. **This package is designed to be used by other DataSHIELD server-side packages.**
+`dsHPC` is a server-side DataSHIELD package that enables the execution of High-Performance Computing (HPC) jobs within the DataSHIELD framework. It provides a standardized interface for submitting, monitoring, and retrieving results from jobs running on HPC resources (Slurm clusters), with built-in caching to avoid redundant computations. **This package is designed to be used exclusively within the DataSHIELD server-side environment.**
 
 ## Features
 
-- **HPC Integration**: Interface with the job scheduler Slurm to submit and manage computational jobs
+- **DataSHIELD Integration**: Fully integrated with the DataSHIELD privacy-preserving framework
+- **HPC Integration**: Direct interface with the Slurm job scheduler to submit and manage computational jobs
 - **Efficient Caching**: Store and retrieve results based on function and parameter hashing to avoid redundant computations
 - **Job Management**: Submit, monitor, cancel, and retrieve results from computational jobs
-- **DataSHIELD Integration**: Secure server-side implementation compatible with DataSHIELD's privacy-preserving framework
 - **Flexible Configuration**: Customizable job submission parameters (memory, CPUs, time limits, etc.)
-- **Local Fallback**: Gracefully falls back to local execution when HPC resources are unavailable
+- **Local Fallback**: Gracefully falls back to local execution when Slurm is unavailable
 - **Python Integration**: Seamlessly execute Python code and modules, with support for image processing via Pillow
 
 ## Documentation
 
 - [Package Website](https://isglobal-brge.github.io/dsHPC/) - Complete documentation with function reference and vignettes
-- [Usage Guide](guides/usage.md) - Comprehensive documentation for using dsHPC
-- [Developer Integration Guide](guides/developer_guide.md) - Guide for DataSHIELD package developers who want to integrate dsHPC
+- [Usage Guide](docs/usage.md) - Comprehensive documentation for using dsHPC
+- [Developer Integration Guide](docs/developer_guide.md) - Guide for DataSHIELD package developers who want to integrate dsHPC
 - [Docker Setup](docker/) - Example Dockerfile to set up all dsHPC requirements in a rock instance
 
 ## Installation
@@ -41,11 +41,11 @@ library(dsHPC)
 dsHPC.init()
 ```
 
-This creates the necessary database connections and checks for available job schedulers.
+This creates the necessary database connections and checks for the Slurm scheduler. The package will always attempt to use Slurm for job submission, falling back to local execution only if Slurm is unavailable.
 
 ### Submitting Jobs
 
-Submit a function to be executed on the HPC cluster:
+Submit a function to be executed on the Slurm cluster:
 
 ```r
 # Simple example with function reference

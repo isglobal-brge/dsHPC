@@ -56,24 +56,24 @@
 <div class="section level2">
 <h2 id="overview">Overview<a class="anchor" aria-label="anchor" href="#overview"></a>
 </h2>
-<p><code>dsHPC</code> is a server-side DataSHIELD package that enables the execution of High-Performance Computing (HPC) jobs. It provides a standardized interface for submitting, monitoring, and retrieving results from jobs running on HPC resources, with built-in caching to avoid redundant computations. <strong>This package is designed to be used by other DataSHIELD server-side packages.</strong></p>
+<p><code>dsHPC</code> is a server-side DataSHIELD package that enables the execution of High-Performance Computing (HPC) jobs within the DataSHIELD framework. It provides a standardized interface for submitting, monitoring, and retrieving results from jobs running on HPC resources (Slurm clusters), with built-in caching to avoid redundant computations. <strong>This package is designed to be used exclusively within the DataSHIELD server-side environment.</strong></p>
 </div>
 <div class="section level2">
 <h2 id="features">Features<a class="anchor" aria-label="anchor" href="#features"></a>
 </h2>
 <ul>
 <li>
-<strong>HPC Integration</strong>: Interface with the job scheduler Slurm to submit and manage computational jobs</li>
+<strong>DataSHIELD Integration</strong>: Fully integrated with the DataSHIELD privacy-preserving framework</li>
+<li>
+<strong>HPC Integration</strong>: Direct interface with the Slurm job scheduler to submit and manage computational jobs</li>
 <li>
 <strong>Efficient Caching</strong>: Store and retrieve results based on function and parameter hashing to avoid redundant computations</li>
 <li>
 <strong>Job Management</strong>: Submit, monitor, cancel, and retrieve results from computational jobs</li>
 <li>
-<strong>DataSHIELD Integration</strong>: Secure server-side implementation compatible with DataSHIELD’s privacy-preserving framework</li>
-<li>
 <strong>Flexible Configuration</strong>: Customizable job submission parameters (memory, CPUs, time limits, etc.)</li>
 <li>
-<strong>Local Fallback</strong>: Gracefully falls back to local execution when HPC resources are unavailable</li>
+<strong>Local Fallback</strong>: Gracefully falls back to local execution when Slurm is unavailable</li>
 <li>
 <strong>Python Integration</strong>: Seamlessly execute Python code and modules, with support for image processing via Pillow</li>
 </ul>
@@ -110,12 +110,12 @@
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://isglobal-brge.github.io/dsHPC">dsHPC</a></span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/dsHPC.init.html">dsHPC.init</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
-<p>This creates the necessary database connections and checks for available job schedulers.</p>
+<p>This creates the necessary database connections and checks for the Slurm scheduler. The package will always attempt to use Slurm for job submission, falling back to local execution only if Slurm is unavailable.</p>
 </div>
 <div class="section level3">
 <h3 id="submitting-jobs">Submitting Jobs<a class="anchor" aria-label="anchor" href="#submitting-jobs"></a>
 </h3>
-<p>Submit a function to be executed on the HPC cluster:</p>
+<p>Submit a function to be executed on the Slurm cluster:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Simple example with function reference</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>

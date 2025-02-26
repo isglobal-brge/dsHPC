@@ -2,18 +2,21 @@
 % Please edit documentation in R/dsHPC.R
 \name{dsHPC.clean_cache}
 \alias{dsHPC.clean_cache}
-\title{Clean Old Results}
+\title{Clean Old Cached Results}
 \usage{
 dsHPC.clean_cache(days_to_keep = 30)
 }
 \arguments{
-\item{days_to_keep}{Integer specifying how many days of cache to retain (default: 30).}
+\item{days_to_keep}{Integer specifying how many days of cache to retain (default: 30).
+Set to 0 to remove all completed job results that are not referenced by active jobs.}
 }
 \value{
 The number of records deleted.
 }
 \description{
 Removes cached results older than a specified time period.
+This function only removes entries from the cache that are older than
+the specified number of days and are not referenced by active jobs.
 }
 \examples{
 \dontrun{
@@ -22,5 +25,8 @@ dsHPC.init()
 
 # Clean results older than 14 days
 dsHPC.clean_cache(days_to_keep = 14)
+
+# Remove all completed job results
+dsHPC.clean_cache(days_to_keep = 0)
 }
 }

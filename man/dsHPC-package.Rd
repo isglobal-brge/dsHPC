@@ -19,7 +19,7 @@ Key features include:
 \item Submit R functions to be executed on HPC clusters
 \item Job status monitoring and management
 \item Efficient caching of results based on function+arguments hashing
-\item DataSHIELD-specific interfaces for secure server-side operations
+\item Secure server-side operations within the DataSHIELD framework
 \item Function wrapping utilities to simplify HPC interactions
 }
 }
@@ -31,13 +31,6 @@ Key features include:
 \item Check job status with \code{dsHPC.status()}
 \item Retrieve results with \code{dsHPC.result()}
 }
-}
-
-\section{DataSHIELD Integration}{
-
-
-For DataSHIELD environments, use the \code{dsHPC.ds.*} functions, which
-provide DataSHIELD-compatible interfaces to the core functionality.
 }
 
 \examples{
@@ -57,6 +50,15 @@ status <- dsHPC.status(job$job_id)
 
 # Get result (with waiting)
 result <- dsHPC.result(job$job_id, wait_for_completion = TRUE)
+}
+
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://isglobal-brge.github.io/dsHPC}
+  \item \url{https://github.com/isglobal-brge/dsHPC}
+  \item Report bugs at \url{https://github.com/isglobal-brge/dsHPC/issues}
 }
 
 }

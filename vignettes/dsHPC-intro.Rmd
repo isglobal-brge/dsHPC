@@ -131,28 +131,6 @@ Clean up old cached results:
 dsHPC.clean_cache(days_to_keep = 14)
 ```
 
-## DataSHIELD Integration
-
-For DataSHIELD environments, use the DataSHIELD-specific functions:
-
-```{r eval=FALSE}
-# Initialize in DataSHIELD environment
-dsHPC.ds.init()
-
-# Submit a job in DataSHIELD environment
-job <- dsHPC.ds.submit(
-  func_name = "kmeans",
-  args = list(x = my_data_matrix, centers = 3),
-  package = "stats"
-)
-
-# Get job status in DataSHIELD environment
-status <- dsHPC.ds.status(job$job_id)
-
-# Get job result in DataSHIELD environment
-result <- dsHPC.ds.result(job$job_id, wait_for_completion = TRUE)
-```
-
 ## Function Wrapping for Easier Use
 
 You can create a wrapped version of a function that will automatically be executed via HPC:

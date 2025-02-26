@@ -30,26 +30,20 @@ navbar:
 reference:
   - title: "Initialization"
     desc: >
-      Functions for setting up the dsHPC environment
+      Functions for setting up the dsHPC environment within DataSHIELD
     contents:
       - dsHPC.init
-      - dsHPC.ds.init
   
   - title: "Job Management"
     desc: >
-      Functions for submitting and managing jobs
+      Functions for submitting and managing Slurm jobs
     contents:
       - dsHPC.submit
       - dsHPC.submit_by_name
-      - dsHPC.ds.submit
       - dsHPC.status
-      - dsHPC.ds.status
       - dsHPC.result
-      - dsHPC.ds.result
       - dsHPC.list_jobs
-      - dsHPC.ds.list_jobs
       - dsHPC.cancel
-      - dsHPC.ds.cancel
       - dsHPC.wrap_function
   
   - title: "Python Integration"
@@ -78,6 +72,7 @@ reference:
       - format_function_call
       - test_utils
       - dsHPC-package
+      - is_datashield_env
 
 articles:
   - title: "Getting Started"
