@@ -29,7 +29,8 @@ Suggests:
     knitr,
     rmarkdown,
     covr,
-    opal
+    opal,
+    callr
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 Config/reticulate:

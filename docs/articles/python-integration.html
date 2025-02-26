@@ -36,6 +36,7 @@
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><a class="dropdown-item" href="../articles/dsHPC-intro.html">Introduction to dsHPC</a></li>
     <li><a class="dropdown-item" href="../articles/python-integration.html">Python Integration with dsHPC</a></li>
+    <li><a class="dropdown-item" href="../articles/job-management.html">Job Management with dsHPC</a></li>
   </ul>
 </li>
       </ul>
@@ -68,11 +69,10 @@ González, Xavier Escribà-Montagut, Juan R. González</h4>
 <div class="section level2">
 <h2 id="introduction">Introduction<a class="anchor" aria-label="anchor" href="#introduction"></a>
 </h2>
-<p>This vignette demonstrates how to use the Python integration
-capabilities of the <code>dsHPC</code> package. The integration allows
-you to seamlessly submit Python functions as jobs through the DataSHIELD
-infrastructure, leveraging the power of the <code>reticulate</code>
-package for R-Python interoperability.</p>
+<p>The <code>dsHPC</code> package provides seamless integration with
+Python through the <code>reticulate</code> package. This allows you to
+run Python code on HPC resources, with automatic conversion between R
+and Python data types.</p>
 </div>
 <div class="section level2">
 <h2 id="prerequisites">Prerequisites<a class="anchor" aria-label="anchor" href="#prerequisites"></a>
@@ -96,11 +96,8 @@ system:</p>
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/dsHPC.init.html">dsHPC.init</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
-<h2 id="basic-python-integration">Basic Python Integration<a class="anchor" aria-label="anchor" href="#basic-python-integration"></a>
+<h2 id="basic-python-job-submission">Basic Python Job Submission<a class="anchor" aria-label="anchor" href="#basic-python-job-submission"></a>
 </h2>
-<div class="section level3">
-<h3 id="submitting-a-simple-python-job">Submitting a Simple Python Job<a class="anchor" aria-label="anchor" href="#submitting-a-simple-python-job"></a>
-</h3>
 <p>The <code><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python()</a></code> function allows you to submit
 a Python function to be executed as a job. Here’s a simple example using
 NumPy:</p>
@@ -122,10 +119,13 @@ NumPy:</p>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">result</span><span class="op">)</span></span>
 <span><span class="op">}</span></span></code></pre></div>
 </div>
+<div class="section level2">
+<h2 id="python-environment-configuration">Python Environment Configuration<a class="anchor" aria-label="anchor" href="#python-environment-configuration"></a>
+</h2>
 <div class="section level3">
-<h3 id="specifying-python-environment">Specifying Python Environment<a class="anchor" aria-label="anchor" href="#specifying-python-environment"></a>
+<h3 id="using-a-specific-python-executable">Using a Specific Python Executable<a class="anchor" aria-label="anchor" href="#using-a-specific-python-executable"></a>
 </h3>
-<p>You can specify which Python environment to use:</p>
+<p>You can specify which Python interpreter to use:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Using a specific Python executable</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
@@ -133,17 +133,25 @@ NumPy:</p>
 <span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
 <span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  python_path <span class="op">=</span> <span class="st">"/path/to/python"</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># Using a virtual environment</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level3">
+<h3 id="using-a-virtual-environment">Using a Virtual Environment<a class="anchor" aria-label="anchor" href="#using-a-virtual-environment"></a>
+</h3>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Using a virtual environment</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
 <span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
 <span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
 <span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  virtualenv <span class="op">=</span> <span class="st">"my_venv"</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># Using a conda environment</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level3">
+<h3 id="using-a-conda-environment">Using a Conda Environment<a class="anchor" aria-label="anchor" href="#using-a-conda-environment"></a>
+</h3>
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Using a conda environment</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
 <span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
 <span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
@@ -153,13 +161,31 @@ NumPy:</p>
 </div>
 </div>
 <div class="section level2">
-<h2 id="working-with-complex-data-types">Working with Complex Data Types<a class="anchor" aria-label="anchor" href="#working-with-complex-data-types"></a>
+<h2 id="passing-data-between-r-and-python">Passing Data Between R and Python<a class="anchor" aria-label="anchor" href="#passing-data-between-r-and-python"></a>
 </h2>
+<p>The <code>dsHPC</code> package automatically converts R objects to
+Python and back. Here are some examples:</p>
 <div class="section level3">
-<h3 id="passing-data-frames-to-python">Passing Data Frames to Python<a class="anchor" aria-label="anchor" href="#passing-data-frames-to-python"></a>
+<h3 id="working-with-vectors-and-arrays">Working with Vectors and Arrays<a class="anchor" aria-label="anchor" href="#working-with-vectors-and-arrays"></a>
 </h3>
-<p>Data frames can be passed to Python as dictionaries:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<p>R vectors are converted to NumPy arrays:</p>
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># R vector to NumPy array and back</span></span>
+<span><span class="va">r_vector</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span></span>
+<span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="va">r_vector</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Result is an R scalar (3)</span></span>
+<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level3">
+<h3 id="working-with-data-frames">Working with Data Frames<a class="anchor" aria-label="anchor" href="#working-with-data-frames"></a>
+</h3>
+<p>R data frames are converted to pandas DataFrames:</p>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Create a sample data frame</span></span>
 <span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
 <span>  x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span>,</span>
@@ -174,38 +200,86 @@ NumPy:</p>
 <span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">df</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 </div>
-<div class="section level3">
-<h3 id="handling-complex-return-values">Handling Complex Return Values<a class="anchor" aria-label="anchor" href="#handling-complex-return-values"></a>
-</h3>
-<p>Python functions can return complex objects that are automatically
-converted to R objects:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Function that returns a dictionary with various types</span></span>
-<span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
-<span>  py_module <span class="op">=</span> <span class="st">"os"</span>,</span>
-<span>  py_function <span class="op">=</span> <span class="st">"environ"</span>,</span>
-<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span></span>
+</div>
+<div class="section level2">
+<h2 id="python-function-caching">Python Function Caching<a class="anchor" aria-label="anchor" href="#python-function-caching"></a>
+</h2>
+<p>Just like with R functions, <code>dsHPC</code> includes an
+intelligent caching system for Python functions. This system identifies
+Python jobs based on:</p>
+<ol style="list-style-type: decimal">
+<li>The Python module name</li>
+<li>The Python function name</li>
+<li>The function’s implementation (when available)</li>
+<li>The exact arguments passed to the function</li>
+</ol>
+<p>When the same Python function is called with the same arguments, the
+cached result is returned immediately without re-executing the
+function:</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># First execution of a Python function</span></span>
+<span><span class="va">job1</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># Get the result (will be an R list)</span></span>
-<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span></code></pre></div>
+<span><span class="co"># Status is COMPLETED, result is computed</span></span>
+<span><span class="va">job1</span><span class="op">$</span><span class="va">status</span></span>
+<span><span class="co">#&gt; [1] "COMPLETED"</span></span>
+<span></span>
+<span><span class="co"># Second execution with identical inputs uses the cache</span></span>
+<span><span class="va">job2</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Status is CACHED, result is retrieved from cache</span></span>
+<span><span class="va">job2</span><span class="op">$</span><span class="va">status</span></span>
+<span><span class="co">#&gt; [1] "CACHED"</span></span></code></pre></div>
+<div class="section level3">
+<h3 id="implementation-details">Implementation Details<a class="anchor" aria-label="anchor" href="#implementation-details"></a>
+</h3>
+<p>For Python functions, dsHPC attempts to capture the function’s
+bytecode for more accurate comparison. This means that functionally
+identical Python functions (even if they’re imported differently or
+accessed through different paths) can be recognized as the same for
+caching purposes.</p>
+</div>
+<div class="section level3">
+<h3 id="disabling-caching">Disabling Caching<a class="anchor" aria-label="anchor" href="#disabling-caching"></a>
+</h3>
+<p>If you need to run a Python function without using the cache (e.g.,
+for time-sensitive data or non-deterministic functions), you can disable
+caching:</p>
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Disable caching for this job</span></span>
+<span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>  use_cache <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
-<h2 id="custom-python-modules">Custom Python Modules<a class="anchor" aria-label="anchor" href="#custom-python-modules"></a>
+<h2 id="working-with-python-libraries">Working with Python Libraries<a class="anchor" aria-label="anchor" href="#working-with-python-libraries"></a>
 </h2>
-<p>You can also call functions from your own Python modules:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Assuming you have a custom module named "my_module.py"</span></span>
-<span><span class="co"># with a function called "process_data"</span></span>
+<div class="section level3">
+<h3 id="required-modules">Required Modules<a class="anchor" aria-label="anchor" href="#required-modules"></a>
+</h3>
+<p>You can specify additional Python modules that need to be
+imported:</p>
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Submit a job that requires multiple modules</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
-<span>  py_module <span class="op">=</span> <span class="st">"my_module"</span>,</span>
-<span>  py_function <span class="op">=</span> <span class="st">"process_data"</span>,</span>
-<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
-<span>    data <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span>,</span>
-<span>    options <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>normalize <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span>  <span class="op">)</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"matplotlib.pyplot"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"plot"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">10</span>, <span class="fl">20</span>, <span class="fl">15</span>, <span class="fl">30</span>, <span class="fl">25</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>  required_modules <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"numpy"</span>, <span class="st">"pandas"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
+</div>
 </div>
 <div class="section level2">
 <h2 id="high-performance-computing-options">High-Performance Computing Options<a class="anchor" aria-label="anchor" href="#high-performance-computing-options"></a>
@@ -214,7 +288,7 @@ converted to R objects:</p>
 <h3 id="setting-slurm-options">Setting Slurm Options<a class="anchor" aria-label="anchor" href="#setting-slurm-options"></a>
 </h3>
 <p>You can specify Slurm options for your Python jobs:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Submit a job with specific Slurm requirements</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
 <span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
@@ -228,33 +302,21 @@ converted to R objects:</p>
 <span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 </div>
-<div class="section level3">
-<h3 id="caching-results">Caching Results<a class="anchor" aria-label="anchor" href="#caching-results"></a>
-</h3>
-<p>By default, <code>dsHPC</code> caches results to avoid redundant
-computations. You can control this behavior:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Disable caching for this job</span></span>
-<span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
-<span>  py_module <span class="op">=</span> <span class="st">"numpy"</span>,</span>
-<span>  py_function <span class="op">=</span> <span class="st">"mean"</span>,</span>
-<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  reuse_cached <span class="op">=</span> <span class="cn">FALSE</span></span>
-<span><span class="op">)</span></span></code></pre></div>
-</div>
 </div>
 <div class="section level2">
-<h2 id="loading-required-modules">Loading Required Modules<a class="anchor" aria-label="anchor" href="#loading-required-modules"></a>
+<h2 id="custom-python-modules">Custom Python Modules<a class="anchor" aria-label="anchor" href="#custom-python-modules"></a>
 </h2>
-<p>If your Python function requires additional modules, you can specify
-them:</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Submit a job that requires multiple modules</span></span>
+<p>You can also call functions from your own Python modules:</p>
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Assuming you have a custom module named "my_module.py"</span></span>
+<span><span class="co"># with a function called "process_data"</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_python.html">dsHPC.submit_python</a></span><span class="op">(</span></span>
-<span>  py_module <span class="op">=</span> <span class="st">"matplotlib.pyplot"</span>,</span>
-<span>  py_function <span class="op">=</span> <span class="st">"plot"</span>,</span>
-<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">10</span>, <span class="fl">20</span>, <span class="fl">15</span>, <span class="fl">30</span>, <span class="fl">25</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  required_modules <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"numpy"</span>, <span class="st">"pandas"</span><span class="op">)</span></span>
+<span>  py_module <span class="op">=</span> <span class="st">"my_module"</span>,</span>
+<span>  py_function <span class="op">=</span> <span class="st">"process_data"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
+<span>    data <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span>,</span>
+<span>    options <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>normalize <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">

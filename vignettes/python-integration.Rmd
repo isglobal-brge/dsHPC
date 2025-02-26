@@ -70,7 +70,7 @@ if (status$status == "COMPLETED") {
 
 You can specify which Python interpreter to use:
 
-```{r python_env}
+```{r python_path}
 # Using a specific Python executable
 job <- dsHPC.submit_python(
   py_module = "numpy",
@@ -82,7 +82,7 @@ job <- dsHPC.submit_python(
 
 ### Using a Virtual Environment
 
-```{r python_env}
+```{r virtualenv}
 # Using a virtual environment
 job <- dsHPC.submit_python(
   py_module = "numpy",
@@ -94,7 +94,7 @@ job <- dsHPC.submit_python(
 
 ### Using a Conda Environment
 
-```{r python_env}
+```{r condaenv}
 # Using a conda environment
 job <- dsHPC.submit_python(
   py_module = "numpy",
@@ -112,7 +112,7 @@ The `dsHPC` package automatically converts R objects to Python and back. Here ar
 
 R vectors are converted to NumPy arrays:
 
-```{r dataframe}
+```{r vectors}
 # R vector to NumPy array and back
 r_vector <- c(1, 2, 3, 4, 5)
 job <- dsHPC.submit_python(
@@ -156,7 +156,7 @@ Just like with R functions, `dsHPC` includes an intelligent caching system for P
 
 When the same Python function is called with the same arguments, the cached result is returned immediately without re-executing the function:
 
-```{r caching}
+```{r caching_example}
 # First execution of a Python function
 job1 <- dsHPC.submit_python(
   py_module = "numpy",
@@ -188,7 +188,7 @@ For Python functions, dsHPC attempts to capture the function's bytecode for more
 
 If you need to run a Python function without using the cache (e.g., for time-sensitive data or non-deterministic functions), you can disable caching:
 
-```{r caching}
+```{r disable_caching}
 # Disable caching for this job
 job <- dsHPC.submit_python(
   py_module = "numpy",

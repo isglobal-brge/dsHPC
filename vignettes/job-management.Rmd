@@ -1,0 +1,410 @@
+---
+title: "Job Management with dsHPC"
+author: "David Sarrat González, Xavier Escribà-Montagut, Juan R González"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Job Management with dsHPC}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+
+The `dsHPC` package provides comprehensive job management capabilities to help you track and interact with computational jobs throughout their lifecycle. This vignette demonstrates how to monitor, query, and manage both R and Python jobs across various states.
+
+## Job States
+
+Jobs in dsHPC can exist in one of the following states:
+
+1. **SUBMITTED**: The job has been submitted to the scheduler or processing queue
+2. **PENDING**: The job is waiting in the scheduler queue
+3. **RUNNING**: The job is currently executing
+4. **COMPLETED**: The job has finished successfully
+5. **FAILED**: The job encountered an error during execution
+6. **CANCELLED**: The job was manually cancelled
+7. **CACHED**: The result was retrieved from cache (not a real job state, but reported by the status function)
+
+## Basic Setup
+
+Before managing jobs, you need to initialize the dsHPC environment:
+
+```{r setup}
+library(dsHPC)
+dsHPC.init()
+```
+
+## Submitting Jobs
+
+### R Jobs
+
+```{r submit_r_job}
+# Define a function that takes some time to run
+long_computation <- function(size) {
+  # Simulate a long computation
+  result <- matrix(rnorm(size^2), size, size)
+  # Compute eigenvectors (computationally intensive for large matrices)
+  eigen_result <- eigen(result)
+  return(eigen_result$values)
+}
+
+# Submit the job
+r_job <- dsHPC.submit(
+  func = long_computation,
+  args = list(size = 1000),
+  slurm_opts = list(
+    memory = "4G",
+    cpus = 2
+  )
+)
+
+# The job is now submitted and has a unique ID
+print(r_job$job_id)
+```
+
+### Python Jobs
+
+```{r submit_python_job}
+# For Python jobs, we use dsHPC.submit_python
+py_job <- dsHPC.submit_python(
+  py_module = "sklearn.cluster",
+  py_function = "KMeans",
+  args = list(
+    n_clusters = 5,
+    random_state = 42
+  ),
+  required_modules = c("numpy", "sklearn")
+)
+
+# Python jobs also receive a unique ID
+print(py_job$job_id)
+```
+
+## Checking Job Status
+
+The most basic task in job management is checking the current status of a job:
+
+```{r check_status}
+# Check status of R job
+r_status <- dsHPC.status(r_job$job_id)
+print(r_status)
+
+# Check status of Python job
+py_status <- dsHPC.status(py_job$job_id)
+print(py_status)
+```
+
+The `dsHPC.status()` function returns a list containing information about the job, including:
+
+- `job_id`: The unique identifier of the job
+- `job_hash`: A hash based on the function and arguments
+- `status`: The current state of the job ("SUBMITTED", "PENDING", "RUNNING", "COMPLETED", "FAILED", or "CANCELLED")
+- `result`: The job result, if available and requested (see below)
+
+## Retrieving Results
+
+Once a job is completed, you can retrieve its result:
+
+```{r get_result}
+# Basic result retrieval (non-blocking)
+if (r_status$status == "COMPLETED") {
+  result <- dsHPC.result(r_job$job_id)
+  print(head(result))  # Show the first few eigenvalues
+}
+```
+
+### Waiting for Completion
+
+You can also wait for a job to complete and then retrieve the result in a single call:
+
+```{r wait_for_result}
+# Waiting for completion (blocking)
+result <- dsHPC.result(r_job$job_id, wait_for_completion = TRUE)
+
+# You can also specify a timeout in seconds
+result <- dsHPC.result(py_job$job_id, 
+                       wait_for_completion = TRUE, 
+                       timeout = 300)  # 5-minute timeout
+```
+
+The `wait_for_completion` parameter causes the function to block until the job completes or the timeout is reached. If the timeout is reached, the function returns `NULL` and issues a warning.
+
+### Checking Completion Status and Result in One Call
+
+You can retrieve both the job status and its result (if available) in a single call:
+
+```{r status_with_result}
+# Check status and get result if available
+status_with_result <- dsHPC.status(r_job$job_id, return_result = TRUE)
+
+if (status_with_result$status == "COMPLETED") {
+  print(head(status_with_result$result))
+}
+```
+
+## Listing Jobs
+
+You can list all jobs or filter by status:
+
+```{r list_jobs}
+# List all jobs
+all_jobs <- dsHPC.list_jobs()
+print(all_jobs)
+
+# List only completed jobs
+completed_jobs <- dsHPC.list_jobs(status_filter = "COMPLETED")
+print(completed_jobs)
+
+# List jobs that are either running or pending
+active_jobs <- dsHPC.list_jobs(status_filter = c("RUNNING", "PENDING"))
+print(active_jobs)
+```
+
+The `dsHPC.list_jobs()` function returns a data frame containing information about all jobs that match the filter criteria.
+
+## Cancelling Jobs
+
+If you want to stop a job that's currently running or pending:
+
+```{r cancel_job}
+# Cancel a running job
+if (r_status$status %in% c("RUNNING", "PENDING")) {
+  cancelled <- dsHPC.cancel(r_job$job_id)
+  if (cancelled) {
+    print("Job cancelled successfully")
+  } else {
+    print("Failed to cancel job")
+  }
+}
+```
+
+Note that job cancellation only works if the job is in a cancellable state (SUBMITTED, PENDING, or RUNNING) and if the job scheduler is available. In simulation mode, or for jobs that have already completed or failed, cancellation will not work.
+
+## Handling Failed Jobs
+
+When a job fails, you can still retrieve information about the failure:
+
+```{r failed_job}
+# Check if a job failed
+if (py_status$status == "FAILED") {
+  # Get detailed job information
+  py_job_info <- get_job_info(getOption("dsHPC.config")$connection, py_job$job_id)
+  
+  # Print the error message
+  print(paste("Job failed with error:", py_job_info$error_message))
+}
+```
+
+## Practical Workflow for Job Management
+
+Here's a practical workflow for managing multiple jobs:
+
+```{r practical_workflow}
+# Submit multiple jobs
+jobs <- list()
+for (i in 1:5) {
+  jobs[[i]] <- dsHPC.submit(
+    func = function(n) sum(rnorm(n)^2),
+    args = list(n = i * 1000)
+  )
+}
+
+# Monitor all jobs until completion
+monitor_until_completion <- function(job_list, interval = 2, timeout = 300) {
+  start_time <- Sys.time()
+  while (TRUE) {
+    # Check all jobs
+    all_completed <- TRUE
+    for (i in seq_along(job_list)) {
+      status <- dsHPC.status(job_list[[i]]$job_id)
+      cat(sprintf("Job %d: %s\n", i, status$status))
+      
+      if (!status$status %in% c("COMPLETED", "FAILED", "CANCELLED", "CACHED")) {
+        all_completed <- FALSE
+      }
+    }
+    
+    # If all jobs are in a final state, exit the loop
+    if (all_completed) {
+      break
+    }
+    
+    # Check timeout
+    elapsed <- difftime(Sys.time(), start_time, units = "secs")
+    if (elapsed > timeout) {
+      warning("Timeout reached while waiting for job completion")
+      break
+    }
+    
+    # Wait before checking again
+    Sys.sleep(interval)
+  }
+  
+  # Collect all results
+  results <- list()
+  for (i in seq_along(job_list)) {
+    status <- dsHPC.status(job_list[[i]]$job_id)
+    if (status$status == "COMPLETED" || status$status == "CACHED") {
+      results[[i]] <- dsHPC.result(job_list[[i]]$job_id)
+    } else {
+      results[[i]] <- NULL
+    }
+  }
+  
+  return(results)
+}
+
+# Monitor all jobs and collect results
+results <- monitor_until_completion(jobs)
+print(results)
+```
+
+## Implementing Job Management in DataSHIELD Packages
+
+If you're developing a DataSHIELD package that uses dsHPC, consider implementing these job management patterns:
+
+```{r datashield_package}
+# Example of a function for a DataSHIELD package
+myPackage.submitAnalysis <- function(data, params) {
+  # Check if dsHPC is available
+  if (!requireNamespace("dsHPC", quietly = TRUE) || 
+      is.null(getOption("dsHPC.config"))) {
+    stop("dsHPC is not available or initialized")
+  }
+  
+  # Submit the job
+  job <- dsHPC.submit(
+    func = function(data, params) {
+      # Actual computation code
+      result <- analyze_data(data, params)
+      return(result)
+    },
+    args = list(data = data, params = params),
+    use_cache = TRUE
+  )
+  
+  # Return job ID and info for status checking
+  return(list(
+    job_id = job$job_id,
+    status = job$status,
+    message = "Analysis job submitted successfully. Use myPackage.checkAnalysis() to check status."
+  ))
+}
+
+# Function to check analysis status
+myPackage.checkAnalysis <- function(job_id) {
+  if (!requireNamespace("dsHPC", quietly = TRUE)) {
+    stop("dsHPC is not available")
+  }
+  
+  status <- dsHPC.status(job_id)
+  
+  if (status$status == "COMPLETED" || status$status == "CACHED") {
+    return(list(
+      status = status$status,
+      message = "Analysis completed. Use myPackage.getAnalysisResult() to retrieve results."
+    ))
+  } else if (status$status == "FAILED") {
+    job_info <- dsHPC:::get_job_info(getOption("dsHPC.config")$connection, job_id)
+    return(list(
+      status = "FAILED",
+      message = paste("Analysis failed:", job_info$error_message)
+    ))
+  } else {
+    return(list(
+      status = status$status,
+      message = paste("Analysis is", tolower(status$status))
+    ))
+  }
+}
+
+# Function to get analysis result
+myPackage.getAnalysisResult <- function(job_id) {
+  if (!requireNamespace("dsHPC", quietly = TRUE)) {
+    stop("dsHPC is not available")
+  }
+  
+  # Check status first
+  status <- dsHPC.status(job_id)
+  
+  if (!(status$status %in% c("COMPLETED", "CACHED"))) {
+    stop(paste("Cannot retrieve result. Job status is", status$status))
+  }
+  
+  # Get the result
+  result <- dsHPC.result(job_id)
+  return(result)
+}
+```
+
+## Cross-Language Job Management
+
+The same job management functions work identically for both R and Python jobs. This allows you to manage a mix of R and Python jobs using a single consistent interface.
+
+```{r mixed_language_jobs}
+# Submit both R and Python jobs
+r_job <- dsHPC.submit(
+  func = function(x) mean(x),
+  args = list(x = rnorm(1000))
+)
+
+py_job <- dsHPC.submit_python(
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = rnorm(1000))
+)
+
+# Check status of both jobs
+r_status <- dsHPC.status(r_job$job_id)
+py_status <- dsHPC.status(py_job$job_id)
+
+# Retrieve results
+r_result <- dsHPC.result(r_job$job_id, wait_for_completion = TRUE)
+py_result <- dsHPC.result(py_job$job_id, wait_for_completion = TRUE)
+
+# List all jobs of any language
+all_jobs <- dsHPC.list_jobs()
+```
+
+## Best Practices for Job Management
+
+1. **Always check job status before retrieving results**
+   ```r
+   status <- dsHPC.status(job_id)
+   if (status$status == "COMPLETED") {
+     result <- dsHPC.result(job_id)
+   }
+   ```
+
+2. **Use timeouts when waiting for job completion**
+   ```r
+   result <- dsHPC.result(job_id, wait_for_completion = TRUE, timeout = 3600)  # 1 hour
+   ```
+
+3. **Implement error handling for job failures**
+   ```r
+   status <- dsHPC.status(job_id)
+   if (status$status == "FAILED") {
+     # Handle the failure, perhaps by resubmitting or using a fallback method
+   }
+   ```
+
+4. **Regularly clean up old jobs and results**
+   ```r
+   # Remove results older than 14 days
+   dsHPC.clean_cache(days_to_keep = 14)
+   ```
+
+5. **Maintain job IDs for long-running processes**
+   Store job IDs in a persistent location (e.g., a database or file) for monitoring long-running jobs that may span multiple R sessions.
+
+## Conclusion
+
+Effective job management is essential for making the most of the high-performance computing capabilities in dsHPC. The functions and patterns demonstrated in this vignette allow you to submit, monitor, and retrieve results from both R and Python jobs, providing a unified interface for computational tasks across languages. 

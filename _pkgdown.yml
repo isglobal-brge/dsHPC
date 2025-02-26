@@ -23,6 +23,8 @@ navbar:
         href: articles/dsHPC-intro.html
       - text: Python Integration with dsHPC
         href: articles/python-integration.html
+      - text: Job Management with dsHPC
+        href: articles/job-management.html
     github:
       icon: fab fa-github fa-lg
       href: https://github.com/isglobal-brge/dsHPC
@@ -85,4 +87,5 @@ articles:
     desc: >
       Advanced usage and integration
     contents:
-      - python-integration 
+      - python-integration
+      - job-management 

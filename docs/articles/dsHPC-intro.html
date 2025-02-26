@@ -36,6 +36,7 @@
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><a class="dropdown-item" href="../articles/dsHPC-intro.html">Introduction to dsHPC</a></li>
     <li><a class="dropdown-item" href="../articles/python-integration.html">Python Integration with dsHPC</a></li>
+    <li><a class="dropdown-item" href="../articles/job-management.html">Job Management with dsHPC</a></li>
   </ul>
 </li>
       </ul>
@@ -105,7 +106,7 @@ will fallback to local execution.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Submit a simple job</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>
-<span>  func_name <span class="op">=</span> <span class="st">"mean"</span>,</span>
+<span>  func <span class="op">=</span> <span class="va">mean</span>,  <span class="co"># Pass the actual function</span></span>
 <span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="fl">5</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
@@ -116,9 +117,8 @@ parameters:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Submit a job with more options</span></span>
 <span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>
-<span>  func_name <span class="op">=</span> <span class="st">"kmeans"</span>,</span>
+<span>  func <span class="op">=</span> <span class="va">kmeans</span>,</span>
 <span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">my_data_matrix</span>, centers <span class="op">=</span> <span class="fl">3</span><span class="op">)</span>,</span>
-<span>  package <span class="op">=</span> <span class="st">"stats"</span>,</span>
 <span>  required_packages <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"stats"</span><span class="op">)</span>,</span>
 <span>  use_cache <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  slurm_opts <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
@@ -128,12 +128,22 @@ parameters:</p>
 <span>    cpus <span class="op">=</span> <span class="fl">2</span></span>
 <span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
+<p>Alternatively, you can use <code>dsHPC.submit_by_name</code> to
+submit a job by its function name:</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Submit using function name</span></span>
+<span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit_by_name.html">dsHPC.submit_by_name</a></span><span class="op">(</span></span>
+<span>  func_name <span class="op">=</span> <span class="st">"kmeans"</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">my_data_matrix</span>, centers <span class="op">=</span> <span class="fl">3</span><span class="op">)</span>,</span>
+<span>  package <span class="op">=</span> <span class="st">"stats"</span>,</span>
+<span>  required_packages <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"stats"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="checking-job-status">Checking Job Status<a class="anchor" aria-label="anchor" href="#checking-job-status"></a>
 </h3>
 <p>You can check the status of a submitted job:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Get job status</span></span>
 <span><span class="va">status</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.status.html">dsHPC.status</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span>
 <span><span class="va">status</span></span></code></pre></div>
@@ -148,31 +158,84 @@ retrieved from cache</p>
 <h3 id="retrieving-results">Retrieving Results<a class="anchor" aria-label="anchor" href="#retrieving-results"></a>
 </h3>
 <p>Once a job is completed, you can retrieve the results:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Get job result (non-blocking)</span></span>
-<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span>
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Retrieve the result</span></span>
+<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span></code></pre></div>
+<p>You can also wait for a job to complete:</p>
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Wait for completion and get result</span></span>
+<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span>, wait_for_completion <span class="op">=</span> <span class="cn">TRUE</span>, timeout <span class="op">=</span> <span class="fl">300</span><span class="op">)</span></span></code></pre></div>
+</div>
+</div>
+<div class="section level2">
+<h2 id="function-caching-and-computation-optimization">Function Caching and Computation Optimization<a class="anchor" aria-label="anchor" href="#function-caching-and-computation-optimization"></a>
+</h2>
+<p>One of the key features of dsHPC is its intelligent caching system,
+which avoids redundant computations by reusing results from previous
+calls with identical inputs.</p>
+<div class="section level3">
+<h3 id="how-function-caching-works">How Function Caching Works<a class="anchor" aria-label="anchor" href="#how-function-caching-works"></a>
+</h3>
+<p>dsHPC uses an advanced hashing mechanism to uniquely identify jobs
+based on:</p>
+<ol style="list-style-type: decimal">
+<li>
+<strong>Function definition</strong>: The actual implementation of
+the function is considered, not just the function name</li>
+<li>
+<strong>Arguments</strong>: The exact arguments passed to the
+function</li>
+<li>
+<strong>Environment</strong>: Relevant context where the function
+runs</li>
+</ol>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Define a custom function</span></span>
+<span><span class="va">my_add</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">a</span>, <span class="va">b</span><span class="op">)</span> <span class="op">{</span> <span class="va">a</span> <span class="op">+</span> <span class="va">b</span> <span class="op">}</span></span>
 <span></span>
-<span><span class="co"># Get job result (blocking, waits for completion)</span></span>
-<span><span class="va">result</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.result.html">dsHPC.result</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span>, wait_for_completion <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
+<span><span class="co"># First execution will compute the result</span></span>
+<span><span class="va">job1</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>
+<span>  func <span class="op">=</span> <span class="va">my_add</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fl">1</span>, b <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co"># Status is COMPLETED, result is computed</span></span>
+<span><span class="va">job1</span><span class="op">$</span><span class="va">status</span></span>
+<span><span class="co">#&gt; [1] "COMPLETED"</span></span>
+<span></span>
+<span><span class="co"># Second execution with identical inputs uses the cache</span></span>
+<span><span class="va">job2</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>
+<span>  func <span class="op">=</span> <span class="va">my_add</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fl">1</span>, b <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co"># Status is CACHED, result is retrieved from cache</span></span>
+<span><span class="va">job2</span><span class="op">$</span><span class="va">status</span></span>
+<span><span class="co">#&gt; [1] "CACHED"</span></span>
+<span></span>
+<span><span class="co"># Even functionally identical functions will use the cache</span></span>
+<span><span class="co"># Define another function with the same behavior but different formatting</span></span>
+<span><span class="va">my_add2</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">a</span>, <span class="va">b</span><span class="op">)</span> <span class="op">{</span> </span>
+<span>  <span class="co"># Different formatting, but same functionality</span></span>
+<span>  <span class="va">a</span> <span class="op">+</span> <span class="va">b</span> </span>
+<span><span class="op">}</span></span>
+<span></span>
+<span><span class="va">job3</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.submit.html">dsHPC.submit</a></span><span class="op">(</span></span>
+<span>  func <span class="op">=</span> <span class="va">my_add2</span>,</span>
+<span>  args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>a <span class="op">=</span> <span class="fl">1</span>, b <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co"># Status is CACHED, result is retrieved from cache</span></span>
+<span><span class="va">job3</span><span class="op">$</span><span class="va">status</span></span>
+<span><span class="co">#&gt; [1] "CACHED"</span></span></code></pre></div>
 </div>
 <div class="section level3">
-<h3 id="job-management">Job Management<a class="anchor" aria-label="anchor" href="#job-management"></a>
+<h3 id="cache-management">Cache Management<a class="anchor" aria-label="anchor" href="#cache-management"></a>
 </h3>
-<p>You can list all jobs or filter by status:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># List all jobs</span></span>
-<span><span class="va">all_jobs</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.list_jobs.html">dsHPC.list_jobs</a></span><span class="op">(</span><span class="op">)</span></span>
+<p>You can manually clean the cache to remove old results:</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Remove results older than 14 days</span></span>
+<span><span class="fu"><a href="../reference/dsHPC.clean_cache.html">dsHPC.clean_cache</a></span><span class="op">(</span>days_to_keep <span class="op">=</span> <span class="fl">14</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># List only completed jobs</span></span>
-<span><span class="va">completed_jobs</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.list_jobs.html">dsHPC.list_jobs</a></span><span class="op">(</span>status_filter <span class="op">=</span> <span class="st">"COMPLETED"</span><span class="op">)</span></span></code></pre></div>
-<p>Cancel a running job:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Cancel job</span></span>
-<span><span class="fu"><a href="../reference/dsHPC.cancel.html">dsHPC.cancel</a></span><span class="op">(</span><span class="va">job</span><span class="op">$</span><span class="va">job_id</span><span class="op">)</span></span></code></pre></div>
-<p>Clean up old cached results:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Remove cache entries older than 14 days</span></span>
-<span><span class="fu"><a href="../reference/dsHPC.clean_cache.html">dsHPC.clean_cache</a></span><span class="op">(</span>days_to_keep <span class="op">=</span> <span class="fl">14</span><span class="op">)</span></span></code></pre></div>
+<span><span class="co"># Clear all completed job results</span></span>
+<span><span class="fu"><a href="../reference/dsHPC.clean_cache.html">dsHPC.clean_cache</a></span><span class="op">(</span>days_to_keep <span class="op">=</span> <span class="fl">0</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -180,7 +243,7 @@ retrieved from cache</p>
 </h2>
 <p>You can create a wrapped version of a function that will
 automatically be executed via HPC:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Create a wrapped version of the kmeans function</span></span>
 <span><span class="va">kmeans_hpc</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/dsHPC.wrap_function.html">dsHPC.wrap_function</a></span><span class="op">(</span></span>
 <span>  func <span class="op">=</span> <span class="va">kmeans</span>,</span>
@@ -208,7 +271,7 @@ follows:</p>
 functions</li>
 </ol>
 <p>Example:</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co">#' My intensive analysis function</span></span>
 <span><span class="co">#' </span></span>
 <span><span class="co">#' @param data Data frame to analyze</span></span>
