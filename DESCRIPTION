@@ -20,7 +20,8 @@ Imports:
     jsonlite,
     stringr,
     uuid,
-    base64enc
+    base64enc,
+    reticulate
 Suggests:
     testthat (>= 3.0.0),
     knitr,
