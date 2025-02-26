@@ -186,6 +186,27 @@ store_job_result <- function(con, job_hash, result) {
   return(result > 0)
 }
 
+#' @title Store Python Job Result
+#' @description Stores a Python job result in the cache, handling conversion from Python objects.
+#' @param con DBI connection object to the SQLite database.
+#' @param job_hash Character string with the hash of the job.
+#' @param result The Python object containing the result.
+#' @return Logical indicating success.
+#' @keywords internal
+store_python_result <- function(con, job_hash, result) {
+  # Convert Python object to R
+  if (requireNamespace("reticulate", quietly = TRUE)) {
+    # First convert the Python object to R
+    r_result <- reticulate::py_to_r(result)
+    
+    # Store the converted R object in the cache
+    return(store_job_result(con, job_hash, r_result))
+  } else {
+    warning("reticulate package not available, storing Python result as is.")
+    return(store_job_result(con, job_hash, result))
+  }
+}
+
 #' @title Retrieve Job Result
 #' @description Retrieves a cached job result from the database.
 #' @param con DBI connection object to the SQLite database.

@@ -39,7 +39,7 @@ test_that("basic job submission works in simulation mode", {
   
   # Submit a simple job that should run locally if Slurm is not available
   job <- dsHPC.submit(
-    func_name = "mean",
+    func = mean,
     args = list(x = c(1, 2, 3, 4, 5))
   )
   

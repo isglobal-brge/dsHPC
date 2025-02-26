@@ -4,10 +4,10 @@
 \alias{create_job_hash}
 \title{Utility Functions for the dsHPC Package}
 \usage{
-create_job_hash(func_name, args, object_hash = NULL)
+create_job_hash(func_or_name, args, object_hash = NULL)
 }
 \arguments{
-\item{func_name}{Character string representing the name of the function.}
+\item{func_or_name}{Character string representing the name of the function or its string representation from deparse.}
 
 \item{args}{List of arguments passed to the function.}
 
@@ -19,7 +19,7 @@ A character string containing a unique hash.
 \description{
 This file contains utility functions used throughout the package.
 
-Creates a unique hash based on a function name and its arguments to use for
+Creates a unique hash based on a function name or definition and its arguments to use for
 caching and identifying jobs.
 }
 \keyword{internal}

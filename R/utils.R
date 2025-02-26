@@ -2,21 +2,27 @@
 #' @description This file contains utility functions used throughout the package.
 
 #' @title Create a Hash from Function and Arguments
-#' @description Creates a unique hash based on a function name and its arguments to use for
+#' @description Creates a unique hash based on a function name or definition and its arguments to use for
 #' caching and identifying jobs.
-#' @param func_name Character string representing the name of the function.
+#' @param func_or_name Character string representing the name of the function or its string representation from deparse.
 #' @param args List of arguments passed to the function.
 #' @param object_hash Optional hash of an object being processed (default: NULL).
 #' @return A character string containing a unique hash.
 #' @keywords internal
-create_job_hash <- function(func_name, args, object_hash = NULL) {
-  if (!is.character(func_name) || length(func_name) != 1) {
-    stop("func_name must be a single character string")
+create_job_hash <- function(func_or_name, args, object_hash = NULL) {
+  # Validate input is either a character string or a vector of character strings (from deparse)
+  if (!is.character(func_or_name)) {
+    stop("func_or_name must be a character string or vector")
+  }
+  
+  # If it's a vector of strings from deparse, collapse it
+  if (length(func_or_name) > 1) {
+    func_or_name <- paste(func_or_name, collapse = "\n")
   }
   
   # Serialize the arguments to create a consistent representation
   serialized_args <- list(
-    func = func_name,
+    func = func_or_name,
     args = args,
     object = object_hash
   )

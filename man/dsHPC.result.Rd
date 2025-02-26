@@ -2,45 +2,34 @@
 % Please edit documentation in R/dsHPC.R
 \name{dsHPC.result}
 \alias{dsHPC.result}
-\title{Retrieve Job Result}
+\title{Get Job Result}
 \usage{
-dsHPC.result(
-  job_id,
-  wait_for_completion = FALSE,
-  timeout = 300,
-  check_interval = 5
-)
+dsHPC.result(job_id)
 }
 \arguments{
 \item{job_id}{Character string with the job ID.}
-
-\item{wait_for_completion}{Logical indicating whether to wait for job completion (default: FALSE).}
-
-\item{timeout}{Integer specifying the maximum time to wait in seconds (default: 300).}
-
-\item{check_interval}{Integer specifying how often to check job status in seconds (default: 5).}
 }
 \value{
-The job result, or NULL if not available.
+The job result or NULL if the job is not completed or the result is not available.
 }
 \description{
-Retrieves the result of a completed job.
+Retrieves the result of a job by its ID.
 }
 \examples{
 \dontrun{
 # Initialize dsHPC first
 dsHPC.init()
 
-# Submit a job
-job <- dsHPC.submit(
-  func_name = "mean",
-  args = list(x = c(1, 2, 3, 4, 5))
-)
+# Submit a simple job
+job <- dsHPC.submit(mean, args = list(x = 1:10))
 
-# Get result (non-blocking)
+# Wait for job completion (in real applications, this would usually be asynchronous)
+while (dsHPC.status(job$job_id)$status == "RUNNING") {
+  Sys.sleep(1)
+}
+
+# Get the job result
 result <- dsHPC.result(job$job_id)
-
-# Get result (blocking, wait for completion)
-result <- dsHPC.result(job$job_id, wait_for_completion = TRUE)
+print(result)
 }
 }

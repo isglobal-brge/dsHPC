@@ -486,76 +486,55 @@ dsHPC.clean_cache <- function(days_to_keep = 30) {
   return(invisible(deleted))
 }
 
-#' @title Retrieve Job Result
-#' @description Retrieves the result of a completed job.
+#' @title Get Job Result
+#' @description Retrieves the result of a job by its ID.
 #' @param job_id Character string with the job ID.
-#' @param wait_for_completion Logical indicating whether to wait for job completion (default: FALSE).
-#' @param timeout Integer specifying the maximum time to wait in seconds (default: 300).
-#' @param check_interval Integer specifying how often to check job status in seconds (default: 5).
-#' @return The job result, or NULL if not available.
+#' @return The job result or NULL if the job is not completed or the result is not available.
 #' @examples
 #' \dontrun{
 #' # Initialize dsHPC first
 #' dsHPC.init()
 #' 
-#' # Submit a job
-#' job <- dsHPC.submit(
-#'   func_name = "mean",
-#'   args = list(x = c(1, 2, 3, 4, 5))
-#' )
+#' # Submit a simple job
+#' job <- dsHPC.submit(mean, args = list(x = 1:10))
 #' 
-#' # Get result (non-blocking)
+#' # Wait for job completion (in real applications, this would usually be asynchronous)
+#' while (dsHPC.status(job$job_id)$status == "RUNNING") {
+#'   Sys.sleep(1)
+#' }
+#' 
+#' # Get the job result
 #' result <- dsHPC.result(job$job_id)
-#' 
-#' # Get result (blocking, wait for completion)
-#' result <- dsHPC.result(job$job_id, wait_for_completion = TRUE)
+#' print(result)
 #' }
 #' @export
-dsHPC.result <- function(job_id, wait_for_completion = FALSE, timeout = 300, check_interval = 5) {
+dsHPC.result <- function(job_id) {
   # Get configuration
   config <- getOption("dsHPC.config")
   if (is.null(config)) {
     stop("dsHPC has not been initialized. Call dsHPC.init() first.")
   }
   
-  # Get job information from database
+  # Check if the job exists
   job_info <- get_job_info(config$connection, job_id)
-  
   if (is.null(job_info)) {
-    stop(paste("Job not found:", job_id))
+    stop("Job not found.")
   }
   
-  # If job is already completed, return result
-  if (job_info$status == "COMPLETED") {
-    result <- get_cached_result(config$connection, job_info$job_hash)
-    return(result)
-  }
-  
-  # If job failed, throw error
-  if (job_info$status == "FAILED") {
-    stop(paste("Job failed:", ifelse(is.na(job_info$error_message), "Unknown error", job_info$error_message)))
-  }
-  
-  # If not waiting for completion, return NULL
-  if (!wait_for_completion) {
-    message("Job not completed yet. Set wait_for_completion = TRUE to wait for completion.")
+  # Check if the job has completed
+  if (job_info$status != "COMPLETED" && job_info$status != "CACHED") {
+    warning("Job has not completed. Current status: ", job_info$status)
     return(NULL)
   }
   
-  # Wait for job completion
-  start_time <- Sys.time()
-  while (difftime(Sys.time(), start_time, units = "secs") < timeout) {
-    status <- dsHPC.status(job_id, return_result = TRUE)
-    
-    if (status$status == "COMPLETED" && !is.null(status$result)) {
-      return(status$result)
-    } else if (status$status == "FAILED") {
-      stop(paste("Job failed:", ifelse(is.null(status$error), "Unknown error", status$error)))
-    }
-    
-    # Sleep for check_interval seconds
-    Sys.sleep(check_interval)
+  # Retrieve the result from the cache
+  result <- get_cached_result(config$connection, job_info$object_hash)
+  
+  # If we don't find the result in the cache (shouldn't happen with new design)
+  if (is.null(result)) {
+    warning("Result not found in cache despite job being marked as completed.")
+    return(NULL)
   }
   
-  stop(paste("Timeout waiting for job completion after", timeout, "seconds"))
+  return(result)
 } 

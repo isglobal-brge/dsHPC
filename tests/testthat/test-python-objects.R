@@ -57,15 +57,8 @@ test_that("Python wrapper can handle data frames", {
 # This test verifies we can handle Python objects via reticulate
 test_that("Python objects can be returned via reticulate", {
   skip_if_not_installed("reticulate")
-  skip_if_not(reticulate::py_available(), "Python is not available")
-  
-  # Skip if numpy is not available
-  skip_if_not(
-    tryCatch({
-      reticulate::py_module_available("numpy")
-    }, error = function(e) FALSE),
-    "NumPy is not available in Python"
-  )
+  skip_if_not(python_available(), "Python is not available")
+  skip_if_not(numpy_available(), "NumPy is not available")
   
   # Create a custom Python snippet that returns different object types
   complex_wrapper <- function() {
@@ -112,15 +105,8 @@ result = {
 # Test for handling Python modules as arguments
 test_that("Python modules can be used in wrapper functions", {
   skip_if_not_installed("reticulate")
-  skip_if_not(reticulate::py_available(), "Python is not available")
-  
-  # Skip if numpy is not available
-  skip_if_not(
-    tryCatch({
-      reticulate::py_module_available("numpy")
-    }, error = function(e) FALSE),
-    "NumPy is not available in Python"
-  )
+  skip_if_not(python_available(), "Python is not available")
+  skip_if_not(numpy_available(), "NumPy is not available")
   
   # Create a wrapper that uses multiple Python modules
   multi_module_wrapper <- function() {

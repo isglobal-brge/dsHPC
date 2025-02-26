@@ -71,43 +71,54 @@ test_that("Python script creation works", {
 })
 
 test_that("dsHPC.submit_python validates inputs", {
-  # Mock the dsHPC.submit function to avoid actual execution
-  local_mocked_bindings(
-    dsHPC.submit = function(...) list(job_id = "mock_job", status = "SUBMITTED")
+  skip_if_not_installed("reticulate")
+  
+  # Use a unique mock job ID for this test run
+  mock_job_id <- paste0("mock_job_", format(Sys.time(), "%Y%m%d%H%M%S"))
+  
+  # Need to mock uuid::UUIDgenerate to control job_id
+  with_mocked_bindings(
+    UUIDgenerate = function(...) mock_job_id,
+    .package = "uuid",
+    {
+      # Test validation of py_module
+      expect_error(dsHPC.submit_python(py_module = 1, py_function = "mean"),
+                  "py_module must be a single character string")
+      
+      # Test validation of py_function
+      expect_error(dsHPC.submit_python(py_module = "numpy", py_function = c("mean", "median")),
+                  "py_function must be a single character string")
+      
+      # Test validation of args
+      expect_error(dsHPC.submit_python(py_module = "numpy", py_function = "mean", args = "not_a_list"),
+                  "args must be a list")
+      
+      # For this test, we need to mock the execution to avoid actual Python calls
+      # We'll patch the get_cached_result to return NULL so we don't use cached results
+      with_mocked_bindings(
+        create_python_wrapper = function(...) function() 3,
+        store_python_result = function(...) NULL,
+        update_job_status = function(...) NULL,
+        get_cached_result = function(...) NULL,
+        .env = environment(),
+        {
+          # Test happy path with mocked submission
+          result <- dsHPC.submit_python(py_module = "numpy", py_function = "mean", args = list(a = c(1, 2, 3)))
+          expect_equal(result$job_id, mock_job_id)
+          expect_equal(result$status, "COMPLETED") # Now returns COMPLETED instead of SUBMITTED
+          expect_equal(result$py_module, "numpy")
+          expect_equal(result$py_function, "mean")
+        }
+      )
+    }
   )
-  
-  # Test validation of py_module
-  expect_error(dsHPC.submit_python(py_module = 1, py_function = "mean"),
-                "py_module must be a single character string")
-  
-  # Test validation of py_function
-  expect_error(dsHPC.submit_python(py_module = "numpy", py_function = c("mean", "median")),
-                "py_function must be a single character string")
-  
-  # Test validation of args
-  expect_error(dsHPC.submit_python(py_module = "numpy", py_function = "mean", args = "not_a_list"),
-                "args must be a list")
-  
-  # Test happy path (with mocked submission)
-  result <- dsHPC.submit_python(py_module = "numpy", py_function = "mean", args = list(a = c(1, 2, 3)))
-  expect_equal(result$job_id, "mock_job")
-  expect_equal(result$status, "SUBMITTED")
-  expect_equal(result$py_module, "numpy")
-  expect_equal(result$py_function, "mean")
 })
 
 # This test requires reticulate and would run Python code, so we'll make it conditional
 test_that("Python integration works with reticulate", {
   skip_if_not_installed("reticulate")
-  skip_if_not(reticulate::py_available(), "Python is not available")
-  
-  # Try to import numpy, skip if not available
-  skip_if_not(
-    tryCatch({
-      reticulate::py_module_available("numpy")
-    }, error = function(e) FALSE),
-    "NumPy is not available in Python"
-  )
+  skip_if_not(python_available(), "Python is not available")
+  skip_if_not(numpy_available(), "NumPy is not available")
   
   # Create a wrapper function for numpy.mean
   wrapper <- create_python_wrapper("numpy", "mean", list(a = c(1, 2, 3, 4, 5)))

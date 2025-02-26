@@ -58,6 +58,12 @@ dsHPC.submit_python <- function(py_module, py_function, args = list(),
     stop("The reticulate package is required to submit Python jobs. Please install it with install.packages('reticulate').")
   }
   
+  # Get configuration
+  config <- getOption("dsHPC.config")
+  if (is.null(config)) {
+    stop("dsHPC has not been initialized. Call dsHPC.init() first.")
+  }
+  
   # Create a wrapper function that will call the Python function using reticulate
   r_wrapper <- create_python_wrapper(py_module, py_function, args, 
                                    python_path, virtualenv, condaenv, required_modules)
@@ -66,29 +72,105 @@ dsHPC.submit_python <- function(py_module, py_function, args = list(),
   job_wrapper_str <- sprintf("python_wrapper(%s, %s)", py_module, py_function)
   job_hash <- create_job_hash(job_wrapper_str, args)
   
+  # Check if result is already cached
+  if (use_cache) {
+    cached_result <- get_cached_result(config$connection, job_hash)
+    if (!is.null(cached_result)) {
+      message("Using cached result for this Python job")
+      return(list(
+        job_id = uuid::UUIDgenerate(),
+        job_hash = job_hash,
+        status = "CACHED",
+        py_module = py_module,
+        py_function = py_function,
+        result = cached_result
+      ))
+    }
+  }
+  
   # Create a proper function name for the wrapper
   py_wrapper_name <- paste0("python_", py_module, "_", py_function)
+  
+  # Generate a unique job ID
+  job_id <- uuid::UUIDgenerate()
   
   # Define the wrapper as a function in the parent environment
   # This is necessary for the R script to find and execute it
   wrapper_env <- new.env(parent = parent.frame())
   assign(py_wrapper_name, r_wrapper, envir = wrapper_env)
   
-  # Use the general dsHPC.submit function with the correct parameters
-  result <- dsHPC.submit(
-    func_name = py_wrapper_name,
-    args = list(),  # Arguments are already packaged in the wrapper
-    object_hash = job_hash,
-    slurm_opts = slurm_opts,
-    use_cache = use_cache,
-    required_packages = c("reticulate")
+  # Store job information in database
+  store_job_info(
+    config$connection, 
+    job_id, 
+    job_hash, 
+    py_wrapper_name, 
+    list(), # Arguments are already packaged in the wrapper
+    status = "SUBMITTED"
   )
   
-  # Add Python-specific details to the result
-  result$py_module <- py_module
-  result$py_function <- py_function
-  
-  return(result)
+  # Execute the job locally if no scheduler or in simulation mode
+  if (!config$scheduler_available || config$simulation_mode) {
+    # Execute the wrapper function
+    tryCatch({
+      # Call the Python function
+      result <- r_wrapper()
+      
+      # Always store the result in the cache using the Python-specific function
+      store_python_result(config$connection, job_hash, result)
+      
+      # Update job status
+      update_job_status(config$connection, job_id, "COMPLETED", completed = TRUE)
+      
+      # Convert Python result to R for return value
+      r_result <- reticulate::py_to_r(result)
+      
+      return(list(
+        job_id = job_id,
+        job_hash = job_hash,
+        status = "COMPLETED",
+        py_module = py_module,
+        py_function = py_function,
+        result = r_result
+      ))
+    }, error = function(e) {
+      update_job_status(config$connection, job_id, "FAILED", 
+                       error_message = as.character(e), completed = TRUE)
+      stop(e)
+    })
+  } else {
+    # TODO: Implement Slurm job submission for Python jobs
+    # For now, we'll simulate execution
+    message("Slurm submission for Python jobs is not implemented yet. Executing locally.")
+    
+    # Execute the wrapper function
+    tryCatch({
+      # Call the Python function
+      result <- r_wrapper()
+      
+      # Always store the result in the cache using the Python-specific function
+      store_python_result(config$connection, job_hash, result)
+      
+      # Update job status
+      update_job_status(config$connection, job_id, "COMPLETED", completed = TRUE)
+      
+      # Convert Python result to R for return value
+      r_result <- reticulate::py_to_r(result)
+      
+      return(list(
+        job_id = job_id,
+        job_hash = job_hash,
+        status = "COMPLETED",
+        py_module = py_module,
+        py_function = py_function,
+        result = r_result
+      ))
+    }, error = function(e) {
+      update_job_status(config$connection, job_id, "FAILED", 
+                       error_message = as.character(e), completed = TRUE)
+      stop(e)
+    })
+  }
 }
 
 #' @title Create Python Wrapper Function
@@ -296,11 +378,20 @@ to_python_arg <- function(arg) {
       return(paste0("{", paste(items, collapse = ", "), "}"))
     }
   } else if (is.data.frame(arg)) {
-    # Not ideal for large data frames, but works for simple cases
-    # In real use, you'd likely use reticulate's conversion functions
-    # or save/load the data separately
-    warning("Converting data frames to Python is rudimentary. Consider using reticulate conversion functions directly.")
-    return("None  # Data frame conversion not fully implemented")
+    # Convert data frame to a dictionary of lists
+    df_dict <- lapply(arg, function(col) {
+      to_python_arg(as.list(col))
+    })
+    
+    # Create Python dictionary representation
+    items <- character(0)
+    for (name in names(df_dict)) {
+      key <- paste0("'", gsub("'", "\\\\'", name), "'")
+      value <- df_dict[[name]]
+      items <- c(items, paste0(key, ": ", value))
+    }
+    
+    return(paste0("{", paste(items, collapse = ", "), "}"))
   } else {
     # Default for other types - not ideal but prevents errors
     warning("Unsupported type for Python conversion: ", class(arg)[1])

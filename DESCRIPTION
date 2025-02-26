@@ -30,3 +30,10 @@ Suggests:
     opal
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+Config/reticulate:
+    list(
+      packages = list(
+        list(package = "numpy"),
+        list(package = "pillow")
+      )
+    )
