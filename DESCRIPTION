@@ -10,6 +10,8 @@ Description: Provides server-side DataSHIELD functions for submitting, managing,
     Slurm, caches results to avoid redundant computations, and provides tools for job lifecycle 
     management. Designed to be used by other DataSHIELD server-side packages.
 License: MIT + file LICENSE
+URL: https://isglobal-brge.github.io/dsHPC, https://github.com/isglobal-brge/dsHPC
+BugReports: https://github.com/isglobal-brge/dsHPC/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2

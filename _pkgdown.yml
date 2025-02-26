@@ -1,0 +1,93 @@
+url: https://isglobal-brge.github.io/dsHPC/
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+
+navbar:
+  structure:
+    left:  [home, reference, articles, tutorials, news]
+    right: [github]
+  components:
+    home:
+      icon: fas fa-home fa-lg
+      href: index.html
+      aria-label: Home
+    reference:
+      text: Functions
+      href: reference/index.html
+    articles:
+      text: Articles
+      menu:
+      - text: Introduction to dsHPC
+        href: articles/dsHPC-intro.html
+      - text: Python Integration with dsHPC
+        href: articles/python-integration.html
+    github:
+      icon: fab fa-github fa-lg
+      href: https://github.com/isglobal-brge/dsHPC
+
+reference:
+  - title: "Initialization"
+    desc: >
+      Functions for setting up the dsHPC environment
+    contents:
+      - dsHPC.init
+      - dsHPC.ds.init
+  
+  - title: "Job Management"
+    desc: >
+      Functions for submitting and managing jobs
+    contents:
+      - dsHPC.submit
+      - dsHPC.submit_by_name
+      - dsHPC.ds.submit
+      - dsHPC.status
+      - dsHPC.ds.status
+      - dsHPC.result
+      - dsHPC.ds.result
+      - dsHPC.list_jobs
+      - dsHPC.ds.list_jobs
+      - dsHPC.cancel
+      - dsHPC.ds.cancel
+      - dsHPC.wrap_function
+  
+  - title: "Python Integration"
+    desc: >
+      Functions for Python integration
+    contents:
+      - dsHPC.submit_python
+      - starts_with("dsHPC.create_test_image")
+      - starts_with("dsHPC.get_image_info")
+      - starts_with("dsHPC.apply_filter")
+      - dsHPC.test_image_path
+      - pillow_test
+  
+  - title: "Cache Management"
+    desc: >
+      Functions for managing the result cache
+    contents:
+      - dsHPC.clean_cache
+  
+  - title: "Internal Functions"
+    desc: >
+      Internal utility functions
+    contents:
+      - create_job_hash
+      - generate_job_id
+      - format_function_call
+      - test_utils
+      - dsHPC-package
+
+articles:
+  - title: "Getting Started"
+    desc: >
+      Introduction to the package and its main features
+    contents:
+      - dsHPC-intro
+  
+  - title: "Advanced Topics"
+    desc: >
+      Advanced usage and integration
+    contents:
+      - python-integration 

@@ -16,9 +16,10 @@
 
 ## Documentation
 
-- [Usage Guide](docs/usage.md) - Comprehensive documentation for using dsHPC
-- [Developer Integration Guide](docs/developer_guide.md) - Guide for DataSHIELD package developers who want to integrate dsHPC
-- [Docker Setup](docker/) - Example Dockerfile to set up all dsHPC requirements dsHPC in a rock instance
+- [Package Website](https://isglobal-brge.github.io/dsHPC/) - Complete documentation with function reference and vignettes
+- [Usage Guide](guides/usage.md) - Comprehensive documentation for using dsHPC
+- [Developer Integration Guide](guides/developer_guide.md) - Guide for DataSHIELD package developers who want to integrate dsHPC
+- [Docker Setup](docker/) - Example Dockerfile to set up all dsHPC requirements in a rock instance
 
 ## Installation
 

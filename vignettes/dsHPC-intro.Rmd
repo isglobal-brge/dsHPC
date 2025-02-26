@@ -1,7 +1,6 @@
 ---
 title: "Introduction to dsHPC"
-author: "David Sarrat González, Xavier Escribà-Montagut, Juan R. González"
-date: "`r Sys.Date()`"
+author: "David Sarrat González, Xavier Escribà-Montagut, Juan R González"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Introduction to dsHPC}
