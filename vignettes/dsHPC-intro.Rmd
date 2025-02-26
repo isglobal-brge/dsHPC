@@ -48,7 +48,7 @@ You can submit a function to be executed on the HPC cluster:
 ```{r eval=FALSE}
 # Submit a simple job
 job <- dsHPC.submit(
-  func_name = "mean",
+  func = mean,  # Pass the actual function
   args = list(x = c(1, 2, 3, 4, 5))
 )
 
@@ -61,9 +61,8 @@ For more complex operations, you can specify additional parameters:
 ```{r eval=FALSE}
 # Submit a job with more options
 job <- dsHPC.submit(
-  func_name = "kmeans",
+  func = kmeans,
   args = list(x = my_data_matrix, centers = 3),
-  package = "stats",
   required_packages = c("stats"),
   use_cache = TRUE,
   slurm_opts = list(
@@ -72,6 +71,18 @@ job <- dsHPC.submit(
     time = "02:00:00",
     cpus = 2
   )
+)
+```
+
+Alternatively, you can use `dsHPC.submit_by_name` to submit a job by its function name:
+
+```{r eval=FALSE}
+# Submit using function name
+job <- dsHPC.submit_by_name(
+  func_name = "kmeans",
+  args = list(x = my_data_matrix, centers = 3),
+  package = "stats",
+  required_packages = c("stats")
 )
 ```
 
@@ -98,37 +109,77 @@ The status will be one of:
 Once a job is completed, you can retrieve the results:
 
 ```{r eval=FALSE}
-# Get job result (non-blocking)
+# Retrieve the result
 result <- dsHPC.result(job$job_id)
-
-# Get job result (blocking, waits for completion)
-result <- dsHPC.result(job$job_id, wait_for_completion = TRUE)
 ```
 
-### Job Management
-
-You can list all jobs or filter by status:
+You can also wait for a job to complete:
 
 ```{r eval=FALSE}
-# List all jobs
-all_jobs <- dsHPC.list_jobs()
-
-# List only completed jobs
-completed_jobs <- dsHPC.list_jobs(status_filter = "COMPLETED")
+# Wait for completion and get result
+result <- dsHPC.result(job$job_id, wait_for_completion = TRUE, timeout = 300)
 ```
 
-Cancel a running job:
+## Function Caching and Computation Optimization
+
+One of the key features of dsHPC is its intelligent caching system, which avoids redundant computations by reusing results from previous calls with identical inputs.
+
+### How Function Caching Works
+
+dsHPC uses an advanced hashing mechanism to uniquely identify jobs based on:
+
+1. **Function definition**: The actual implementation of the function is considered, not just the function name
+2. **Arguments**: The exact arguments passed to the function
+3. **Environment**: Relevant context where the function runs
 
 ```{r eval=FALSE}
-# Cancel job
-dsHPC.cancel(job$job_id)
+# Define a custom function
+my_add <- function(a, b) { a + b }
+
+# First execution will compute the result
+job1 <- dsHPC.submit(
+  func = my_add,
+  args = list(a = 1, b = 2)
+)
+# Status is COMPLETED, result is computed
+job1$status
+#> [1] "COMPLETED"
+
+# Second execution with identical inputs uses the cache
+job2 <- dsHPC.submit(
+  func = my_add,
+  args = list(a = 1, b = 2)
+)
+# Status is CACHED, result is retrieved from cache
+job2$status
+#> [1] "CACHED"
+
+# Even functionally identical functions will use the cache
+# Define another function with the same behavior but different formatting
+my_add2 <- function(a, b) { 
+  # Different formatting, but same functionality
+  a + b 
+}
+
+job3 <- dsHPC.submit(
+  func = my_add2,
+  args = list(a = 1, b = 2)
+)
+# Status is CACHED, result is retrieved from cache
+job3$status
+#> [1] "CACHED"
 ```
 
-Clean up old cached results:
+### Cache Management
+
+You can manually clean the cache to remove old results:
 
 ```{r eval=FALSE}
-# Remove cache entries older than 14 days
+# Remove results older than 14 days
 dsHPC.clean_cache(days_to_keep = 14)
+
+# Clear all completed job results
+dsHPC.clean_cache(days_to_keep = 0)
 ```
 
 ## Function Wrapping for Easier Use

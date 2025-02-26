@@ -68,9 +68,46 @@ dsHPC.submit_python <- function(py_module, py_function, args = list(),
   r_wrapper <- create_python_wrapper(py_module, py_function, args, 
                                    python_path, virtualenv, condaenv, required_modules)
   
+  # Try to get the actual Python function definition for better hashing
+  python_func_source <- NULL
+  try({
+    # Set up Python environment if needed
+    if (!is.null(python_path)) {
+      reticulate::use_python(python_path, required = TRUE)
+    }
+    
+    if (!is.null(virtualenv)) {
+      reticulate::use_virtualenv(virtualenv, required = TRUE)
+    } else if (!is.null(condaenv)) {
+      reticulate::use_condaenv(condaenv, required = TRUE)
+    }
+    
+    # Import the module
+    py_mod <- reticulate::import(py_module)
+    
+    # Get the function from the module
+    py_func <- py_mod[[py_function]]
+    
+    # Try to get source code if possible
+    if (reticulate::py_has_attr(py_func, "__code__")) {
+      code_obj <- py_func$`__code__`
+      if (reticulate::py_has_attr(code_obj, "co_code")) {
+        # Hash the bytecode as a representation of the function
+        python_func_source <- as.character(code_obj$co_code)
+      }
+    }
+  }, silent = TRUE)
+  
   # Calculate job hash for caching
-  job_wrapper_str <- sprintf("python_wrapper(%s, %s)", py_module, py_function)
-  job_hash <- create_job_hash(job_wrapper_str, args)
+  if (!is.null(python_func_source)) {
+    # Use the actual Python function source code if available
+    func_info <- paste(py_module, py_function, python_func_source, sep = "::")
+    job_hash <- create_job_hash(func_info, args)
+  } else {
+    # Fall back to module and function name if source not available
+    func_info <- paste(py_module, py_function, sep = "::")
+    job_hash <- create_job_hash(func_info, args)
+  }
   
   # Check if result is already cached
   if (use_cache) {

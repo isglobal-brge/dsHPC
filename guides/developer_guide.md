@@ -8,10 +8,11 @@ This guide is for DataSHIELD package developers who want to integrate the dsHPC 
 2. [Setting Up Dependencies](#setting-up-dependencies)
 3. [Integrating with Your Package](#integrating-with-your-package)
 4. [Job Submission Patterns](#job-submission-patterns)
-5. [Handling Results](#handling-results)
-6. [Python Integration](#python-integration)
-7. [Error Handling](#error-handling)
-8. [Best Practices](#best-practices)
+5. [Intelligent Function Caching](#intelligent-function-caching)
+6. [Handling Results](#handling-results)
+7. [Python Integration](#python-integration)
+8. [Error Handling](#error-handling)
+9. [Best Practices](#best-practices)
 
 ## Overview
 
@@ -99,23 +100,13 @@ myPackage.intensiveFunction <- function(data, param1, param2) {
     if (job$status == "COMPLETED" || job$status == "CACHED") {
       return(job$result)
     } else {
-      # For asynchronous jobs, wait for completion
-      while (TRUE) {
-        status <- dsHPC::dsHPC.status(job$job_id, return_result = TRUE)
-        if (status$status == "COMPLETED" || status$status == "CACHED") {
-          return(status$result)
-        } else if (status$status == "FAILED") {
-          stop("Job failed: ", status$error_message)
-        }
-        # Wait before checking again
-        Sys.sleep(2)
-      }
+      # For a synchronous approach, wait for completion
+      return(dsHPC::dsHPC.result(job$job_id, wait_for_completion = TRUE))
     }
   } else {
-    # Fallback if dsHPC is not available
-    warning("dsHPC not available, computing locally")
-    # Perform computation locally
-    result <- # ... compute locally
+    # Fallback to regular processing if dsHPC is not available
+    # Actual computation code goes here
+    result <- # ... compute something intensive
     return(result)
   }
 }
@@ -228,6 +219,67 @@ job <- dsHPC::dsHPC.submit(
     cpus = 8                # Request 8 CPUs
   )
 )
+```
+
+## Intelligent Function Caching
+
+dsHPC includes a sophisticated function caching system that identifies jobs based on their actual function implementation, not just the function name. This helps avoid redundant computations and improves efficiency.
+
+### How Function Hashing Works
+
+When a job is submitted, dsHPC creates a unique hash based on:
+
+1. The function's body (actual code implementation)
+2. The function's formal arguments
+3. The function's environment
+4. The exact arguments passed to the function
+
+This allows the system to identify functionally equivalent code, even if it's formatted differently or comes from different sources.
+
+### Leveraging the Cache in Your Code
+
+Always use the `use_cache = TRUE` parameter (default) in your job submissions to benefit from this system:
+
+```r
+job <- dsHPC::dsHPC.submit(
+  func = my_function,
+  args = list(x = data),
+  use_cache = TRUE  # This is the default, but shown here for clarity
+)
+```
+
+### Smart Function Wrapping
+
+To maximize caching efficiency across different parts of your code, consider using factory functions that produce computational functions with consistent implementations:
+
+```r
+# Factory function that produces a computation function
+create_computation <- function(method = "default") {
+  # Return a specific implementation based on the method
+  if (method == "fast") {
+    return(function(x) {
+      # Fast implementation
+      result <- # ...
+      return(result)
+    })
+  } else {
+    return(function(x) {
+      # Default implementation
+      result <- # ...
+      return(result)
+    })
+  }
+}
+
+# Use the factory to create consistent functions
+fast_compute <- create_computation("fast")
+default_compute <- create_computation("default")
+
+# These submissions will correctly use the cache when appropriate
+job1 <- dsHPC::dsHPC.submit(func = fast_compute, args = list(x = data1))
+job2 <- dsHPC::dsHPC.submit(func = fast_compute, args = list(x = data1)) # Uses cache
+job3 <- dsHPC::dsHPC.submit(func = fast_compute, args = list(x = data2)) # New computation
+job4 <- dsHPC::dsHPC.submit(func = default_compute, args = list(x = data1)) # New computation (different function)
 ```
 
 ## Handling Results

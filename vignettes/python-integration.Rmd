@@ -18,7 +18,7 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-This vignette demonstrates how to use the Python integration capabilities of the `dsHPC` package. The integration allows you to seamlessly submit Python functions as jobs through the DataSHIELD infrastructure, leveraging the power of the `reticulate` package for R-Python interoperability.
+The `dsHPC` package provides seamless integration with Python through the `reticulate` package. This allows you to run Python code on HPC resources, with automatic conversion between R and Python data types.
 
 ## Prerequisites
 
@@ -41,9 +41,7 @@ Before submitting any jobs, you need to initialize the dsHPC system:
 dsHPC.init()
 ```
 
-## Basic Python Integration
-
-### Submitting a Simple Python Job
+## Basic Python Job Submission
 
 The `dsHPC.submit_python()` function allows you to submit a Python function to be executed as a job. Here's a simple example using NumPy:
 
@@ -66,9 +64,11 @@ if (status$status == "COMPLETED") {
 }
 ```
 
-### Specifying Python Environment
+## Python Environment Configuration
 
-You can specify which Python environment to use:
+### Using a Specific Python Executable
+
+You can specify which Python interpreter to use:
 
 ```{r python_env}
 # Using a specific Python executable
@@ -78,7 +78,11 @@ job <- dsHPC.submit_python(
   args = list(a = c(1, 2, 3, 4, 5)),
   python_path = "/path/to/python"
 )
+```
 
+### Using a Virtual Environment
+
+```{r python_env}
 # Using a virtual environment
 job <- dsHPC.submit_python(
   py_module = "numpy",
@@ -86,7 +90,11 @@ job <- dsHPC.submit_python(
   args = list(a = c(1, 2, 3, 4, 5)),
   virtualenv = "my_venv"
 )
+```
 
+### Using a Conda Environment
+
+```{r python_env}
 # Using a conda environment
 job <- dsHPC.submit_python(
   py_module = "numpy",
@@ -96,11 +104,30 @@ job <- dsHPC.submit_python(
 )
 ```
 
-## Working with Complex Data Types
+## Passing Data Between R and Python
 
-### Passing Data Frames to Python
+The `dsHPC` package automatically converts R objects to Python and back. Here are some examples:
 
-Data frames can be passed to Python as dictionaries:
+### Working with Vectors and Arrays
+
+R vectors are converted to NumPy arrays:
+
+```{r dataframe}
+# R vector to NumPy array and back
+r_vector <- c(1, 2, 3, 4, 5)
+job <- dsHPC.submit_python(
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = r_vector)
+)
+
+# Result is an R scalar (3)
+result <- dsHPC.result(job$job_id)
+```
+
+### Working with Data Frames
+
+R data frames are converted to pandas DataFrames:
 
 ```{r dataframe}
 # Create a sample data frame
@@ -118,36 +145,72 @@ job <- dsHPC.submit_python(
 )
 ```
 
-### Handling Complex Return Values
+## Python Function Caching
 
-Python functions can return complex objects that are automatically converted to R objects:
+Just like with R functions, `dsHPC` includes an intelligent caching system for Python functions. This system identifies Python jobs based on:
 
-```{r complex_returns}
-# Function that returns a dictionary with various types
-job <- dsHPC.submit_python(
-  py_module = "os",
-  py_function = "environ",
-  args = list()
+1. The Python module name
+2. The Python function name
+3. The function's implementation (when available)
+4. The exact arguments passed to the function
+
+When the same Python function is called with the same arguments, the cached result is returned immediately without re-executing the function:
+
+```{r caching}
+# First execution of a Python function
+job1 <- dsHPC.submit_python(
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = c(1, 2, 3, 4, 5))
 )
 
-# Get the result (will be an R list)
-result <- dsHPC.result(job$job_id)
+# Status is COMPLETED, result is computed
+job1$status
+#> [1] "COMPLETED"
+
+# Second execution with identical inputs uses the cache
+job2 <- dsHPC.submit_python(
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = c(1, 2, 3, 4, 5))
+)
+
+# Status is CACHED, result is retrieved from cache
+job2$status
+#> [1] "CACHED"
 ```
 
-## Custom Python Modules
+### Implementation Details
 
-You can also call functions from your own Python modules:
+For Python functions, dsHPC attempts to capture the function's bytecode for more accurate comparison. This means that functionally identical Python functions (even if they're imported differently or accessed through different paths) can be recognized as the same for caching purposes.
 
-```{r custom_module}
-# Assuming you have a custom module named "my_module.py"
-# with a function called "process_data"
+### Disabling Caching
+
+If you need to run a Python function without using the cache (e.g., for time-sensitive data or non-deterministic functions), you can disable caching:
+
+```{r caching}
+# Disable caching for this job
 job <- dsHPC.submit_python(
-  py_module = "my_module",
-  py_function = "process_data",
-  args = list(
-    data = c(1, 2, 3, 4, 5),
-    options = list(normalize = TRUE)
-  )
+  py_module = "numpy",
+  py_function = "mean",
+  args = list(a = c(1, 2, 3, 4, 5)),
+  use_cache = FALSE
+)
+```
+
+## Working with Python Libraries
+
+### Required Modules
+
+You can specify additional Python modules that need to be imported:
+
+```{r required_modules}
+# Submit a job that requires multiple modules
+job <- dsHPC.submit_python(
+  py_module = "matplotlib.pyplot",
+  py_function = "plot",
+  args = list(x = c(1, 2, 3, 4, 5), y = c(10, 20, 15, 30, 25)),
+  required_modules = c("numpy", "pandas")
 )
 ```
 
@@ -172,31 +235,20 @@ job <- dsHPC.submit_python(
 )
 ```
 
-### Caching Results
+## Custom Python Modules
 
-By default, `dsHPC` caches results to avoid redundant computations. You can control this behavior:
+You can also call functions from your own Python modules:
 
-```{r caching}
-# Disable caching for this job
+```{r custom_module}
+# Assuming you have a custom module named "my_module.py"
+# with a function called "process_data"
 job <- dsHPC.submit_python(
-  py_module = "numpy",
-  py_function = "mean",
-  args = list(a = c(1, 2, 3, 4, 5)),
-  reuse_cached = FALSE
-)
-```
-
-## Loading Required Modules
-
-If your Python function requires additional modules, you can specify them:
-
-```{r required_modules}
-# Submit a job that requires multiple modules
-job <- dsHPC.submit_python(
-  py_module = "matplotlib.pyplot",
-  py_function = "plot",
-  args = list(x = c(1, 2, 3, 4, 5), y = c(10, 20, 15, 30, 25)),
-  required_modules = c("numpy", "pandas")
+  py_module = "my_module",
+  py_function = "process_data",
+  args = list(
+    data = c(1, 2, 3, 4, 5),
+    options = list(normalize = TRUE)
+  )
 )
 ```
 
