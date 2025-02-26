@@ -96,8 +96,36 @@ dsHPC.submit_by_name <- function(func_name, args, package = NULL, object_hash = 
     stop("dsHPC has not been initialized. Call dsHPC.init() first.")
   }
   
+  # Try to get the actual function object 
+  func <- NULL
+  if (!is.null(package)) {
+    # Get function from package namespace
+    if (!requireNamespace(package, quietly = TRUE)) {
+      stop(paste("Package", package, "is not available"))
+    }
+    if (exists(func_name, envir = asNamespace(package), mode = "function")) {
+      func <- get(func_name, envir = asNamespace(package), mode = "function")
+    } else {
+      stop(paste("Function", func_name, "not found in package", package))
+    }
+  } else {
+    # Try to find function in global environment or parent frames
+    if (exists(func_name, mode = "function")) {
+      func <- get(func_name, mode = "function")
+    } else {
+      # If function not found, we'll use the name only
+      warning(paste("Function", func_name, "not found, using name for hashing only"))
+    }
+  }
+  
   # Create a job hash for identifying this specific job
-  job_hash <- create_job_hash(func_name, args, object_hash)
+  if (!is.null(func)) {
+    # Use the function object for a more accurate hash
+    job_hash <- create_job_hash(func, args, object_hash)
+  } else {
+    # Fall back to using function name if object not available
+    job_hash <- create_job_hash(func_name, args, object_hash)
+  }
   
   # Check if result is already cached
   if (use_cache) {

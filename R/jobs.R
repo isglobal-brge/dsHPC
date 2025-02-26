@@ -50,8 +50,7 @@ dsHPC.submit <- function(func, args = list(), slurm_opts = list(),
   func_name <- sprintf("dsHPC_func_%s", uuid::UUIDgenerate(use.time = TRUE))
   
   # Calculate a hash for the function and arguments
-  func_str <- deparse(func)
-  job_hash <- create_job_hash(func_str, args)
+  job_hash <- create_job_hash(func, args)
   
   # Check if result is already cached
   if (use_cache) {
@@ -72,6 +71,9 @@ dsHPC.submit <- function(func, args = list(), slurm_opts = list(),
   
   # Store function and job info
   assign(func_name, func, envir = parent.frame())
+  
+  # Need to deparse the function for storage
+  func_str <- deparse(func)
   store_job_info(config$connection, job_id, job_hash, func_name, args, status = "SUBMITTED")
   
   # Execute job locally if no scheduler or in simulation mode
@@ -197,8 +199,8 @@ dsHPC.submit_by_name <- function(func_name, args = list(), object_hash = NULL,
   
   # Calculate a hash for the function and arguments if not provided
   if (is.null(object_hash)) {
-    func_str <- deparse(func)
-    job_hash <- create_job_hash(func_str, args)
+    # Use the entire function object for a more accurate hash
+    job_hash <- create_job_hash(func, args)
   } else {
     job_hash <- object_hash
   }

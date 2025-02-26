@@ -1,11 +1,27 @@
 test_that("core utilities work", {
-  # Test hash creation
+  # Test hash creation with function names
   hash1 <- create_job_hash("test_func", list(a = 1, b = 2))
   hash2 <- create_job_hash("test_func", list(a = 1, b = 2))
   hash3 <- create_job_hash("test_func", list(a = 1, b = 3))
   
   expect_equal(hash1, hash2)
   expect_false(identical(hash1, hash3))
+  
+  # Test hash creation with function objects
+  test_fn1 <- function(x) x + 1
+  test_fn2 <- function(x) x + 1  # Same definition
+  test_fn3 <- function(x) x + 2  # Different definition
+  
+  hash_fn1 <- create_job_hash(test_fn1, list(x = 5))
+  hash_fn2 <- create_job_hash(test_fn2, list(x = 5))
+  hash_fn3 <- create_job_hash(test_fn3, list(x = 5))
+  
+  # These might produce the same hash because they have the same body and formals
+  # But they were defined in the same environment
+  expect_equal(hash_fn1, hash_fn2)
+  
+  # Different function body should produce different hash
+  expect_false(identical(hash_fn1, hash_fn3))
   
   # Test job ID generation
   job_id1 <- generate_job_id()
