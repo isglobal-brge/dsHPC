@@ -141,7 +141,7 @@ test_that("can retrieve results from completed job", {
     args = list(x = 5)
   )
   
-  # The job should complete immediately in simulation mode
+  # The job should complete immediately if scheduler is not available
   expect_equal(job$status, "COMPLETED")
   
   # Check status

@@ -146,8 +146,8 @@ dsHPC.submit_python <- function(py_module, py_function, args = list(),
     status = "SUBMITTED"
   )
   
-  # Execute the job locally if no scheduler or in simulation mode
-  if (!config$scheduler_available || config$simulation_mode) {
+  # Execute the job locally if no scheduler
+  if (!config$scheduler_available) {
     # Execute the wrapper function
     tryCatch({
       # Call the Python function
@@ -177,7 +177,7 @@ dsHPC.submit_python <- function(py_module, py_function, args = list(),
     })
   } else {
     # TODO: Implement Slurm job submission for Python jobs
-    # For now, we'll simulate execution
+    # For now, we'll execute locally
     message("Slurm submission for Python jobs is not implemented yet. Executing locally.")
     
     # Execute the wrapper function

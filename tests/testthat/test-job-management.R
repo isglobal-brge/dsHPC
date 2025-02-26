@@ -77,7 +77,7 @@ test_that("R job status management works correctly", {
     args = list(x = 5)
   )
   
-  # Initially the job should be COMPLETED (in simulation mode)
+  # Initially the job should be COMPLETED (when scheduler is not available)
   # or SUBMITTED/PENDING (if using a real scheduler)
   initial_status <- dsHPC.status(job$job_id)
   expect_true(initial_status$status %in% c("SUBMITTED", "PENDING", "RUNNING", "COMPLETED"))
@@ -154,7 +154,7 @@ test_that("Python job status management works correctly", {
       args = list(a = c(1, 2, 3, 4, 5))
     )
     
-    # Initially the job should be COMPLETED (in simulation mode)
+    # Initially the job should be COMPLETED (when scheduler is not available)
     # or SUBMITTED/PENDING (if using a real scheduler)
     initial_status <- dsHPC.status(job$job_id)
     expect_true(initial_status$status %in% c("SUBMITTED", "PENDING", "RUNNING", "COMPLETED"))
@@ -220,7 +220,7 @@ test_that("Job cancellation works correctly", {
   # Set job to RUNNING state to test cancellation
   manually_update_job_status(job$job_id, "RUNNING")
   
-  # In simulation mode, we can't actually cancel a job with Slurm
+  # When scheduler is not available, we can't actually cancel a job with Slurm
   # But we can test the database update logic
   
   # Mock the slurm cancellation function to always succeed

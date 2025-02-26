@@ -38,7 +38,7 @@ test_that("core utilities work", {
   expect_match(call2, "^stats::kmeans\\(x = \"data\", centers = 3\\)$")
 })
 
-test_that("initialization works without errors in simulation mode", {
+test_that("initialization works without errors", {
   # This test should run even without Slurm
   config <- dsHPC.init()
   
@@ -47,7 +47,7 @@ test_that("initialization works without errors in simulation mode", {
   expect_true("scheduler" %in% names(config))
 })
 
-test_that("basic job submission works in simulation mode", {
+test_that("basic job submission works when scheduler is unavailable", {
   # Skip if already initialized
   if(is.null(getOption("dsHPC.config"))) {
     dsHPC.init()

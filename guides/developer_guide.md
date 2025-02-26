@@ -25,7 +25,7 @@ dsHPC allows DataSHIELD packages to offload computationally intensive tasks to H
 
 The system is designed to work in two modes:
 1. With an actual Slurm scheduler (in a real HPC environment)
-2. In simulation mode (for development/testing)
+2. In local execution mode (when scheduler is not available)
 
 ## Setting Up Dependencies
 

@@ -76,8 +76,8 @@ dsHPC.submit <- function(func, args = list(), slurm_opts = list(),
   func_str <- deparse(func)
   store_job_info(config$connection, job_id, job_hash, func_name, args, status = "SUBMITTED")
   
-  # Execute job locally if no scheduler or in simulation mode
-  if (!config$scheduler_available || config$simulation_mode) {
+  # Execute job locally if no scheduler
+  if (!config$scheduler_available) {
     tryCatch({
       # Load required packages
       if (!is.null(required_packages)) {
@@ -225,8 +225,8 @@ dsHPC.submit_by_name <- function(func_name, args = list(), object_hash = NULL,
   # Store job info
   store_job_info(config$connection, job_id, job_hash, func_name, args, status = "SUBMITTED")
   
-  # Execute job locally if no scheduler or in simulation mode
-  if (!config$scheduler_available || config$simulation_mode) {
+  # Execute job locally if no scheduler
+  if (!config$scheduler_available) {
     tryCatch({
       # Load required packages
       if (!is.null(required_packages)) {
