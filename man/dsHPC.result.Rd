@@ -4,10 +4,14 @@
 \alias{dsHPC.result}
 \title{Get Job Result}
 \usage{
-dsHPC.result(job_id)
+dsHPC.result(job_id, wait_for_completion = FALSE, timeout = 300)
 }
 \arguments{
 \item{job_id}{Character string with the job ID.}
+
+\item{wait_for_completion}{Logical indicating whether to wait for the job to complete.}
+
+\item{timeout}{Integer specifying maximum time to wait in seconds (default: 300).}
 }
 \value{
 The job result or NULL if the job is not completed or the result is not available.
@@ -21,7 +25,7 @@ Retrieves the result of a job by its ID.
 dsHPC.init()
 
 # Submit a simple job
-job <- dsHPC.submit(mean, args = list(x = 1:10))
+job <- dsHPC.submit_by_name(func_name = "mean", args = list(x = 1:10))
 
 # Wait for job completion (in real applications, this would usually be asynchronous)
 while (dsHPC.status(job$job_id)$status == "RUNNING") {

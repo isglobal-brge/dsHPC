@@ -4,7 +4,7 @@ pkgdown_sha: ~
 articles:
   dsHPC-intro: dsHPC-intro.html
   python-integration: python-integration.html
-last_built: 2025-02-26T07:18Z
+last_built: 2025-02-26T07:21Z
 urls:
   reference: https://isglobal-brge.github.io/dsHPC/reference
   article: https://isglobal-brge.github.io/dsHPC/articles

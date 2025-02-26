@@ -49,8 +49,8 @@ dsHPC.init <- function(db_path = NULL, scheduler = "slurm") {
   return(invisible(config))
 }
 
-#' @title Submit a Function Execution as a Job
-#' @description Submits a function to be executed as a job on the HPC cluster.
+#' @title Submit a Function Execution as a Job by Name
+#' @description Submits a function to be executed as a job on the HPC cluster using the function name.
 #' @param func_name Character string with the name of the function to execute.
 #' @param args List of arguments to pass to the function.
 #' @param package Character string with the package name containing the function.
@@ -66,13 +66,13 @@ dsHPC.init <- function(db_path = NULL, scheduler = "slurm") {
 #' dsHPC.init()
 #' 
 #' # Submit a simple job
-#' job <- dsHPC.submit(
+#' job <- dsHPC.submit_by_name(
 #'   func_name = "mean",
 #'   args = list(x = c(1, 2, 3, 4, 5))
 #' )
 #' 
 #' # Submit a job with package function and custom Slurm options
-#' job <- dsHPC.submit(
+#' job <- dsHPC.submit_by_name(
 #'   func_name = "kmeans",
 #'   args = list(x = my_data_matrix, centers = 3),
 #'   package = "stats",
@@ -86,7 +86,7 @@ dsHPC.init <- function(db_path = NULL, scheduler = "slurm") {
 #' )
 #' }
 #' @export
-dsHPC.submit <- function(func_name, args, package = NULL, object_hash = NULL,
+dsHPC.submit_by_name <- function(func_name, args, package = NULL, object_hash = NULL,
                          required_packages = NULL, use_cache = TRUE, cache_only = FALSE,
                          slurm_opts = list()) {
   
@@ -233,7 +233,7 @@ dsHPC.submit <- function(func_name, args, package = NULL, object_hash = NULL,
 #' dsHPC.init()
 #' 
 #' # Submit a job
-#' job <- dsHPC.submit(
+#' job <- dsHPC.submit_by_name(
 #'   func_name = "mean",
 #'   args = list(x = c(1, 2, 3, 4, 5))
 #' )
@@ -412,7 +412,7 @@ dsHPC.list_jobs <- function(status_filter = NULL) {
 #' dsHPC.init()
 #' 
 #' # Submit a job
-#' job <- dsHPC.submit(
+#' job <- dsHPC.submit_by_name(
 #'   func_name = "mean",
 #'   args = list(x = c(1, 2, 3, 4, 5))
 #' )
@@ -495,6 +495,8 @@ dsHPC.clean_cache <- function(days_to_keep = 30) {
 #' @title Get Job Result
 #' @description Retrieves the result of a job by its ID.
 #' @param job_id Character string with the job ID.
+#' @param wait_for_completion Logical indicating whether to wait for the job to complete.
+#' @param timeout Integer specifying maximum time to wait in seconds (default: 300).
 #' @return The job result or NULL if the job is not completed or the result is not available.
 #' @examples
 #' \dontrun{
@@ -502,7 +504,7 @@ dsHPC.clean_cache <- function(days_to_keep = 30) {
 #' dsHPC.init()
 #' 
 #' # Submit a simple job
-#' job <- dsHPC.submit(mean, args = list(x = 1:10))
+#' job <- dsHPC.submit_by_name(func_name = "mean", args = list(x = 1:10))
 #' 
 #' # Wait for job completion (in real applications, this would usually be asynchronous)
 #' while (dsHPC.status(job$job_id)$status == "RUNNING") {
@@ -514,11 +516,35 @@ dsHPC.clean_cache <- function(days_to_keep = 30) {
 #' print(result)
 #' }
 #' @export
-dsHPC.result <- function(job_id) {
+dsHPC.result <- function(job_id, wait_for_completion = FALSE, timeout = 300) {
   # Get configuration
   config <- getOption("dsHPC.config")
   if (is.null(config)) {
     stop("dsHPC has not been initialized. Call dsHPC.init() first.")
+  }
+  
+  # If wait_for_completion is TRUE, wait for the job to complete
+  if (wait_for_completion) {
+    start_time <- Sys.time()
+    
+    while (TRUE) {
+      # Check current status
+      status <- dsHPC.status(job_id)
+      
+      # If job completed or failed, exit the loop
+      if (status$status %in% c("COMPLETED", "FAILED", "CACHED")) {
+        break
+      }
+      
+      # Check timeout
+      if (difftime(Sys.time(), start_time, units = "secs") > timeout) {
+        warning("Timeout reached while waiting for job completion")
+        return(NULL)
+      }
+      
+      # Wait a bit before checking again
+      Sys.sleep(2)
+    }
   }
   
   # Check if the job exists
@@ -534,7 +560,7 @@ dsHPC.result <- function(job_id) {
   }
   
   # Retrieve the result from the cache
-  result <- get_cached_result(config$connection, job_info$object_hash)
+  result <- get_cached_result(config$connection, job_info$job_hash)
   
   # If we don't find the result in the cache (shouldn't happen with new design)
   if (is.null(result)) {

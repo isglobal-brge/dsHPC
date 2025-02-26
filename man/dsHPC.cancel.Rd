@@ -21,7 +21,7 @@ Cancels a running job.
 dsHPC.init()
 
 # Submit a job
-job <- dsHPC.submit(
+job <- dsHPC.submit_by_name(
   func_name = "mean",
   args = list(x = c(1, 2, 3, 4, 5))
 )

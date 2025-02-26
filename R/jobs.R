@@ -5,6 +5,7 @@
 #' @param slurm_opts Optional list with Slurm-specific options (partition, memory, time, cpus).
 #' @param use_cache Logical indicating whether to reuse cached results.
 #' @param required_packages Character vector with additional packages to load.
+#' @param package Optional character string with the package name containing the function (used in wrapped functions).
 #' @return List with job information.
 #' @examples
 #' \dontrun{
@@ -25,7 +26,8 @@
 #' }
 #' @export
 dsHPC.submit <- function(func, args = list(), slurm_opts = list(), 
-                          use_cache = TRUE, required_packages = NULL) {
+                          use_cache = TRUE, required_packages = NULL,
+                          package = NULL) {
   # Validate input
   if (!is.function(func)) {
     stop("func must be a function")
@@ -34,6 +36,9 @@ dsHPC.submit <- function(func, args = list(), slurm_opts = list(),
   if (!is.list(args)) {
     stop("args must be a list")
   }
+  
+  # The package parameter is not used directly in this function but is 
+  # included for compatibility with dsHPC.wrap_function
   
   # Get configuration
   config <- getOption("dsHPC.config")
