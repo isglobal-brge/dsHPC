@@ -459,9 +459,12 @@ dsHPC.cancel <- function(job_id) {
   }
 }
 
-#' @title Clean Old Results
+#' @title Clean Old Cached Results
 #' @description Removes cached results older than a specified time period.
+#'   This function only removes entries from the cache that are older than
+#'   the specified number of days and are not referenced by active jobs.
 #' @param days_to_keep Integer specifying how many days of cache to retain (default: 30).
+#'   Set to 0 to remove all completed job results that are not referenced by active jobs.
 #' @return The number of records deleted.
 #' @examples
 #' \dontrun{
@@ -470,6 +473,9 @@ dsHPC.cancel <- function(job_id) {
 #' 
 #' # Clean results older than 14 days
 #' dsHPC.clean_cache(days_to_keep = 14)
+#' 
+#' # Remove all completed job results
+#' dsHPC.clean_cache(days_to_keep = 0)
 #' }
 #' @export
 dsHPC.clean_cache <- function(days_to_keep = 30) {

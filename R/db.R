@@ -4,8 +4,11 @@
 
 #' @title Initialize Database Connection
 #' @description Creates and initializes the SQLite database for storing job information.
+#'   This function ensures that the database filename contains "dsHPC" to avoid
+#'   conflicts with other SQLite databases. If a custom path is provided without
+#'   "dsHPC" in the name, it will be renamed and a warning will be issued.
 #' @param db_path Character string specifying the path to the SQLite database file.
-#'   If NULL (default), uses the package's default location.
+#'   If NULL (default), uses the package's default location at ~/.dsHPC/dsHPC.sqlite.
 #' @return A DBI connection object to the database.
 #' @keywords internal
 init_db_connection <- function(db_path = NULL) {
@@ -15,7 +18,22 @@ init_db_connection <- function(db_path = NULL) {
     if (!dir.exists(db_dir)) {
       dir.create(db_dir, recursive = TRUE)
     }
-    db_path <- file.path(db_dir, "dsHPC_cache.sqlite")
+    db_path <- file.path(db_dir, "dsHPC.sqlite")
+  } else {
+    # If a custom path is provided, ensure it has dsHPC in the name to avoid conflicts
+    db_name <- basename(db_path)
+    if (!grepl("dsHPC", db_name, ignore.case = TRUE)) {
+      # Replace the filename with one that includes dsHPC
+      db_dir <- dirname(db_path)
+      file_ext <- tools::file_ext(db_path)
+      if (file_ext != "") {
+        new_name <- paste0("dsHPC.", file_ext)
+      } else {
+        new_name <- "dsHPC.sqlite"
+      }
+      db_path <- file.path(db_dir, new_name)
+      warning("Database name changed to ", new_name, " to avoid conflicts")
+    }
   }
   
   # Create connection to the database
