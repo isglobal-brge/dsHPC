@@ -61,9 +61,17 @@ validate_method_parameters <- function(method_name, params, method_spec) {
   }
   
   # Extract parameter info from the parameter data frame
-  param_df <- method_info$parameters[[1]]
+  # Handle case where parameters is an empty list or data frame
+  param_df <- if (length(method_info$parameters) > 0) {
+    method_info$parameters[[1]]
+  } else {
+    NULL
+  }
   
-  if (is.null(param_df) || nrow(param_df) == 0) {
+  # Check if param_df is NULL or empty
+  if (is.null(param_df) || 
+      (is.data.frame(param_df) && nrow(param_df) == 0) ||
+      (!is.data.frame(param_df) && length(param_df) == 0)) {
     # No parameters defined
     if (length(params) > 0) {
       stop(paste0("Method '", method_name, "' does not accept parameters, but parameters were provided."))

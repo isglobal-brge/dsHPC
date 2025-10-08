@@ -18,9 +18,10 @@ sort_parameters <- function(parameters) {
     stop("parameters must be a list")
   }
   
-  # Return empty list if no parameters
+  # Return empty named list if no parameters
+  # This ensures it serializes as {} instead of []
   if (length(parameters) == 0) {
-    return(list())
+    return(structure(list(), names = character(0)))
   }
   
   # Get parameter names
