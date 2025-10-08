@@ -5,14 +5,14 @@
 #' @param api_key API key for authentication
 #' @param auth_header Name of the authentication header (default "Authorization")
 #' @param auth_prefix Prefix for the API key in the authentication header (default "Bearer")
-#' @param timeout Timeout in seconds for API requests (default 30)
+#' @param timeout Timeout in seconds for API requests (default 300)
 #'
 #' @return A list with API configuration
 #'
 #' @examples
 #' api_config <- create_api_config("https://api.example.com", 8080, "your-api-key")
 create_api_config <- function(base_url, port, api_key, auth_header = "Authorization", 
-                              auth_prefix = "Bearer", timeout = 30) {
+                              auth_prefix = "Bearer", timeout = 300) {
   if (!requireNamespace("httr", quietly = TRUE)) {
     stop("Package 'httr' is required. Please install it.")
   }

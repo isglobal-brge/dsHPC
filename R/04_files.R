@@ -35,7 +35,17 @@ upload_file <- function(config, content, filename) {
     return(TRUE)
   }
   
-  # Base64 encode the content
+  # Check size of content
+  content_size <- length(content)
+  size_mb <- content_size / (1024 * 1024)
+  
+  # Use optimized upload for large files (>100MB)
+  if (size_mb > 100) {
+    message(sprintf("Large file detected (%.1f MB). Using optimized upload...", size_mb))
+    return(upload_file_optimized(config, content, filename, file_hash))
+  }
+  
+  # For smaller files, use direct encoding
   content_base64 <- base64enc::base64encode(content)
   
   # Create request body
@@ -46,14 +56,90 @@ upload_file <- function(config, content, filename) {
     content_type = "application/octet-stream"
   )
   
+  # Set very long timeout to avoid issues
+  original_timeout <- config$timeout
+  config$timeout <- 31536000  # 1 year in seconds
+  
   # Upload the content
   tryCatch({
     response <- api_post(config, "/files/upload", body = body)
-    
-    # If we get here, upload was successful
     message("Content uploaded successfully.")
     return(TRUE)
   }, error = function(e) {
     stop(paste0("Error uploading content: ", e$message))
+  }, finally = {
+    config$timeout <- original_timeout
+  })
+}
+
+#' Upload large file with optimized memory usage
+#' 
+#' @param config API configuration
+#' @param content Raw content to upload
+#' @param filename Name for the file
+#' @param file_hash Pre-computed hash of the content
+#' @return TRUE if successful
+#' @keywords internal
+upload_file_optimized <- function(config, content, filename, file_hash) {
+  # Write to a temp file for more efficient processing
+  temp_file <- tempfile()
+  on.exit(unlink(temp_file), add = TRUE)
+  
+  # Write raw content to temp file
+  writeBin(content, temp_file)
+  
+  # Try to use system base64 command first (much faster and memory efficient)
+  if (Sys.which("base64") != "") {
+    message("  Using system base64 command for encoding...")
+    
+    # Universal approach: use base64 with input redirection
+    encoded_file <- tempfile()
+    on.exit(unlink(encoded_file), add = TRUE)
+    
+    # Using shell redirection
+    result <- system2("sh",
+                     args = c("-c", sprintf("base64 < %s > %s", shQuote(temp_file), shQuote(encoded_file))),
+                     stdout = FALSE, stderr = FALSE)
+    
+    if (result == 0) {
+      # Read the encoded content (it will have newlines, but that's OK for HTTP)
+      content_base64 <- readChar(encoded_file, file.info(encoded_file)$size)
+    } else {
+      # Fall back to R-based encoding if system command fails
+      message("  System base64 failed, falling back to R-based encoding...")
+      content_base64 <- base64enc::base64encode(temp_file)
+    }
+  } else {
+    # No system base64 available, use R directly
+    message("  Using R base64enc...")
+    # base64enc::base64encode can accept a filename as input (memory efficient)
+    content_base64 <- base64enc::base64encode(temp_file)
+  }
+  
+  # Create request body
+  body <- list(
+    file_hash = file_hash,
+    content = content_base64,
+    filename = filename,
+    content_type = "application/octet-stream"
+  )
+  
+  # Set a very long timeout
+  original_timeout <- config$timeout
+  config$timeout <- 31536000 # 1 year
+  
+  size_mb <- length(content) / (1024 * 1024)
+  message(sprintf("  Uploading %.1f MB file...", size_mb))
+  
+  # Upload the content
+  tryCatch({
+    response <- api_post(config, "/files/upload", body = body)
+    message("Large file uploaded successfully.")
+    return(TRUE)
+  }, error = function(e) {
+    stop(paste0("Error uploading large file: ", e$message))
+  }, finally = {
+    # Restore original timeout
+    config$timeout <- original_timeout
   })
 } 
