@@ -70,7 +70,8 @@ api_request <- function(config, endpoint, method = "GET", params = list(), body 
   # Prepare headers
   headers <- c(
     "Content-Type" = "application/json",
-    "Accept" = "application/json"
+    "Accept" = "application/json",
+    "Accept-Encoding" = "gzip, deflate"  # Explicitly request compression for large responses
   )
   
   # Add authentication header if API key is provided
