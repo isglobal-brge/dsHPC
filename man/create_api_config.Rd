@@ -10,7 +10,7 @@ create_api_config(
   api_key,
   auth_header = "Authorization",
   auth_prefix = "Bearer",
-  timeout = 30
+  timeout = 300
 )
 }
 \arguments{
@@ -24,7 +24,7 @@ create_api_config(
 
 \item{auth_prefix}{Prefix for the API key in the authentication header (default "Bearer")}
 
-\item{timeout}{Timeout in seconds for API requests (default 30)}
+\item{timeout}{Timeout in seconds for API requests (default 300)}
 }
 \value{
 A list with API configuration

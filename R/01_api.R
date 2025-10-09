@@ -8,6 +8,7 @@
 #' @param timeout Timeout in seconds for API requests (default 300)
 #'
 #' @return A list with API configuration
+#' @export
 #'
 #' @examples
 #' api_config <- create_api_config("https://api.example.com", 8080, "your-api-key")
