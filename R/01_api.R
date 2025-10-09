@@ -100,13 +100,15 @@ api_request <- function(config, endpoint, method = "GET", params = list(), body 
       url = url,
       query = params,
       httr::add_headers(.headers = headers),
+      httr::timeout(config$timeout)
     ),
     "POST" = httr::POST(
       url = url,
       query = params,
       httr::add_headers(.headers = headers),
       body = body,
-      encode = "json"
+      encode = "json",
+      httr::timeout(config$timeout)
     ),
     stop("Unsupported HTTP method: ", method)
   )
