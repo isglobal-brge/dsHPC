@@ -1,10 +1,18 @@
 Package: dsHPC
-Title: High-Performance Computing API Client
-Version: 0.0.0.9000
-Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Provides functions to connect to a REST API with JSON responses,
-    handling authentication and request construction.
+Title: High-Performance Computing API Client for DataSHIELD
+Version: 0.1.0
+Authors@R:
+    c(person("David", "Sarrat González", , "david.sarrat@isglobal.org", role = c("aut", "cre")),
+      person("Xavier", "Escribà-Montagut", , "xavier.escriba@isglobal.org", role = c("aut")),
+      person("Juan R", "González", , "juanr.gonzalez@isglobal.org", role = c("aut")))
+Description: Provides a comprehensive R client for interacting with DataSHIELD's 
+    High-Performance Computing (HPC) systems through REST APIs. Features include 
+    content-based caching with SHA-256 hashing for automatic deduplication, 
+    deterministic file compression for consistent hash generation, job submission 
+    and monitoring (both individual jobs and multi-step processing chains), and 
+    optimized file upload with base64 encoding. The package integrates with the 
+    'resourcer' framework for DataSHIELD compatibility and offers both simple and 
+    hash-based APIs for efficient workflow management in DataSHIELD environments.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
