@@ -30,50 +30,8 @@ submit_meta_job <- function(config, content, method_chain) {
   # Calculate content hash
   file_hash <- hash_content(content)
   
-  # Validate method_chain
-  if (!is.list(method_chain) || length(method_chain) == 0) {
-    stop("method_chain must be a non-empty list")
-  }
-  
-  # Process and validate each step in the chain
-  processed_chain <- list()
-  for (i in seq_along(method_chain)) {
-    step <- method_chain[[i]]
-    
-    if (!is.list(step)) {
-      stop(paste0("Step ", i, " in method_chain must be a list"))
-    }
-    
-    if (is.null(step$method_name) || !is.character(step$method_name)) {
-      stop(paste0("Step ", i, " must have a 'method_name' character field"))
-    }
-    
-    # Ensure parameters is a list (default to empty list if not provided)
-    if (is.null(step$parameters)) {
-      step$parameters <- list()
-    } else if (!is.list(step$parameters)) {
-      stop(paste0("Step ", i, " parameters must be a list"))
-    }
-    
-    # Sort parameters for consistency
-    sorted_params <- sort_parameters(step$parameters)
-    
-    processed_chain[[i]] <- list(
-      method_name = step$method_name,
-      parameters = sorted_params
-    )
-  }
-  
-  # Create request body
-  body <- list(
-    initial_file_hash = file_hash,
-    method_chain = processed_chain
-  )
-  
-  # Make API call
-  response <- api_post(config, "/submit-meta-job", body = body)
-  
-  return(response)
+  # Call the _by_hash version
+  return(submit_meta_job_by_hash(config, file_hash, method_chain))
 }
 
 #' Get the status of a meta-job
@@ -214,25 +172,12 @@ execute_processing_chain <- function(config, content, method_chain,
     stop("Failed to upload content")
   }
   
-  # Submit meta-job
-  message("Submitting meta-job with ", length(method_chain), " steps...")
-  meta_job_response <- submit_meta_job(config, content, method_chain)
+  # Calculate hash once
+  file_hash <- hash_content(content)
   
-  if (is.null(meta_job_response$meta_job_id)) {
-    stop("Failed to submit meta-job: ", 
-         ifelse(is.null(meta_job_response$message), "unknown error", meta_job_response$message))
-  }
-  
-  meta_job_id <- meta_job_response$meta_job_id
-  message("Meta-job submitted with ID: ", meta_job_id)
-  
-  # Wait for results
-  message("Waiting for processing to complete...")
-  results <- wait_for_meta_job_results(config, meta_job_id, timeout = timeout, 
-                                      interval = interval, parse_json = parse_json)
-  
-  message("Processing complete!")
-  return(results)
+  # Call the _by_hash version
+  return(execute_processing_chain_by_hash(config, file_hash, method_chain, 
+                                          timeout, interval, parse_json))
 }
 
 #' Get cached steps from a meta-job
