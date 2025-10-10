@@ -17,3 +17,6 @@ Imports:
     R6,
     methods,
     resourcer
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
