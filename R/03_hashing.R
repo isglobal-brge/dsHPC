@@ -3,6 +3,7 @@
 #' @param content The content to hash (raw vector, character, or other object)
 #'
 #' @return A character string with the content hash using SHA-256 algorithm
+#' @export
 #'
 #' @examples
 #' \dontrun{
@@ -35,6 +36,7 @@ hash_content <- function(content) {
 #' @param hashes Character vector of content hashes to check
 #'
 #' @return A list with two components: existing_hashes and missing_hashes
+#' @export
 #'
 #' @examples
 #' \dontrun{
@@ -70,6 +72,7 @@ check_existing_hashes <- function(config, hashes) {
 #' @param hash A single hash string to check
 #'
 #' @return Boolean indicating if the hash exists
+#' @export
 #'
 #' @examples
 #' \dontrun{

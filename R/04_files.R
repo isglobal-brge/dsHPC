@@ -5,6 +5,7 @@
 #' @param filename Name to use for the uploaded content
 #'
 #' @return TRUE if the content was successfully uploaded or already exists
+#' @export
 #'
 #' @examples
 #' \dontrun{

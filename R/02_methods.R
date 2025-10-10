@@ -3,6 +3,7 @@
 #' @param config API configuration created by create_api_config
 #'
 #' @return A named list of methods and their parameters
+#' @export
 #'
 #' @examples
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
