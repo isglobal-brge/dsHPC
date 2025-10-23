@@ -90,6 +90,9 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
   # Start timer
   start_time <- Sys.time()
   
+  # Track last displayed step to avoid repetition
+  last_step_displayed <- NULL
+  
   # Poll for completion
   while(TRUE) {
     # Check for timeout
@@ -103,21 +106,32 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
     status_info <- get_meta_job_status(config, meta_job_id)
     
     # Display current step info during processing (if available)
+    # Only show when step changes to avoid repetition
     if (!is.null(status_info$current_step_info)) {
       step_info <- status_info$current_step_info
-      total_steps <- length(status_info$chain)
       
-      # Build status message
-      status_msg <- sprintf("Processing step %d/%d: %s [%s]%s",
-                           step_info$step_number,
-                           total_steps,
-                           step_info$method_name,
-                           step_info$status_description,
-                           if(step_info$is_resubmitted) " (resubmitted)" else "")
+      # Create unique identifier for this step state
+      step_id <- paste0(step_info$step_number, "_", step_info$job_id, "_", step_info$job_status)
       
-      # Use carriage return to overwrite previous line
-      cat(sprintf("\r%s", status_msg))
-      flush.console()
+      if (is.null(last_step_displayed) || last_step_displayed != step_id) {
+        # Get total steps - chain might be a dataframe or list
+        total_steps <- if (is.data.frame(status_info$chain)) {
+          nrow(status_info$chain)
+        } else {
+          length(status_info$chain)
+        }
+        
+        # Build status message
+        status_msg <- sprintf("Step %d/%d: %s [%s]%s",
+                             step_info$step_number,
+                             total_steps,
+                             step_info$method_name,
+                             step_info$status_description,
+                             if(step_info$is_resubmitted) " (resubmitted)" else "")
+        
+        cat(status_msg, "\n")
+        last_step_displayed <- step_id
+      }
     }
     
     # Check if completed
