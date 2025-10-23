@@ -99,20 +99,32 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
     
     # Check if completed
     if (!is.null(status_info$status) && status_info$status == "completed") {
-      # Get the final output
-      output <- status_info$final_output
+      # Get the final output using the hash
+      final_hash <- status_info$final_output_hash
       
-      # Parse JSON if requested
-      if (parse_json && !is.null(output) && output != "") {
-        tryCatch({
-          output <- jsonlite::fromJSON(output)
-        }, error = function(e) {
-          warning("Failed to parse output as JSON: ", e$message)
-          # Return the raw output instead
-        })
+      if (is.null(final_hash) || final_hash == "") {
+        stop("Meta-job completed but no final_output_hash found")
       }
       
-      return(output)
+      # Retrieve content from server using hash
+      tryCatch({
+        response <- api_get(config, paste0("/files/", final_hash))
+        output <- response
+        
+        # Parse JSON if requested
+        if (parse_json && !is.null(output) && output != "") {
+          tryCatch({
+            output <- jsonlite::fromJSON(output)
+          }, error = function(e) {
+            warning("Failed to parse output as JSON: ", e$message)
+            # Return the raw output instead
+          })
+        }
+        
+        return(output)
+      }, error = function(e) {
+        stop(paste0("Failed to retrieve final output from hash ", final_hash, ": ", e$message))
+      })
     }
     
     # Check for error state
