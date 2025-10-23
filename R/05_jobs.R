@@ -1,3 +1,8 @@
+# Internal helper: NULL-coalescing operator
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
 #' Query a job execution
 #'
 #' @param config API configuration created by create_api_config
@@ -325,6 +330,9 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   # Query the job initially
   job_info <- api_post(config, "/query-job", body = body)
   
+  # Track last displayed status to avoid repetition
+  last_status_displayed <- NULL
+  
   # Loop until timeout or job completion
   while(is.null(job_info$status) || job_info$status != "CD") {
     # Check for timeout (only if specified)
@@ -334,6 +342,15 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
         stop(paste0("Timeout waiting for job to complete after ", timeout, " seconds. Current status: ", 
                     ifelse(is.null(job_info$status), "unknown", job_info$status)))
       }
+    }
+    
+    # Display job status (only when it changes)
+    current_status <- job_info$status
+    if (!is.null(current_status) && (is.null(last_status_displayed) || last_status_displayed != current_status)) {
+      status_desc <- job_info$status_detail %||% current_status
+      timestamp <- format(Sys.time(), "%H:%M:%S")
+      cat(sprintf("[%s] Job: %s [%s]\n", timestamp, current_status, status_desc))
+      last_status_displayed <- current_status
     }
     
     # Check for error state
