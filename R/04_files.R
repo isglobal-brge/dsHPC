@@ -102,9 +102,9 @@ upload_file_optimized <- function(config, content, filename, file_hash) {
     content_type = "application/octet-stream"
   )
   
-  # Set a very long timeout
+  # Set a very long timeout (use .Machine$integer.max for max safe integer)
   original_timeout <- config$timeout
-  config$timeout <- 31536000 # 1 year
+  config$timeout <- .Machine$integer.max
   
   size_mb <- length(content) / (1024 * 1024)
   message(sprintf("  Uploading %.1f MB file...", size_mb))
