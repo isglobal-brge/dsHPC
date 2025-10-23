@@ -1,3 +1,8 @@
+# Internal helper: NULL-coalescing operator
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
 #' Submit a meta-job with chained processing steps
 #'
 #' @param config API configuration created by create_api_config
@@ -97,8 +102,29 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
     # Get current status
     status_info <- get_meta_job_status(config, meta_job_id)
     
+    # Display current step info during processing (if available)
+    if (!is.null(status_info$current_step_info)) {
+      step_info <- status_info$current_step_info
+      total_steps <- length(status_info$chain)
+      
+      # Build status message
+      status_msg <- sprintf("Processing step %d/%d: %s [%s]%s",
+                           step_info$step_number,
+                           total_steps,
+                           step_info$method_name,
+                           step_info$status_description,
+                           if(step_info$is_resubmitted) " (resubmitted)" else "")
+      
+      # Use carriage return to overwrite previous line
+      cat(sprintf("\r%s", status_msg))
+      flush.console()
+    }
+    
     # Check if completed
     if (!is.null(status_info$status) && status_info$status == "completed") {
+      # Add newline after progress display
+      cat("\n")
+      
       # The server includes the final output directly in the meta-job response
       # No need to make a separate query - the chain is handled entirely server-side
       output <- status_info$final_output
@@ -122,8 +148,34 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
     
     # Check for error state
     if (!is.null(status_info$status) && status_info$status == "failed") {
-      stop(paste0("Meta-job failed with error: ", 
-                  ifelse(is.null(status_info$error), "unknown error", status_info$error)))
+      # Add newline after progress display
+      cat("\n")
+      
+      # Enhanced error message with step information
+      error_msg <- "Meta-job failed"
+      
+      if (!is.null(status_info$current_step_info)) {
+        step_info <- status_info$current_step_info
+        error_msg <- sprintf("Meta-job failed at step %d (%s): %s",
+                            step_info$step_number,
+                            step_info$method_name,
+                            status_info$error %||% "Unknown error")
+        
+        # Add job details if available
+        if (!is.null(step_info$job_status)) {
+          error_msg <- paste0(error_msg, 
+                             sprintf("\n  Job status: %s - %s",
+                                    step_info$job_status,
+                                    step_info$status_description))
+        }
+        if (!is.null(step_info$job_id)) {
+          error_msg <- paste0(error_msg, sprintf("\n  Job ID: %s", step_info$job_id))
+        }
+      } else {
+        error_msg <- paste0(error_msg, ": ", status_info$error %||% "Unknown error")
+      }
+      
+      stop(error_msg)
     }
     
     # Wait before polling again
