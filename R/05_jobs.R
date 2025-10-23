@@ -330,11 +330,15 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   # Query the job initially
   job_info <- api_post(config, "/query-job", body = body)
   
-  # Track last displayed status to avoid repetition
+  # Track last displayed status
   last_status_displayed <- NULL
+  status_start_time <- Sys.time()
   
-  # Loop until timeout or job completion
-  while(is.null(job_info$status) || job_info$status != "CD") {
+  # Define in-progress statuses (job is still being processed)
+  IN_PROGRESS_STATUSES <- c("PD", "R", "CG", "CF", "S", "ST")
+  
+  # Loop while job is in progress (exit on any terminal state)
+  while(is.null(job_info$status) || (job_info$status %in% IN_PROGRESS_STATUSES)) {
     # Check for timeout (only if specified)
     if (!is.na(timeout)) {
       elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
@@ -344,19 +348,21 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
       }
     }
     
-    # Display job status (only when it changes)
     current_status <- job_info$status
+    timestamp <- format(Sys.time(), "%H:%M:%S")
+    
+    # Check if status changed
     if (!is.null(current_status) && (is.null(last_status_displayed) || last_status_displayed != current_status)) {
+      # Status changed - show full info
       status_desc <- job_info$status_detail %||% current_status
-      timestamp <- format(Sys.time(), "%H:%M:%S")
       cat(sprintf("[%s] Job: %s [%s]\n", timestamp, current_status, status_desc))
       last_status_displayed <- current_status
-    }
-    
-    # Check for error state
-    if (!is.null(job_info$status) && job_info$status == "ER") {
-      stop(paste0("Job failed with error: ", 
-                  ifelse(is.null(job_info$error_details), "unknown error", job_info$error_details)))
+      status_start_time <- Sys.time()
+    } else if (!is.null(current_status)) {
+      # Status didn't change - show heartbeat with elapsed time
+      status_elapsed <- as.numeric(difftime(Sys.time(), status_start_time, units = "secs"))
+      status_desc <- job_info$status_detail %||% current_status
+      cat(sprintf("[%s] Job: %s [%s] (%.0fs)\n", timestamp, current_status, status_desc, status_elapsed))
     }
     
     # Wait before polling again
@@ -366,18 +372,25 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
     job_info <- api_post(config, "/query-job", body = body)
   }
   
-  # Get the output
-  output <- job_info$output
-  
-  # Parse JSON if requested
-  if (parse_json && !is.null(output) && output != "") {
-    tryCatch({
-      output <- jsonlite::fromJSON(output)
-    }, error = function(e) {
-      warning("Failed to parse output as JSON: ", e$message)
-      # Return the raw output instead
-    })
+  # Job reached terminal state - check if it succeeded or failed
+  if (job_info$status == "CD") {
+    # Job completed successfully
+    output <- job_info$output
+    
+    # Parse JSON if requested
+    if (parse_json && !is.null(output) && output != "") {
+      tryCatch({
+        output <- jsonlite::fromJSON(output)
+      }, error = function(e) {
+        warning("Failed to parse output as JSON: ", e$message)
+        # Return the raw output instead
+      })
+    }
+    
+    return(output)
+  } else {
+    # Job failed or was cancelled
+    error_details <- job_info$error_details %||% job_info$message %||% "No error details available"
+    stop(paste0("Job terminated with status ", job_info$status, ": ", error_details))
   }
-  
-  return(output)
 }
