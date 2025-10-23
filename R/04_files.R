@@ -89,33 +89,10 @@ upload_file_optimized <- function(config, content, filename, file_hash) {
   # Write raw content to temp file
   writeBin(content, temp_file)
   
-  # Try to use system base64 command first (much faster and memory efficient)
-  if (Sys.which("base64") != "") {
-    message("  Using system base64 command for encoding...")
-    
-    # Universal approach: use base64 with input redirection
-    encoded_file <- tempfile()
-    on.exit(unlink(encoded_file), add = TRUE)
-    
-    # Using shell redirection
-    result <- system2("sh",
-                     args = c("-c", sprintf("base64 < %s > %s", shQuote(temp_file), shQuote(encoded_file))),
-                     stdout = FALSE, stderr = FALSE)
-    
-    if (result == 0) {
-      # Read the encoded content (it will have newlines, but that's OK for HTTP)
-      content_base64 <- readChar(encoded_file, file.info(encoded_file)$size)
-    } else {
-      # Fall back to R-based encoding if system command fails
-      message("  System base64 failed, falling back to R-based encoding...")
-      content_base64 <- base64enc::base64encode(temp_file)
-    }
-  } else {
-    # No system base64 available, use R directly
-    message("  Using R base64enc...")
-    # base64enc::base64encode can accept a filename as input (memory efficient)
-    content_base64 <- base64enc::base64encode(temp_file)
-  }
+  # Use R base64enc for reliable encoding
+  # base64enc::base64encode can accept a filename as input (memory efficient)
+  message("  Using R base64enc for reliable encoding...")
+  content_base64 <- base64enc::base64encode(temp_file)
   
   # Create request body
   body <- list(
