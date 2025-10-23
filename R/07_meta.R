@@ -99,39 +99,25 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
     
     # Check if completed
     if (!is.null(status_info$status) && status_info$status == "completed") {
-      # Get the final job ID
-      final_job_id <- status_info$final_job_id
+      # The server includes the final output directly in the meta-job response
+      # No need to make a separate query - the chain is handled entirely server-side
+      output <- status_info$final_output
       
-      if (is.null(final_job_id) || final_job_id == "") {
-        stop("Meta-job completed but no final_job_id found")
+      if (is.null(output)) {
+        stop("Meta-job completed but no final_output provided by server")
       }
       
-      # Retrieve output from the final job
-      tryCatch({
-        job_result <- get_job_by_id(config, final_job_id)
-        
-        # Check if job completed successfully
-        if (is.null(job_result$status) || job_result$status != "completed") {
-          stop(paste0("Final job ", final_job_id, " has status: ", job_result$status))
-        }
-        
-        # Get the output
-        output <- job_result$data
-        
-        # Parse JSON if requested
-        if (parse_json && !is.null(output) && output != "") {
-          tryCatch({
-            output <- jsonlite::fromJSON(output)
-          }, error = function(e) {
-            warning("Failed to parse output as JSON: ", e$message)
-            # Return the raw output instead
-          })
-        }
-        
-        return(output)
-      }, error = function(e) {
-        stop(paste0("Failed to retrieve output from final job ", final_job_id, ": ", e$message))
-      })
+      # Parse JSON if requested
+      if (parse_json && !is.null(output) && output != "") {
+        tryCatch({
+          output <- jsonlite::fromJSON(output)
+        }, error = function(e) {
+          warning("Failed to parse output as JSON: ", e$message)
+          # Return the raw output instead
+        })
+      }
+      
+      return(output)
     }
     
     # Check for error state
