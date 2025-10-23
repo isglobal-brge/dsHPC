@@ -90,8 +90,9 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
   # Start timer
   start_time <- Sys.time()
   
-  # Track last displayed step to avoid repetition
+  # Track last displayed step
   last_step_displayed <- NULL
+  step_start_time <- Sys.time()
   
   # Poll for completion
   while(TRUE) {
@@ -108,23 +109,25 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
     status_info <- get_meta_job_status(config, meta_job_id)
     
     # Display current step info during processing (if available)
-    # Only show when step changes to avoid repetition
     if (!is.null(status_info$current_step_info)) {
       step_info <- status_info$current_step_info
+      
+      # Get total steps - chain might be a dataframe or list
+      total_steps <- if (is.data.frame(status_info$chain)) {
+        nrow(status_info$chain)
+      } else {
+        length(status_info$chain)
+      }
       
       # Create unique identifier for this step state
       step_id <- paste0(step_info$step_number, "_", step_info$job_id, "_", step_info$job_status)
       
+      timestamp <- format(Sys.time(), "%H:%M:%S")
+      
       if (is.null(last_step_displayed) || last_step_displayed != step_id) {
-        # Get total steps - chain might be a dataframe or list
-        total_steps <- if (is.data.frame(status_info$chain)) {
-          nrow(status_info$chain)
-        } else {
-          length(status_info$chain)
-        }
-        
-        # Build status message
-        status_msg <- sprintf("Step %d/%d: %s [%s]%s",
+        # Step/status changed - show full info
+        status_msg <- sprintf("[%s] Step %d/%d: %s [%s]%s",
+                             timestamp,
                              step_info$step_number,
                              total_steps,
                              step_info$method_name,
@@ -133,6 +136,19 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
         
         cat(status_msg, "\n")
         last_step_displayed <- step_id
+        step_start_time <- Sys.time()
+      } else {
+        # Same step/status - show heartbeat with elapsed time
+        step_elapsed <- as.numeric(difftime(Sys.time(), step_start_time, units = "secs"))
+        status_msg <- sprintf("[%s] Step %d/%d: %s [%s] (%.0fs)",
+                             timestamp,
+                             step_info$step_number,
+                             total_steps,
+                             step_info$method_name,
+                             step_info$status_description,
+                             step_elapsed)
+        
+        cat(status_msg, "\n")
       }
     }
     
