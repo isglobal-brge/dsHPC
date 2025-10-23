@@ -95,7 +95,7 @@ get_job_output <- function(config, file_path, method_name, parameters = list(), 
 #' @param content Content to process (raw vector, character, or other object)
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
-#' @param timeout Maximum time to wait in seconds (default: 300)
+#' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the output as JSON (default: TRUE)
 #' @param validate_parameters Whether to validate parameters against method specification (default: TRUE)
@@ -110,7 +110,7 @@ get_job_output <- function(config, file_path, method_name, parameters = list(), 
 #' results <- wait_for_job_results(config, content, "analyze_text", list(parameter1 = "value1"))
 #' }
 wait_for_job_results <- function(config, content, method_name, parameters = list(), 
-                                 timeout = 300, interval = 5, parse_json = TRUE,
+                                 timeout = NA, interval = 5, parse_json = TRUE,
                                  validate_parameters = TRUE) {
   # Calculate content hash once for efficiency
   file_hash <- hash_content(content)
@@ -275,7 +275,7 @@ get_job_output_by_hash <- function(config, file_hash, method_name, parameters = 
 #' @param file_hash Hash of the content (as returned by hash_content)
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
-#' @param timeout Maximum time to wait in seconds (default: 300)
+#' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the output as JSON (default: TRUE)
 #' @param validate_parameters Whether to validate parameters against method specification (default: TRUE)
@@ -290,7 +290,7 @@ get_job_output_by_hash <- function(config, file_hash, method_name, parameters = 
 #' results <- wait_for_job_results_by_hash(config, file_hash, "analyze_text", list(parameter1 = "value1"))
 #' }
 wait_for_job_results_by_hash <- function(config, file_hash, method_name, parameters = list(), 
-                                         timeout = 300, interval = 5, parse_json = TRUE,
+                                         timeout = NA, interval = 5, parse_json = TRUE,
                                          validate_parameters = TRUE) {
   # Validate the hash input
   if (!is.character(file_hash) || length(file_hash) != 1) {
@@ -327,11 +327,13 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   
   # Loop until timeout or job completion
   while(is.null(job_info$status) || job_info$status != "CD") {
-    # Check for timeout
-    elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-    if (elapsed > timeout) {
-      stop(paste0("Timeout waiting for job to complete. Current status: ", 
-                  ifelse(is.null(job_info$status), "unknown", job_info$status)))
+    # Check for timeout (only if specified)
+    if (!is.na(timeout)) {
+      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      if (elapsed > timeout) {
+        stop(paste0("Timeout waiting for job to complete after ", timeout, " seconds. Current status: ", 
+                    ifelse(is.null(job_info$status), "unknown", job_info$status)))
+      }
     }
     
     # Check for error state

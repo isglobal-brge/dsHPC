@@ -67,7 +67,7 @@ get_meta_job_status <- function(config, meta_job_id) {
 #'
 #' @param config API configuration created by create_api_config
 #' @param meta_job_id ID of the meta-job to wait for
-#' @param timeout Maximum time to wait in seconds (default: 600)
+#' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the final output as JSON (default: TRUE)
 #'
@@ -79,7 +79,7 @@ get_meta_job_status <- function(config, meta_job_id) {
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
 #' results <- wait_for_meta_job_results(config, meta_job_id, timeout = 900)
 #' }
-wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interval = 5, parse_json = TRUE) {
+wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interval = 5, parse_json = TRUE) {
   if (!is.character(meta_job_id) || length(meta_job_id) != 1) {
     stop("meta_job_id must be a single character string")
   }
@@ -95,11 +95,13 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
   
   # Poll for completion
   while(TRUE) {
-    # Check for timeout
-    elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-    if (elapsed > timeout) {
-      stop(paste0("Timeout waiting for meta-job to complete. Current status: ", 
-                  ifelse(is.null(status_info$status), "unknown", status_info$status)))
+    # Check for timeout (only if specified)
+    if (!is.na(timeout)) {
+      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      if (elapsed > timeout) {
+        stop(paste0("Timeout waiting for meta-job to complete after ", timeout, " seconds. Current status: ", 
+                    ifelse(is.null(status_info$status), "unknown", status_info$status)))
+      }
     }
     
     # Get current status
@@ -206,7 +208,7 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
 #' @param content Content to process (raw vector, character, or other object)
 #' @param method_chain List of method specifications, each with method_name and parameters
 #' @param upload_filename Name to use when uploading the content (default: "input_data")
-#' @param timeout Maximum time to wait in seconds (default: 600)
+#' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the final output as JSON (default: TRUE)
 #'
@@ -234,7 +236,7 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = 600, interv
 #' }
 execute_processing_chain <- function(config, content, method_chain, 
                                    upload_filename = "input_data",
-                                   timeout = 600, interval = 5, parse_json = TRUE) {
+                                   timeout = NA, interval = 5, parse_json = TRUE) {
   # Upload the content first
   message("Uploading content...")
   upload_success <- upload_file(config, content, upload_filename)
@@ -410,7 +412,7 @@ submit_meta_job_by_hash <- function(config, file_hash, method_chain) {
 #' results <- execute_processing_chain_by_hash(config, file_hash, chain)
 #' }
 execute_processing_chain_by_hash <- function(config, file_hash, method_chain, 
-                                             timeout = 600, interval = 5, parse_json = TRUE) {
+                                            timeout = NA, interval = 5, parse_json = TRUE) {
   # Validate file_hash
   if (!is.character(file_hash) || length(file_hash) != 1) {
     stop("file_hash must be a single character string")
