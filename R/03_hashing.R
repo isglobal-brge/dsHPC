@@ -94,3 +94,80 @@ hash_exists <- function(config, hash) {
   # Return TRUE if hash is in existing_hashes
   return(hash %in% result$existing_hashes)
 }
+
+#' Create an incremental hash calculator
+#'
+#' @return A list with methods to add data and finalize the hash
+#' @export
+#'
+#' @details
+#' This function creates an incremental hash calculator that allows you to
+#' add data in chunks and compute the final hash without needing all data
+#' in memory at once.
+#'
+#' @examples
+#' \dontrun{
+#' # Create incremental hasher
+#' hasher <- create_incremental_hasher()
+#' 
+#' # Add chunks as you process them
+#' hasher$add(chunk1)
+#' hasher$add(chunk2)
+#' hasher$add(chunk3)
+#' 
+#' # Get final hash
+#' final_hash <- hasher$finalize()
+#' }
+create_incremental_hasher <- function() {
+  if (!requireNamespace("digest", quietly = TRUE)) {
+    stop("Package 'digest' is required. Please install it.")
+  }
+  
+  # Internal state
+  accumulated_data <- list()
+  finalized <- FALSE
+  
+  list(
+    add = function(chunk) {
+      if (finalized) {
+        stop("Cannot add data after finalizing hash")
+      }
+      
+      # Convert to raw if needed
+      if (!is.raw(chunk)) {
+        if (is.character(chunk)) {
+          chunk <- charToRaw(paste(chunk, collapse = "\n"))
+        } else {
+          chunk <- serialize(chunk, NULL)
+        }
+      }
+      
+      # Accumulate chunk
+      accumulated_data <<- c(accumulated_data, list(chunk))
+    },
+    
+    finalize = function() {
+      if (finalized) {
+        stop("Hash already finalized")
+      }
+      
+      finalized <<- TRUE
+      
+      # Combine all accumulated data
+      all_data <- do.call(c, accumulated_data)
+      
+      # Calculate hash
+      hash <- digest::digest(all_data, algo = "sha256", serialize = FALSE)
+      
+      # Free accumulated data
+      accumulated_data <<- list()
+      
+      return(hash)
+    },
+    
+    reset = function() {
+      accumulated_data <<- list()
+      finalized <<- FALSE
+    }
+  )
+}
