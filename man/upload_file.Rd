@@ -4,14 +4,16 @@
 \alias{upload_file}
 \title{Upload content to the HPC resource}
 \usage{
-upload_file(config, content, filename)
+upload_file(config, content, filename, use_chunked_threshold_mb = 100)
 }
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{content}{Content to upload (raw vector, character, or other object)}
+\item{content}{Content to upload (raw vector, character, file path, or other object)}
 
 \item{filename}{Name to use for the uploaded content}
+
+\item{use_chunked_threshold_mb}{Threshold in MB for using chunked upload (default: 100)}
 }
 \value{
 TRUE if the content was successfully uploaded or already exists
@@ -19,10 +21,23 @@ TRUE if the content was successfully uploaded or already exists
 \description{
 Upload content to the HPC resource
 }
+\details{
+This function automatically detects if content is a file path and uses chunked
+upload for files larger than the threshold. For in-memory objects, it uses the
+standard upload method. Chunked upload is more memory-efficient for large files.
+}
 \examples{
 \dontrun{
 config <- create_api_config("http://localhost", 9000, "please_change_me")
+
+# Upload in-memory content
 content <- "Hello, World!"
 upload_file(config, content, "hello.txt")
+
+# Upload file (automatically uses chunked upload if > 100 MB)
+upload_file(config, "large_dataset.rds", "dataset.rds")
+
+# Customize chunked threshold
+upload_file(config, "medium_file.csv", "data.csv", use_chunked_threshold_mb = 50)
 }
 }

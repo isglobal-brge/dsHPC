@@ -9,7 +9,7 @@ execute_processing_chain(
   content,
   method_chain,
   upload_filename = "input_data",
-  timeout = 600,
+  timeout = NA,
   interval = 5,
   parse_json = TRUE
 )
@@ -23,7 +23,7 @@ execute_processing_chain(
 
 \item{upload_filename}{Name to use when uploading the content (default: "input_data")}
 
-\item{timeout}{Maximum time to wait in seconds (default: 600)}
+\item{timeout}{Maximum time to wait in seconds (default: NA for no timeout)}
 
 \item{interval}{Polling interval in seconds (default: 5)}
 

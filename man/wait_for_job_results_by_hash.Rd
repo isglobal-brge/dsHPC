@@ -9,7 +9,7 @@ wait_for_job_results_by_hash(
   file_hash,
   method_name,
   parameters = list(),
-  timeout = 300,
+  timeout = NA,
   interval = 5,
   parse_json = TRUE,
   validate_parameters = TRUE
@@ -24,7 +24,7 @@ wait_for_job_results_by_hash(
 
 \item{parameters}{Parameters used for the method}
 
-\item{timeout}{Maximum time to wait in seconds (default: 300)}
+\item{timeout}{Maximum time to wait in seconds (default: NA for no timeout)}
 
 \item{interval}{Polling interval in seconds (default: 5)}
 

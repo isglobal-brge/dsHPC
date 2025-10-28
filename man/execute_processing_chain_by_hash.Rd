@@ -8,7 +8,7 @@ execute_processing_chain_by_hash(
   config,
   file_hash,
   method_chain,
-  timeout = 600,
+  timeout = NA,
   interval = 5,
   parse_json = TRUE
 )

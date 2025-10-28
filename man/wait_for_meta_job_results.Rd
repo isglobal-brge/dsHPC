@@ -7,7 +7,7 @@
 wait_for_meta_job_results(
   config,
   meta_job_id,
-  timeout = 600,
+  timeout = NA,
   interval = 5,
   parse_json = TRUE
 )
@@ -17,7 +17,7 @@ wait_for_meta_job_results(
 
 \item{meta_job_id}{ID of the meta-job to wait for}
 
-\item{timeout}{Maximum time to wait in seconds (default: 600)}
+\item{timeout}{Maximum time to wait in seconds (default: NA for no timeout)}
 
 \item{interval}{Polling interval in seconds (default: 5)}
 
