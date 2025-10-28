@@ -253,18 +253,15 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
 execute_processing_chain <- function(config, content, method_chain, 
                                    upload_filename = "input_data",
                                    timeout = NA, interval = 5, parse_json = TRUE) {
-  # Upload the content first
+  # Upload the content first - this returns the hash of the uploaded content
   message("Uploading content...")
-  upload_success <- upload_file(config, content, upload_filename)
+  file_hash <- upload_file(config, content, upload_filename)
   
-  if (!upload_success) {
-    stop("Failed to upload content")
-  }
+  # The hash returned is the hash of the complete content (before chunking)
+  # - For files: hash of the complete file
+  # - For objects: hash of the complete serialized object
   
-  # Calculate hash once
-  file_hash <- hash_content(content)
-  
-  # Call the _by_hash version
+  # Call the _by_hash version with the hash from upload
   return(execute_processing_chain_by_hash(config, file_hash, method_chain, 
                                           timeout, interval, parse_json))
 }

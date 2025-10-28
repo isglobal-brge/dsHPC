@@ -39,11 +39,18 @@ upload_file <- function(config, content, filename, chunk_size_mb = 10, show_prog
   # Check if content is a file path
   if (is.character(content) && length(content) == 1 && file.exists(content)) {
     # Content is a file path - use upload_file_chunked
-    return(upload_file_chunked(config, content, filename, chunk_size_mb, 
-                              content_type = "application/octet-stream"))
+    # Return the hash of the complete file
+    file_hash <- hash_file(content)
+    success <- upload_file_chunked(config, content, filename, chunk_size_mb, 
+                                   content_type = "application/octet-stream")
+    if (!success) {
+      stop("Failed to upload file")
+    }
+    return(file_hash)
   }
   
   # Content is an in-memory object - use upload_object
+  # This returns the hash directly
   return(upload_object(config, content, filename, chunk_size_mb, show_progress))
 }
 
@@ -90,16 +97,36 @@ upload_object <- function(config, obj, filename, chunk_size_mb = 10, show_progre
     stop("Package 'base64enc' is required. Please install it.")
   }
   
-  # Serialize object to raw bytes
-  message("Serializing R object...")
-  serialized <- serialize(obj, NULL)
-  total_size <- length(serialized)
+  # IMPORTANT: For R objects, we hash the ORIGINAL object (if it's raw bytes)
+  # If obj is already raw bytes (e.g., from readBin), hash those directly
+  # If obj is an R object, we'll serialize it but the hash should be of the original data
   
-  message(sprintf("Object serialized: %.2f MB", total_size / (1024^2)))
-  
-  # Calculate hash
-  file_hash <- hash_content(serialized)
-  message(sprintf("Hash: %s", file_hash))
+  # Determine if this is raw bytes or needs serialization
+  if (is.raw(obj)) {
+    # This is already raw bytes (e.g., file loaded with readBin)
+    # Calculate hash BEFORE any processing
+    message("Calculating hash of original file...")
+    file_hash <- hash_content(obj)
+    message(sprintf("Hash: %s", file_hash))
+    
+    # Use the raw bytes directly (no serialization needed)
+    serialized <- obj
+    total_size <- length(serialized)
+    message(sprintf("File size: %.2f MB", total_size / (1024^2)))
+  } else {
+    # This is an R object that needs serialization
+    # For objects, we serialize first, then hash the serialized form
+    # (because the "file" IS the serialization)
+    message("Serializing R object...")
+    serialized <- serialize(obj, NULL)
+    total_size <- length(serialized)
+    
+    message(sprintf("Object serialized: %.2f MB", total_size / (1024^2)))
+    
+    # Calculate hash of serialized form (this IS the file content)
+    file_hash <- hash_content(serialized)
+    message(sprintf("Hash: %s", file_hash))
+  }
   
   # Check if already exists
   if (hash_exists(config, file_hash)) {
@@ -139,7 +166,12 @@ upload_object <- function(config, obj, filename, chunk_size_mb = 10, show_progre
   rm(serialized)
   gc(verbose = FALSE)
   
-  return(result)
+  if (!result) {
+    stop("Failed to upload object")
+  }
+  
+  # Return the hash of the complete serialized object (before chunking)
+  return(file_hash)
 }
 
 #' Calculate hash of a file efficiently
