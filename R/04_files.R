@@ -159,6 +159,7 @@ upload_file_optimized <- function(config, content, filename, file_hash) {
 #' @param file_path Path to the file to hash
 #'
 #' @return SHA-256 hash of the file as a character string
+#' @export
 #'
 #' @details
 #' This function calculates the SHA-256 hash of a file without loading the
@@ -196,6 +197,7 @@ hash_file <- function(file_path) {
 #' @param content_type MIME type of the content (default: "application/octet-stream")
 #'
 #' @return TRUE if the upload was successful
+#' @export
 #'
 #' @details
 #' This function uploads large files in chunks without loading the entire file
@@ -236,7 +238,7 @@ upload_file_chunked <- function(config, file_path, filename = NULL,
   message(sprintf("Preparing to upload file: %s (%.2f MB)", 
                   filename, file_size / (1024^2)))
   
-  # Calculate file hash efficiently
+  # Calculate file hash efficiently (does NOT load file into memory)
   message("Calculating file hash...")
   file_hash <- hash_file(file_path)
   message(sprintf("File hash: %s", file_hash))
@@ -245,6 +247,21 @@ upload_file_chunked <- function(config, file_path, filename = NULL,
   if (hash_exists(config, file_hash)) {
     message("File already exists in the database (based on hash).")
     return(TRUE)
+  }
+  
+  # Detect available memory and adjust chunk size if needed
+  gc_info <- gc(verbose = FALSE)
+  available_mb <- sum(gc_info[, 4] - gc_info[, 2])  # trigger - used
+  
+  # Ensure chunk size doesn't exceed 20% of available memory
+  # (need ~1.5x for base64 encoding)
+  max_safe_chunk_mb <- (available_mb * 0.2) / 1.5
+  
+  if (chunk_size_mb > max_safe_chunk_mb) {
+    old_size <- chunk_size_mb
+    chunk_size_mb <- max(1, floor(max_safe_chunk_mb))  # At least 1 MB
+    message(sprintf("Adjusting chunk size from %.1f MB to %.1f MB based on available memory",
+                   old_size, chunk_size_mb))
   }
   
   # Calculate chunk size in bytes
@@ -336,6 +353,10 @@ upload_file_chunked <- function(config, file_path, filename = NULL,
       progress_pct <- (bytes_uploaded / file_size) * 100
       message(sprintf("  Chunk %d/%d uploaded (%.1f%%)", 
                      chunk_num, total_chunks, progress_pct))
+      
+      # Free memory explicitly after each chunk
+      rm(chunk_data, chunk_base64, chunk_response)
+      gc(verbose = FALSE)
     }
     
     # Finalize upload
