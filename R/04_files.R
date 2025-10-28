@@ -133,7 +133,7 @@ upload_object <- function(config, obj, filename, chunk_size_mb = 10, show_progre
     message("Object already exists in the database (based on hash).")
     rm(serialized)
     gc(verbose = FALSE)
-    return(TRUE)
+    return(file_hash)  # Return hash instead of TRUE
   }
   
   # Create chunk provider for serialized bytes
