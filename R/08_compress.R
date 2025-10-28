@@ -138,41 +138,9 @@ upload_file_compressed <- function(config, content, filename,
     return(TRUE)
   }
   
-  # Check size of content
-  content_size <- length(content)
-  size_mb <- content_size / (1024 * 1024)
-  
-  # Use optimized upload for large files (>100MB)
-  if (size_mb > 100) {
-    message(sprintf("Large file detected (%.1f MB). Using optimized upload...", size_mb))
-    return(upload_file_optimized(config, content, filename, file_hash))
-  }
-  
-  # For smaller files, use direct encoding
-  content_base64 <- base64enc::base64encode(content)
-  
-  # Create request body
-  body <- list(
-    file_hash = file_hash,
-    content = content_base64,
-    filename = filename,
-    content_type = "application/octet-stream"
-  )
-  
-  # Set very long timeout to avoid issues
-  original_timeout <- config$timeout
-  config$timeout <- 31536000  # 1 year in seconds
-  
-  # Upload the content
-  tryCatch({
-    response <- api_post(config, "/files/upload", body = body)
-    message("Content uploaded successfully.")
-    return(TRUE)
-  }, error = function(e) {
-    stop(paste0("Error uploading content: ", e$message))
-  }, finally = {
-    config$timeout <- original_timeout
-  })
+  # Use upload_object to handle the compressed content (always uses chunked system)
+  # The content is already in raw format (compressed)
+  return(upload_object(config, content, filename, chunk_size_mb = 10, show_progress = TRUE))
 }
 
 #' Get compression statistics for content
