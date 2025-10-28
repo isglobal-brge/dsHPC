@@ -4,16 +4,24 @@
 \alias{upload_file}
 \title{Upload content to the HPC resource}
 \usage{
-upload_file(config, content, filename, use_chunked_threshold_mb = 100)
+upload_file(
+  config,
+  content,
+  filename,
+  chunk_size_mb = 10,
+  show_progress = TRUE
+)
 }
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{content}{Content to upload (raw vector, character, file path, or other object)}
+\item{content}{Content to upload (file path, raw vector, character, or other R object)}
 
 \item{filename}{Name to use for the uploaded content}
 
-\item{use_chunked_threshold_mb}{Threshold in MB for using chunked upload (default: 100)}
+\item{chunk_size_mb}{Size of each chunk in megabytes (default: 10)}
+
+\item{show_progress}{Show progress bar (default: TRUE)}
 }
 \value{
 TRUE if the content was successfully uploaded or already exists
@@ -22,22 +30,30 @@ TRUE if the content was successfully uploaded or already exists
 Upload content to the HPC resource
 }
 \details{
-This function automatically detects if content is a file path and uses chunked
-upload for files larger than the threshold. For in-memory objects, it uses the
-standard upload method. Chunked upload is more memory-efficient for large files.
+This function uses chunked upload for optimal memory efficiency.
+\itemize{
+\item For file paths: Uses hash_file() for incremental hashing, then chunked upload
+\item For R objects: Serializes to raw, then uses chunked upload without temp files
+\item Progress bar is shown by default (requires 'progress' package)
+}
+
+The function automatically detects the content type and handles it appropriately.
+All uploads go through the chunked system which is memory-efficient regardless
+of file size.
 }
 \examples{
 \dontrun{
-config <- create_api_config("http://localhost", 9000, "please_change_me")
+config <- create_api_config("http://localhost", 8001, "key",
+                            auth_header = "X-API-Key", auth_prefix = "")
 
-# Upload in-memory content
-content <- "Hello, World!"
-upload_file(config, content, "hello.txt")
-
-# Upload file (automatically uses chunked upload if > 100 MB)
+# Upload file from disk (chunked upload, no memory issues)
 upload_file(config, "large_dataset.rds", "dataset.rds")
 
-# Customize chunked threshold
-upload_file(config, "medium_file.csv", "data.csv", use_chunked_threshold_mb = 50)
+# Upload R object (serialized and chunked)
+my_data <- data.frame(x = 1:1000000, y = rnorm(1000000))
+upload_file(config, my_data, "data.rds")
+
+# Upload with custom chunk size
+upload_file(config, "file.csv", "data.csv", chunk_size_mb = 5)
 }
 }

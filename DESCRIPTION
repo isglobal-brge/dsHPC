@@ -8,11 +8,12 @@ Authors@R:
 Description: Provides a comprehensive R client for interacting with DataSHIELD's 
     High-Performance Computing (HPC) systems through REST APIs. Features include 
     content-based caching with SHA-256 hashing for automatic deduplication, 
-    deterministic file compression for consistent hash generation, job submission 
-    and monitoring (both individual jobs and multi-step processing chains), and 
-    optimized file upload with base64 encoding. The package integrates with the 
-    'resourcer' framework for DataSHIELD compatibility and offers both simple and 
-    hash-based APIs for efficient workflow management in DataSHIELD environments.
+    deterministic file compression for consistent hash generation, memory-efficient 
+    chunked file uploads with progress tracking, job submission and monitoring 
+    (both individual jobs and multi-step processing chains), and flexible APIs for 
+    custom upload workflows. The package integrates with the 'resourcer' framework 
+    for DataSHIELD compatibility and offers imperative, functional, and helper APIs 
+    for efficient workflow management in DataSHIELD environments.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -26,5 +27,6 @@ Imports:
     methods,
     resourcer
 Suggests:
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    progress
 Config/testthat/edition: 3

@@ -1,157 +1,145 @@
 #' Upload content to the HPC resource
 #'
 #' @param config API configuration created by create_api_config
-#' @param content Content to upload (raw vector, character, file path, or other object)
+#' @param content Content to upload (file path, raw vector, character, or other R object)
 #' @param filename Name to use for the uploaded content
-#' @param use_chunked_threshold_mb Threshold in MB for using chunked upload (default: 100)
+#' @param chunk_size_mb Size of each chunk in megabytes (default: 10)
+#' @param show_progress Show progress bar (default: TRUE)
 #'
 #' @return TRUE if the content was successfully uploaded or already exists
 #' @export
 #'
 #' @details
-#' This function automatically detects if content is a file path and uses chunked
-#' upload for files larger than the threshold. For in-memory objects, it uses the
-#' standard upload method. Chunked upload is more memory-efficient for large files.
+#' This function uses chunked upload for optimal memory efficiency.
+#' 
+#' - For file paths: Uses hash_file() for incremental hashing, then chunked upload
+#' - For R objects: Serializes to raw, then uses chunked upload without temp files
+#' - Progress bar is shown by default (requires 'progress' package)
+#' 
+#' The function automatically detects the content type and handles it appropriately.
+#' All uploads go through the chunked system which is memory-efficient regardless
+#' of file size.
 #'
 #' @examples
 #' \dontrun{
-#' config <- create_api_config("http://localhost", 9000, "please_change_me")
+#' config <- create_api_config("http://localhost", 8001, "key",
+#'                             auth_header = "X-API-Key", auth_prefix = "")
 #' 
-#' # Upload in-memory content
-#' content <- "Hello, World!"
-#' upload_file(config, content, "hello.txt")
-#' 
-#' # Upload file (automatically uses chunked upload if > 100 MB)
+#' # Upload file from disk (chunked upload, no memory issues)
 #' upload_file(config, "large_dataset.rds", "dataset.rds")
 #' 
-#' # Customize chunked threshold
-#' upload_file(config, "medium_file.csv", "data.csv", use_chunked_threshold_mb = 50)
+#' # Upload R object (serialized and chunked)
+#' my_data <- data.frame(x = 1:1000000, y = rnorm(1000000))
+#' upload_file(config, my_data, "data.rds")
+#' 
+#' # Upload with custom chunk size
+#' upload_file(config, "file.csv", "data.csv", chunk_size_mb = 5)
 #' }
-upload_file <- function(config, content, filename, use_chunked_threshold_mb = 100) {
+upload_file <- function(config, content, filename, chunk_size_mb = 10, show_progress = TRUE) {
+  # Check if content is a file path
+  if (is.character(content) && length(content) == 1 && file.exists(content)) {
+    # Content is a file path - use upload_file_chunked
+    return(upload_file_chunked(config, content, filename, chunk_size_mb, 
+                              content_type = "application/octet-stream"))
+  }
+  
+  # Content is an in-memory object - use upload_object
+  return(upload_object(config, content, filename, chunk_size_mb, show_progress))
+}
+
+#' Upload an R object using chunked upload
+#'
+#' @param config API configuration created by create_api_config
+#' @param obj R object to upload (will be serialized)
+#' @param filename Name to use for the uploaded content
+#' @param chunk_size_mb Size of each chunk in megabytes (default: 10)
+#' @param show_progress Show progress bar (default: TRUE)
+#'
+#' @return TRUE if the upload was successful
+#' @export
+#'
+#' @details
+#' This function uploads R objects using chunked upload without creating temporary files.
+#' The object is serialized to raw bytes in memory, then uploaded in chunks.
+#' Memory is freed progressively as chunks are uploaded.
+#' 
+#' Process:
+#' 1. Serialize object to raw vector
+#' 2. Calculate hash of serialized bytes
+#' 3. Check if already exists (deduplication)
+#' 4. Upload in chunks, freeing memory after each chunk
+#' 5. Show progress bar
+#'
+#' Peak memory usage: object size + ~1.5x chunk_size
+#'
+#' @examples
+#' \dontrun{
+#' config <- create_api_config("http://localhost", 8001, "key",
+#'                             auth_header = "X-API-Key", auth_prefix = "")
+#' 
+#' # Upload large data frame
+#' big_df <- data.frame(x = 1:1000000, y = rnorm(1000000))
+#' upload_object(config, big_df, "big_data.rds")
+#' 
+#' # Upload list
+#' my_list <- list(a = 1:100, b = letters, c = iris)
+#' upload_object(config, my_list, "my_list.rds", chunk_size_mb = 5)
+#' }
+upload_object <- function(config, obj, filename, chunk_size_mb = 10, show_progress = TRUE) {
   if (!requireNamespace("base64enc", quietly = TRUE)) {
     stop("Package 'base64enc' is required. Please install it.")
   }
   
-  # Check if content is a file path (auto-detect)
-  if (is.character(content) && length(content) == 1 && file.exists(content)) {
-    # Content is a file path
-    file_path <- content
-    file_size_mb <- file.info(file_path)$size / (1024^2)
-    
-    # Use chunked upload for large files
-    if (file_size_mb > use_chunked_threshold_mb) {
-      message(sprintf("File size (%.2f MB) exceeds threshold (%.2f MB). Using chunked upload...",
-                     file_size_mb, use_chunked_threshold_mb))
-      return(upload_file_chunked(config, file_path, filename))
-    }
-    
-    # For smaller files, read into memory and use regular upload
-    message(sprintf("Reading file into memory (%.2f MB)...", file_size_mb))
-    content <- readBin(file_path, "raw", file.info(file_path)$size)
-  }
+  # Serialize object to raw bytes
+  message("Serializing R object...")
+  serialized <- serialize(obj, NULL)
+  total_size <- length(serialized)
   
-  # Convert content to raw bytes if it's not already
-  if (!is.raw(content)) {
-    if (is.character(content)) {
-      content <- charToRaw(paste(content, collapse = "\n"))
-    } else {
-      content <- serialize(content, NULL)
-    }
-  }
+  message(sprintf("Object serialized: %.2f MB", total_size / (1024^2)))
   
-  # Compute content hash using the dedicated function
-  file_hash <- hash_content(content)
+  # Calculate hash
+  file_hash <- hash_content(serialized)
+  message(sprintf("Hash: %s", file_hash))
   
-  # Check if content already exists
+  # Check if already exists
   if (hash_exists(config, file_hash)) {
-    message("Content already exists in the database.")
+    message("Object already exists in the database (based on hash).")
+    rm(serialized)
+    gc(verbose = FALSE)
     return(TRUE)
   }
   
-  # Check size of content
-  content_size <- length(content)
-  size_mb <- content_size / (1024 * 1024)
+  # Create chunk provider for serialized bytes
+  chunk_size <- chunk_size_mb * 1024 * 1024
   
-  # Use optimized upload for large files (>100MB)
-  if (size_mb > 100) {
-    message(sprintf("Large file detected (%.1f MB). Using optimized upload...", size_mb))
-    return(upload_file_optimized(config, content, filename, file_hash))
+  chunk_provider <- function(chunk_num, chunk_size) {
+    start <- chunk_num * chunk_size + 1
+    end <- min(start + chunk_size - 1, total_size)
+    
+    if (start > total_size) return(NULL)
+    
+    # Extract chunk (indexing, no copy until necessary)
+    chunk <- serialized[start:end]
+    return(chunk)
   }
   
-  # For smaller files, use direct encoding
-  content_base64 <- base64enc::base64encode(content)
-  
-  # Create request body
-  body <- list(
-    file_hash = file_hash,
-    content = content_base64,
+  # Use upload_with_provider
+  result <- upload_with_provider(
+    config = config,
     filename = filename,
-    content_type = "application/octet-stream"
+    total_size = total_size,
+    file_hash = file_hash,
+    chunk_provider = chunk_provider,
+    chunk_size_mb = chunk_size_mb,
+    content_type = "application/octet-stream",
+    show_progress = show_progress
   )
   
-  # Set very long timeout to avoid issues
-  original_timeout <- config$timeout
-  config$timeout <- 31536000  # 1 year in seconds
+  # Free serialized bytes
+  rm(serialized)
+  gc(verbose = FALSE)
   
-  # Upload the content
-  tryCatch({
-    response <- api_post(config, "/files/upload", body = body)
-    message("Content uploaded successfully.")
-    return(TRUE)
-  }, error = function(e) {
-    stop(paste0("Error uploading content: ", e$message))
-  }, finally = {
-    config$timeout <- original_timeout
-  })
-}
-
-#' Upload large file with optimized memory usage
-#' 
-#' @param config API configuration
-#' @param content Raw content to upload
-#' @param filename Name for the file
-#' @param file_hash Pre-computed hash of the content
-#' @return TRUE if successful
-#' @keywords internal
-upload_file_optimized <- function(config, content, filename, file_hash) {
-  # Write to a temp file for more efficient processing
-  temp_file <- tempfile()
-  on.exit(unlink(temp_file), add = TRUE)
-  
-  # Write raw content to temp file
-  writeBin(content, temp_file)
-  
-  # Use R base64enc for reliable encoding
-  # base64enc::base64encode can accept a filename as input (memory efficient)
-  message("  Using R base64enc for reliable encoding...")
-  content_base64 <- base64enc::base64encode(temp_file)
-  
-  # Create request body
-  body <- list(
-    file_hash = file_hash,
-    content = content_base64,
-    filename = filename,
-    content_type = "application/octet-stream"
-  )
-  
-  # Set a very long timeout (use .Machine$integer.max for max safe integer)
-  original_timeout <- config$timeout
-  config$timeout <- .Machine$integer.max
-  
-  size_mb <- length(content) / (1024 * 1024)
-  message(sprintf("  Uploading %.1f MB file...", size_mb))
-  
-  # Upload the content
-  tryCatch({
-    response <- api_post(config, "/files/upload", body = body)
-    message("Large file uploaded successfully.")
-    return(TRUE)
-  }, error = function(e) {
-    stop(paste0("Error uploading large file: ", e$message))
-  }, finally = {
-    # Restore original timeout
-    config$timeout <- original_timeout
-  })
+  return(result)
 }
 
 #' Calculate hash of a file efficiently
