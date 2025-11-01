@@ -4,7 +4,7 @@
 #' @param file_inputs Named list of file hashes (e.g., list(primary="hash1", reference="hash2"))
 #' @param method_chain List of method specifications
 #'
-#' @return Response from API with meta_job_id
+#' @return Response from API with meta_job_hash
 #' @export
 submit_meta_job_multi <- function(config, file_inputs, method_chain) {
   if (!is.list(file_inputs) || is.null(names(file_inputs))) {
@@ -46,10 +46,10 @@ execute_processing_chain_multi <- function(config, file_inputs, method_chain,
   
   # Submit meta-job
   meta_response <- submit_meta_job_multi(config, file_inputs, method_chain)
-  meta_job_id <- meta_response$meta_job_id
+  meta_job_hash <- meta_response$meta_job_hash
   
   # Wait for results
-  result <- wait_for_meta_job_results(config, meta_job_id, timeout, interval, parse_json)
+  result <- wait_for_meta_job_results(config, meta_job_hash, timeout, interval, parse_json)
   
   return(result)
 }

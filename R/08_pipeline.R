@@ -5,7 +5,7 @@
 #' @param config API configuration created by create_api_config
 #' @param pipeline_definition List with 'nodes'
 #'
-#' @return Pipeline response with pipeline_id
+#' @return Pipeline response with pipeline_hash
 #' @export
 #'
 #' @examples
@@ -40,16 +40,16 @@ submit_pipeline <- function(config, pipeline_definition) {
 #' Get pipeline status
 #'
 #' @param config API configuration
-#' @param pipeline_id Pipeline ID
+#' @param pipeline_hash Pipeline ID
 #'
 #' @return Pipeline status information
 #' @export
-get_pipeline_status <- function(config, pipeline_id) {
-  if (!is.character(pipeline_id) || length(pipeline_id) != 1) {
-    stop("pipeline_id must be a single character string")
+get_pipeline_status <- function(config, pipeline_hash) {
+  if (!is.character(pipeline_hash) || length(pipeline_hash) != 1) {
+    stop("pipeline_hash must be a single character string")
   }
   
-  status <- dsHPC:::api_get(config, paste0("/pipeline/", pipeline_id))
+  status <- dsHPC:::api_get(config, paste0("/pipeline/", pipeline_hash))
   
   return(status)
 }
@@ -58,7 +58,7 @@ get_pipeline_status <- function(config, pipeline_id) {
 #' Wait for pipeline to complete and return output
 #'
 #' @param config API configuration
-#' @param pipeline_id Pipeline ID to wait for
+#' @param pipeline_hash Pipeline ID to wait for
 #' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param verbose Show progress updates (default: TRUE)
@@ -66,9 +66,9 @@ get_pipeline_status <- function(config, pipeline_id) {
 #'
 #' @return Final pipeline output (parsed JSON or string)
 #' @export
-wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, verbose = TRUE, parse_json = TRUE) {
-  if (!is.character(pipeline_id) || length(pipeline_id) != 1) {
-    stop("pipeline_id must be a single character string")
+wait_for_pipeline <- function(config, pipeline_hash, timeout = NA, interval = 5, verbose = TRUE, parse_json = TRUE) {
+  if (!is.character(pipeline_hash) || length(pipeline_hash) != 1) {
+    stop("pipeline_hash must be a single character string")
   }
   
   interval <- max(interval, 1)
@@ -87,7 +87,7 @@ wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, v
     }
     
     # Get status
-    status <- get_pipeline_status(config, pipeline_id)
+    status <- get_pipeline_status(config, pipeline_hash)
     
     # Display progress if verbose
     if (verbose) {
@@ -166,7 +166,9 @@ wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, v
         })
       }
       
-      return(output)
+      # Return full status object for consistency with wait_for_meta_job
+      status$final_output <- output  # Replace with parsed output
+      return(status)
     }
     
     Sys.sleep(interval)
@@ -213,15 +215,15 @@ execute_pipeline <- function(config, pipeline_definition, timeout = NA, interval
   }
   
   response <- submit_pipeline(config, pipeline_definition)
-  pipeline_id <- response$pipeline_id
+  pipeline_hash <- response$pipeline_hash
   
   if (verbose) {
-    message(sprintf("Pipeline ID: %s", pipeline_id))
+    message(sprintf("Pipeline ID: %s", pipeline_hash))
     message("")
   }
   
   # Wait for completion and return output
-  return(wait_for_pipeline(config, pipeline_id, timeout, interval, verbose))
+  return(wait_for_pipeline(config, pipeline_hash, timeout, interval, verbose))
 }
 
 

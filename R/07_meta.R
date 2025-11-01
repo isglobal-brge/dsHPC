@@ -9,7 +9,7 @@
 #' @param content Initial content to process (raw vector, character, or other object)
 #' @param method_chain List of method specifications, each with method_name and parameters
 #'
-#' @return A list with meta-job information including meta_job_id and status
+#' @return A list with meta-job information including meta_job_hash and status
 #' @export
 #'
 #' @examples
@@ -42,7 +42,7 @@ submit_meta_job <- function(config, content, method_chain) {
 #' Get the status of a meta-job
 #'
 #' @param config API configuration created by create_api_config
-#' @param meta_job_id ID of the meta-job to check
+#' @param meta_job_hash ID of the meta-job to check
 #'
 #' @return A list with detailed meta-job status including chain progress
 #' @export
@@ -52,13 +52,13 @@ submit_meta_job <- function(config, content, method_chain) {
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
 #' status <- get_meta_job_status(config, "meta-job-uuid-here")
 #' }
-get_meta_job_status <- function(config, meta_job_id) {
-  if (!is.character(meta_job_id) || length(meta_job_id) != 1) {
-    stop("meta_job_id must be a single character string")
+get_meta_job_status <- function(config, meta_job_hash) {
+  if (!is.character(meta_job_hash) || length(meta_job_hash) != 1) {
+    stop("meta_job_hash must be a single character string")
   }
   
   # Make API call
-  response <- api_get(config, paste0("/meta-job/", meta_job_id))
+  response <- api_get(config, paste0("/meta-job/", meta_job_hash))
   
   return(response)
 }
@@ -66,7 +66,7 @@ get_meta_job_status <- function(config, meta_job_id) {
 #' Wait for a meta-job to complete and return results
 #'
 #' @param config API configuration created by create_api_config
-#' @param meta_job_id ID of the meta-job to wait for
+#' @param meta_job_hash ID of the meta-job to wait for
 #' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the final output as JSON (default: TRUE)
@@ -77,11 +77,11 @@ get_meta_job_status <- function(config, meta_job_id) {
 #' @examples
 #' \dontrun{
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
-#' results <- wait_for_meta_job_results(config, meta_job_id, timeout = 900)
+#' results <- wait_for_meta_job_results(config, meta_job_hash, timeout = 900)
 #' }
-wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interval = 5, parse_json = TRUE) {
-  if (!is.character(meta_job_id) || length(meta_job_id) != 1) {
-    stop("meta_job_id must be a single character string")
+wait_for_meta_job_results <- function(config, meta_job_hash, timeout = NA, interval = 5, parse_json = TRUE) {
+  if (!is.character(meta_job_hash) || length(meta_job_hash) != 1) {
+    stop("meta_job_hash must be a single character string")
   }
   
   # Ensure interval is not too small
@@ -106,7 +106,7 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
     }
     
     # Get current status
-    status_info <- get_meta_job_status(config, meta_job_id)
+    status_info <- get_meta_job_status(config, meta_job_hash)
     
     # Display current step info during processing (if available)
     if (!is.null(status_info$current_step_info)) {
@@ -215,6 +215,27 @@ wait_for_meta_job_results <- function(config, meta_job_id, timeout = NA, interva
   }
 }
 
+#' Wait for a meta-job to complete (alias for wait_for_meta_job_results)
+#'
+#' @param config API configuration
+#' @param meta_job_hash Meta-job hash
+#' @param max_wait Maximum time to wait in seconds (default: NA for no timeout)
+#' @param interval Polling interval in seconds (default: 5)
+#' @param parse_json Whether to parse the final output as JSON (default: TRUE)
+#'
+#' @return Complete meta-job information including final output
+#' @export
+wait_for_meta_job <- function(config, meta_job_hash, max_wait = NA, interval = 5, parse_json = TRUE) {
+  # Get meta-job info
+  info <- wait_for_meta_job_results(config, meta_job_hash, timeout = max_wait, interval = interval, parse_json = parse_json)
+  
+  # Return full status object for consistency with wait_for_pipeline
+  status <- get_meta_job_status(config, meta_job_hash)
+  status$final_output <- info  # Replace with parsed output
+  
+  return(status)
+}
+
 #' Execute a processing chain and wait for results
 #'
 #' This is a convenience function that uploads content, submits a meta-job,
@@ -271,7 +292,7 @@ execute_processing_chain <- function(config, content, method_chain,
 #' Returns information about which steps in a meta-job used cached results
 #'
 #' @param config API configuration created by create_api_config
-#' @param meta_job_id ID of the meta-job to check
+#' @param meta_job_hash ID of the meta-job to check
 #'
 #' @return A data frame with step information including cache usage
 #' @export
@@ -281,9 +302,9 @@ execute_processing_chain <- function(config, content, method_chain,
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
 #' cache_info <- get_meta_job_cache_info(config, "meta-job-uuid-here")
 #' }
-get_meta_job_cache_info <- function(config, meta_job_id) {
+get_meta_job_cache_info <- function(config, meta_job_hash) {
   # Get full status
-  status_info <- get_meta_job_status(config, meta_job_id)
+  status_info <- get_meta_job_status(config, meta_job_hash)
   
   if (is.null(status_info$chain)) {
     return(data.frame())
@@ -310,7 +331,7 @@ get_meta_job_cache_info <- function(config, meta_job_id) {
 #' @param file_hash Hash of the initial content (as returned by hash_content)
 #' @param method_chain List of method specifications, each with method_name and parameters
 #'
-#' @return A list with meta-job information including meta_job_id and status
+#' @return A list with meta-job information including meta_job_hash and status
 #' @export
 #'
 #' @examples
@@ -332,10 +353,10 @@ get_meta_job_cache_info <- function(config, meta_job_id) {
 #' 
 #' meta_job <- submit_meta_job_by_hash(config, file_hash, chain)
 #' }
-submit_meta_job_by_hash <- function(config, file_hash, method_chain) {
-  # Validate file_hash
-  if (!is.character(file_hash) || length(file_hash) != 1) {
-    stop("file_hash must be a single character string")
+submit_meta_job_by_hash <- function(config, file_hash = NULL, method_chain) {
+  # Validate file_hash (can be NULL for params-only jobs)
+  if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
+    stop("file_hash must be NULL or a single character string")
   }
   
   # Validate method_chain
@@ -374,9 +395,13 @@ submit_meta_job_by_hash <- function(config, file_hash, method_chain) {
   
   # Create request body
   body <- list(
-    initial_file_hash = file_hash,
     method_chain = processed_chain
   )
+  
+  # Only include initial_file_hash if provided (not NULL)
+  if (!is.null(file_hash)) {
+    body$initial_file_hash <- file_hash
+  }
   
   # Make API call
   response <- api_post(config, "/submit-meta-job", body = body)
@@ -388,10 +413,10 @@ submit_meta_job_by_hash <- function(config, file_hash, method_chain) {
 #'
 #' This is a convenience function that submits a meta-job using a pre-computed hash
 #' and waits for the results in one call. Use this when you've already uploaded
-#' the content and have its hash.
+#' the content and have its hash, or pass NULL for params-only jobs.
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the initial content (as returned by hash_content)
+#' @param file_hash Hash of the initial content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_chain List of method specifications, each with method_name and parameters
 #' @param timeout Maximum time to wait in seconds (default: 600)
 #' @param interval Polling interval in seconds (default: 5)
@@ -424,28 +449,28 @@ submit_meta_job_by_hash <- function(config, file_hash, method_chain) {
 #' # Execute using hash directly
 #' results <- execute_processing_chain_by_hash(config, file_hash, chain)
 #' }
-execute_processing_chain_by_hash <- function(config, file_hash, method_chain, 
+execute_processing_chain_by_hash <- function(config, file_hash = NULL, method_chain, 
                                             timeout = NA, interval = 5, parse_json = TRUE) {
-  # Validate file_hash
-  if (!is.character(file_hash) || length(file_hash) != 1) {
-    stop("file_hash must be a single character string")
+  # Validate file_hash (can be NULL for params-only jobs)
+  if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
+    stop("file_hash must be NULL or a single character string")
   }
   
   # Submit meta-job
   message("Submitting meta-job with ", length(method_chain), " steps...")
   meta_job_response <- submit_meta_job_by_hash(config, file_hash, method_chain)
   
-  if (is.null(meta_job_response$meta_job_id)) {
+  if (is.null(meta_job_response$meta_job_hash)) {
     stop("Failed to submit meta-job: ", 
          ifelse(is.null(meta_job_response$message), "unknown error", meta_job_response$message))
   }
   
-  meta_job_id <- meta_job_response$meta_job_id
-  message("Meta-job submitted with ID: ", meta_job_id)
+  meta_job_hash <- meta_job_response$meta_job_hash
+  message("Meta-job submitted with ID: ", meta_job_hash)
   
   # Wait for results
   message("Waiting for processing to complete...")
-  results <- wait_for_meta_job_results(config, meta_job_id, timeout = timeout, 
+  results <- wait_for_meta_job_results(config, meta_job_hash, timeout = timeout, 
                                       interval = interval, parse_json = parse_json)
   
   message("Processing complete!")

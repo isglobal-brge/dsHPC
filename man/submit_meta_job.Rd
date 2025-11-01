@@ -14,7 +14,7 @@ submit_meta_job(config, content, method_chain)
 \item{method_chain}{List of method specifications, each with method_name and parameters}
 }
 \value{
-A list with meta-job information including meta_job_id and status
+A list with meta-job information including meta_job_hash and status
 }
 \description{
 Submit a meta-job with chained processing steps

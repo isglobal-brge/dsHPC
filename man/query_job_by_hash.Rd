@@ -6,7 +6,7 @@
 \usage{
 query_job_by_hash(
   config,
-  file_hash,
+  file_hash = NULL,
   method_name,
   parameters = list(),
   validate_parameters = TRUE

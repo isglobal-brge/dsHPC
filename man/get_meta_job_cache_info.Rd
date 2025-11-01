@@ -4,12 +4,12 @@
 \alias{get_meta_job_cache_info}
 \title{Get cached steps from a meta-job}
 \usage{
-get_meta_job_cache_info(config, meta_job_id)
+get_meta_job_cache_info(config, meta_job_hash)
 }
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{meta_job_id}{ID of the meta-job to check}
+\item{meta_job_hash}{ID of the meta-job to check}
 }
 \value{
 A data frame with step information including cache usage

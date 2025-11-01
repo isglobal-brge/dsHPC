@@ -6,7 +6,7 @@
 \usage{
 wait_for_meta_job_results(
   config,
-  meta_job_id,
+  meta_job_hash,
   timeout = NA,
   interval = 5,
   parse_json = TRUE
@@ -15,7 +15,7 @@ wait_for_meta_job_results(
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{meta_job_id}{ID of the meta-job to wait for}
+\item{meta_job_hash}{ID of the meta-job to wait for}
 
 \item{timeout}{Maximum time to wait in seconds (default: NA for no timeout)}
 
@@ -32,6 +32,6 @@ Wait for a meta-job to complete and return results
 \examples{
 \dontrun{
 config <- create_api_config("http://localhost", 9000, "please_change_me")
-results <- wait_for_meta_job_results(config, meta_job_id, timeout = 900)
+results <- wait_for_meta_job_results(config, meta_job_hash, timeout = 900)
 }
 }

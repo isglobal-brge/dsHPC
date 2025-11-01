@@ -6,7 +6,7 @@
 \usage{
 execute_processing_chain_by_hash(
   config,
-  file_hash,
+  file_hash = NULL,
   method_chain,
   timeout = NA,
   interval = 5,
@@ -16,7 +16,7 @@ execute_processing_chain_by_hash(
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{file_hash}{Hash of the initial content (as returned by hash_content)}
+\item{file_hash}{Hash of the initial content (as returned by hash_content), or NULL for params-only jobs}
 
 \item{method_chain}{List of method specifications, each with method_name and parameters}
 
@@ -32,7 +32,7 @@ The final output of the processing chain
 \description{
 This is a convenience function that submits a meta-job using a pre-computed hash
 and waits for the results in one call. Use this when you've already uploaded
-the content and have its hash.
+the content and have its hash, or pass NULL for params-only jobs.
 }
 \examples{
 \dontrun{

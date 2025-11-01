@@ -4,7 +4,7 @@
 \alias{submit_meta_job_by_hash}
 \title{Submit a meta-job with chained processing steps by hash}
 \usage{
-submit_meta_job_by_hash(config, file_hash, method_chain)
+submit_meta_job_by_hash(config, file_hash = NULL, method_chain)
 }
 \arguments{
 \item{config}{API configuration created by create_api_config}
@@ -14,7 +14,7 @@ submit_meta_job_by_hash(config, file_hash, method_chain)
 \item{method_chain}{List of method specifications, each with method_name and parameters}
 }
 \value{
-A list with meta-job information including meta_job_id and status
+A list with meta-job information including meta_job_hash and status
 }
 \description{
 Submit a meta-job with chained processing steps by hash

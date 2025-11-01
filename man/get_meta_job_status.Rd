@@ -4,12 +4,12 @@
 \alias{get_meta_job_status}
 \title{Get the status of a meta-job}
 \usage{
-get_meta_job_status(config, meta_job_id)
+get_meta_job_status(config, meta_job_hash)
 }
 \arguments{
 \item{config}{API configuration created by create_api_config}
 
-\item{meta_job_id}{ID of the meta-job to check}
+\item{meta_job_hash}{ID of the meta-job to check}
 }
 \value{
 A list with detailed meta-job status including chain progress

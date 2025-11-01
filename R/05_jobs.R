@@ -142,10 +142,10 @@ wait_for_job_results <- function(config, content, method_name, parameters = list
 #' file_hash <- "abc123..."
 #' job <- query_job_by_hash(config, file_hash, "analyze_data", list(parameter1 = "value1"))
 #' }
-query_job_by_hash <- function(config, file_hash, method_name, parameters = list(), validate_parameters = TRUE) {
-  # Validate the inputs
-  if (!is.character(file_hash) || length(file_hash) != 1) {
-    stop("file_hash must be a single character string")
+query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters = list(), validate_parameters = TRUE) {
+  # Validate the inputs (file_hash can be NULL for params-only jobs)
+  if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
+    stop("file_hash must be NULL or a single character string")
   }
   
   if (!is.character(method_name) || length(method_name) != 1) {
@@ -170,10 +170,14 @@ query_job_by_hash <- function(config, file_hash, method_name, parameters = list(
   
   # Create request body with sorted parameters
   body <- list(
-    file_hash = file_hash,
     method_name = method_name,
     parameters = sorted_params
   )
+  
+  # Only include file_hash if provided (not NULL)
+  if (!is.null(file_hash)) {
+    body$file_hash <- file_hash
+  }
   
   # Make API call
   response <- api_post(config, "/query-job", body = body)

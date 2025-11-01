@@ -14,7 +14,7 @@ submit_meta_job_multi(config, file_inputs, method_chain)
 \item{method_chain}{List of method specifications}
 }
 \value{
-Response from API with meta_job_id
+Response from API with meta_job_hash
 }
 \description{
 Submit a meta-job with multiple input files
