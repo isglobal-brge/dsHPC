@@ -298,12 +298,12 @@ get_job_output_by_hash <- function(config, file_hash, method_name, parameters = 
 #' file_hash <- "abc123..."
 #' results <- wait_for_job_results_by_hash(config, file_hash, "analyze_text", list(parameter1 = "value1"))
 #' }
-wait_for_job_results_by_hash <- function(config, file_hash, method_name, parameters = list(), 
+wait_for_job_results_by_hash <- function(config, file_hash = NULL, method_name, parameters = list(), 
                                          timeout = NA, interval = 5, parse_json = TRUE,
                                          validate_parameters = TRUE) {
-  # Validate the hash input
-  if (!is.character(file_hash) || length(file_hash) != 1) {
-    stop("file_hash must be a single character string")
+  # Validate the hash input (can be NULL for params-only jobs)
+  if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
+    stop("file_hash must be NULL or a single character string")
   }
   
   # Ensure interval is not too small
@@ -326,10 +326,14 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   
   # Create request body with sorted parameters
   body <- list(
-    file_hash = file_hash,
     method_name = method_name,
     parameters = sorted_params
   )
+  
+  # Only include file_hash if provided (not NULL)
+  if (!is.null(file_hash)) {
+    body$file_hash <- file_hash
+  }
   
   # Query the job initially
   job_info <- api_post(config, "/query-job", body = body)
