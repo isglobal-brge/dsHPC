@@ -3,7 +3,7 @@
 #' Submit a pipeline (DAG of meta-jobs)
 #'
 #' @param config API configuration created by create_api_config
-#' @param pipeline_definition List with 'name' and 'nodes'
+#' @param pipeline_definition List with 'nodes'
 #'
 #' @return Pipeline response with pipeline_id
 #' @export
@@ -11,7 +11,6 @@
 #' @examples
 #' \dontrun{
 #' pipeline <- list(
-#'   name = "My Pipeline",
 #'   nodes = list(
 #'     node_1 = list(
 #'       chain = list(list(method_name = "concat", parameters = list(a = "Hello", b = "World"))),
