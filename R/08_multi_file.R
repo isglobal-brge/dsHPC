@@ -12,11 +12,14 @@ submit_meta_job_multi <- function(config, file_inputs, method_chain) {
   }
   
   # Sort file_inputs by name for consistency
-  sorted_inputs <- file_inputs[order(names(file_inputs))]
+  sorted_inputs <- sort_file_inputs(file_inputs)
+  
+  # Sort method chain parameters
+  sorted_chain <- sort_chain(method_chain)
   
   body <- list(
     initial_file_inputs = sorted_inputs,
-    method_chain = method_chain
+    method_chain = sorted_chain
   )
   
   response <- api_post(config, "/submit-meta-job", body = body)

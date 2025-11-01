@@ -30,8 +30,12 @@ submit_pipeline <- function(config, pipeline_definition) {
     stop("pipeline_definition must be a list with 'nodes'")
   }
   
+  # Sort nodes, dependencies, and all parameters for deterministic ordering
+  sorted_definition <- pipeline_definition
+  sorted_definition$nodes <- sort_nodes(pipeline_definition$nodes)
+  
   # Submit via API (use internal function)
-  response <- dsHPC:::api_post(config, "/pipeline/submit", body = pipeline_definition)
+  response <- dsHPC:::api_post(config, "/pipeline/submit", body = sorted_definition)
   
   return(response)
 }
@@ -237,9 +241,13 @@ execute_pipeline <- function(config, pipeline_definition, timeout = NA, interval
 #' @return Node definition
 #' @export
 create_pipeline_node <- function(chain, dependencies = character(0), input_file_hash = NULL) {
+  # Sort dependencies and chain parameters for deterministic ordering
+  sorted_deps <- sort_dependencies(dependencies)
+  sorted_chain <- sort_chain(chain)
+  
   node <- list(
-    chain = chain,
-    dependencies = as.list(dependencies)
+    chain = sorted_chain,
+    dependencies = as.list(sorted_deps)
   )
   
   if (!is.null(input_file_hash)) {
