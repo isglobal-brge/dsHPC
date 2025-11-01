@@ -55,17 +55,18 @@ get_pipeline_status <- function(config, pipeline_id) {
 }
 
 
-#' Wait for pipeline to complete
+#' Wait for pipeline to complete and return output
 #'
 #' @param config API configuration
 #' @param pipeline_id Pipeline ID to wait for
 #' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param verbose Show progress updates (default: TRUE)
+#' @param parse_json Whether to parse output as JSON (default: TRUE)
 #'
-#' @return Final pipeline status
+#' @return Final pipeline output (parsed JSON or string)
 #' @export
-wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, verbose = TRUE) {
+wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, verbose = TRUE, parse_json = TRUE) {
   if (!is.character(pipeline_id) || length(pipeline_id) != 1) {
     stop("pipeline_id must be a single character string")
   }
@@ -113,17 +114,59 @@ wait_for_pipeline <- function(config, pipeline_id, timeout = NA, interval = 5, v
       
       if (status$status == "failed") {
         # Build error message with failed nodes
-        failed_nodes <- Filter(function(n) n$status == "failed", status$nodes)
+        # Handle both list of nodes and named list
+        nodes_list <- if (is.list(status$nodes) && !is.null(names(status$nodes))) {
+          # Named list - convert to list of nodes
+          lapply(names(status$nodes), function(node_id) {
+            node_data <- status$nodes[[node_id]]
+            if (is.list(node_data)) {
+              node_data$node_id <- node_id
+            } else {
+              list(node_id = node_id, status = node_data)
+            }
+            node_data
+          })
+        } else if (is.list(status$nodes)) {
+          status$nodes
+        } else {
+          list()
+        }
+        
+        failed_nodes <- Filter(function(n) {
+          if (is.list(n) && !is.null(n$status)) {
+            n$status == "failed"
+          } else {
+            FALSE
+          }
+        }, nodes_list)
+        
         error_msg <- sprintf("Pipeline failed. %d nodes failed:\n", length(failed_nodes))
         for (node in failed_nodes) {
-          error_msg <- paste0(error_msg, sprintf("  - %s: %s\n", 
-                                                 node$node_id, 
-                                                 node$error %||% "Unknown error"))
+          node_id <- if (is.list(node) && !is.null(node$node_id)) node$node_id else "unknown"
+          node_error <- if (is.list(node) && !is.null(node$error)) node$error else "Unknown error"
+          error_msg <- paste0(error_msg, sprintf("  - %s: %s\n", node_id, node_error))
         }
         stop(error_msg)
       }
       
-      return(status)
+      # Extract final output (consistent with wait_for_meta_job_results)
+      output <- status$final_output
+      
+      if (is.null(output)) {
+        stop("Pipeline completed but no final_output provided by server")
+      }
+      
+      # Parse JSON if requested
+      if (parse_json && !is.null(output) && output != "") {
+        tryCatch({
+          output <- jsonlite::fromJSON(output)
+        }, error = function(e) {
+          warning("Failed to parse output as JSON: ", e$message)
+          # Return the raw output instead
+        })
+      }
+      
+      return(output)
     }
     
     Sys.sleep(interval)
@@ -177,11 +220,8 @@ execute_pipeline <- function(config, pipeline_definition, timeout = NA, interval
     message("")
   }
   
-  # Wait for completion
-  final_status <- wait_for_pipeline(config, pipeline_id, timeout, interval, verbose)
-  
-  # Return final output
-  return(final_status$final_output)
+  # Wait for completion and return output
+  return(wait_for_pipeline(config, pipeline_id, timeout, interval, verbose))
 }
 
 
