@@ -341,11 +341,11 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   while(is.null(job_info$status) || (job_info$status %in% IN_PROGRESS_STATUSES)) {
     # Check for timeout (only if specified)
     if (!is.na(timeout)) {
-      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-      if (elapsed > timeout) {
+    elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+    if (elapsed > timeout) {
         stop(paste0("Timeout waiting for job to complete after ", timeout, " seconds. Current status: ", 
-                    ifelse(is.null(job_info$status), "unknown", job_info$status)))
-      }
+                  ifelse(is.null(job_info$status), "unknown", job_info$status)))
+    }
     }
     
     current_status <- job_info$status
@@ -375,19 +375,19 @@ wait_for_job_results_by_hash <- function(config, file_hash, method_name, paramet
   # Job reached terminal state - check if it succeeded or failed
   if (job_info$status == "CD") {
     # Job completed successfully
-    output <- job_info$output
-    
-    # Parse JSON if requested
-    if (parse_json && !is.null(output) && output != "") {
-      tryCatch({
-        output <- jsonlite::fromJSON(output)
-      }, error = function(e) {
-        warning("Failed to parse output as JSON: ", e$message)
-        # Return the raw output instead
-      })
-    }
-    
-    return(output)
+  output <- job_info$output
+  
+  # Parse JSON if requested
+  if (parse_json && !is.null(output) && output != "") {
+    tryCatch({
+      output <- jsonlite::fromJSON(output)
+    }, error = function(e) {
+      warning("Failed to parse output as JSON: ", e$message)
+      # Return the raw output instead
+    })
+  }
+  
+  return(output)
   } else {
     # Job failed or was cancelled
     error_details <- job_info$error_details %||% job_info$message %||% "No error details available"
