@@ -120,7 +120,7 @@ wait_for_meta_job_results <- function(config, meta_job_hash, timeout = NA, inter
       }
       
       # Create unique identifier for this step state
-      step_id <- paste0(step_info$step_number, "_", step_info$job_id, "_", step_info$job_status)
+      step_id <- paste0(step_info$step_number, "_", step_info$job_hash, "_", step_info$job_status)
       
       timestamp <- format(Sys.time(), "%H:%M:%S")
       
@@ -200,8 +200,8 @@ wait_for_meta_job_results <- function(config, meta_job_hash, timeout = NA, inter
                                     step_info$job_status,
                                     step_info$status_description))
         }
-        if (!is.null(step_info$job_id)) {
-          error_msg <- paste0(error_msg, sprintf("\n  Job ID: %s", step_info$job_id))
+        if (!is.null(step_info$job_hash)) {
+          error_msg <- paste0(error_msg, sprintf("\n  Job Hash: %s", step_info$job_hash))
         }
       } else {
         error_msg <- paste0(error_msg, ": ", status_info$error %||% "Unknown error")
@@ -317,7 +317,7 @@ get_meta_job_cache_info <- function(config, meta_job_hash) {
       method_name = step$method_name,
       cached = ifelse(is.null(step$cached), FALSE, step$cached),
       status = ifelse(is.null(step$status), "pending", step$status),
-      job_id = ifelse(is.null(step$job_id), NA, step$job_id),
+      job_hash = ifelse(is.null(step$job_hash), NA, step$job_hash),
       stringsAsFactors = FALSE
     )
   }))
