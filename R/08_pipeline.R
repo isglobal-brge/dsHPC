@@ -270,12 +270,25 @@ execute_pipeline <- function(config, pipeline_definition, timeout = NA, interval
 # Helper for creating pipeline nodes
 #' Create a pipeline node definition
 #'
-#' @param chain List of method steps
+#' @param chain List of method steps (each can have file_inputs)
 #' @param dependencies Vector of node IDs this depends on
 #' @param input_file_hash Optional file hash for root nodes
 #'
 #' @return Node definition
 #' @export
+#'
+#' @details
+#' Each step in the chain can now include file_inputs with $ref support:
+#' \code{
+#' chain = list(list(
+#'   method_name = "merge_files",
+#'   parameters = list(separator = "|"),
+#'   file_inputs = list(
+#'     input_1 = "$ref:node1/data/text",
+#'     input_2 = "$ref:node2/data/text"
+#'   )
+#' ))
+#' }
 create_pipeline_node <- function(chain, dependencies = character(0), input_file_hash = NULL) {
   # Sort dependencies and chain parameters for deterministic ordering
   sorted_deps <- sort_dependencies(dependencies)

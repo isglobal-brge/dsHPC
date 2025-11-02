@@ -387,10 +387,21 @@ submit_meta_job_by_hash <- function(config, file_hash = NULL, method_chain) {
     # Sort parameters for consistency
     sorted_params <- sort_parameters(step$parameters)
     
-    processed_chain[[i]] <- list(
+    # Build processed step
+    processed_step <- list(
       method_name = step$method_name,
       parameters = sorted_params
     )
+    
+    # Include file_inputs if provided
+    if (!is.null(step$file_inputs)) {
+      if (!is.list(step$file_inputs)) {
+        stop(paste0("Step ", i, " file_inputs must be a list/named vector"))
+      }
+      processed_step$file_inputs <- step$file_inputs
+    }
+    
+    processed_chain[[i]] <- processed_step
   }
   
   # Create request body
