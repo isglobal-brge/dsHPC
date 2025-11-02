@@ -1,5 +1,38 @@
 # Pipeline (DAG) Orchestration Functions
 
+#' Validate that pipeline has exactly one terminal node
+#'
+#' @param nodes Named list of pipeline nodes
+#'
+#' @return TRUE if valid, stops with error if invalid
+#' @keywords internal
+validate_single_terminal_node <- function(nodes) {
+  # Find all node IDs that are mentioned as dependencies
+  all_dependencies <- character(0)
+  for (node_id in names(nodes)) {
+    node <- nodes[[node_id]]
+    if (!is.null(node$dependencies) && length(node$dependencies) > 0) {
+      all_dependencies <- c(all_dependencies, unlist(node$dependencies))
+    }
+  }
+  
+  # Terminal nodes = nodes NOT in any dependency list
+  terminal_nodes <- setdiff(names(nodes), all_dependencies)
+  
+  if (length(terminal_nodes) == 0) {
+    stop("Pipeline validation failed: No terminal node found. All nodes are dependencies of other nodes (circular dependency).")
+  }
+  
+  if (length(terminal_nodes) > 1) {
+    stop(sprintf("Pipeline validation failed: Multiple terminal nodes detected: [%s]. Pipelines must converge to exactly ONE final output node. Add a merge node that depends on: [%s]",
+                 paste(terminal_nodes, collapse=", "),
+                 paste(terminal_nodes, collapse=", ")))
+  }
+  
+  # Exactly one terminal node - valid!
+  return(TRUE)
+}
+
 #' Submit a pipeline (DAG of meta-jobs)
 #'
 #' @param config API configuration created by create_api_config
@@ -29,6 +62,9 @@ submit_pipeline <- function(config, pipeline_definition) {
   if (!is.list(pipeline_definition) || is.null(pipeline_definition$nodes)) {
     stop("pipeline_definition must be a list with 'nodes'")
   }
+  
+  # Validate single terminal node
+  validate_single_terminal_node(pipeline_definition$nodes)
   
   # Sort nodes, dependencies, and all parameters for deterministic ordering
   sorted_definition <- pipeline_definition
