@@ -15,15 +15,33 @@
 #' Sort a named list of file inputs alphabetically by their names.
 #' Used for multi-file operations to ensure consistent ordering.
 #'
-#' @param file_inputs Named list mapping input names to file hashes
+#' IMPORTANT: This function only sorts the KEYS (input names) alphabetically.
+#' The VALUES (file hashes or arrays of hashes) are NOT modified or sorted.
+#' 
+#' For array values (e.g., inputs = c(hash3, hash1, hash2)), the array order
+#' is PRESERVED EXACTLY as provided. If you need the array elements sorted,
+#' you must sort them client-side before calling the API.
 #'
-#' @return Named list with keys sorted alphabetically
+#' @param file_inputs Named list mapping input names to file hashes (str or List[str])
+#'
+#' @return Named list with keys sorted alphabetically, values unchanged
 #' @export
 #'
 #' @examples
 #' inputs <- list(file_c = "hash3", file_a = "hash1", file_b = "hash2")
 #' sorted <- sort_file_inputs(inputs)
 #' # Returns: list(file_a = "hash1", file_b = "hash2", file_c = "hash3")
+#' 
+#' # Arrays preserve order:
+#' inputs_with_array <- list(
+#'   zebra = c("hash_z", "hash_a", "hash_m"),
+#'   alpha = "hash_single"
+#' )
+#' sorted <- sort_file_inputs(inputs_with_array)
+#' # Returns: list(
+#' #   alpha = "hash_single",
+#' #   zebra = c("hash_z", "hash_a", "hash_m")  # Order preserved!
+#' # )
 sort_file_inputs <- function(file_inputs) {
   if (is.null(file_inputs) || length(file_inputs) == 0) {
     return(structure(list(), names = character(0)))
