@@ -6,7 +6,7 @@
 \usage{
 wait_for_job_results_by_hash(
   config,
-  file_hash,
+  file_hash = NULL,
   method_name,
   parameters = list(),
   timeout = NA,

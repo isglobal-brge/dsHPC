@@ -11,7 +11,7 @@ create_pipeline_node(
 )
 }
 \arguments{
-\item{chain}{List of method steps}
+\item{chain}{List of method steps (each can have file_inputs)}
 
 \item{dependencies}{Vector of node IDs this depends on}
 
@@ -22,4 +22,17 @@ Node definition
 }
 \description{
 Create a pipeline node definition
+}
+\details{
+Each step in the chain can now include file_inputs with $ref support:
+\code{
+chain = list(list(
+  method_name = "merge_files",
+  parameters = list(separator = "|"),
+  file_inputs = list(
+    input_1 = "$ref:node1/data/text",
+    input_2 = "$ref:node2/data/text"
+  )
+))
+}
 }

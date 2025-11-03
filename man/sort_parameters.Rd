@@ -2,7 +2,7 @@
 % Please edit documentation in R/06_parameter_utils.R
 \name{sort_parameters}
 \alias{sort_parameters}
-\title{Sort parameters alphabetically by name}
+\title{Sort parameters alphabetically by name with RECURSIVE sorting}
 \usage{
 sort_parameters(parameters)
 }
@@ -10,15 +10,19 @@ sort_parameters(parameters)
 \item{parameters}{A named list of parameters}
 }
 \value{
-A named list with parameters sorted alphabetically by name
+A named list with parameters sorted alphabetically by name at all levels
 }
 \description{
 This function ensures that parameters are always in the same order
 regardless of how they were specified by the user. This is important
 for job deduplication as MongoDB's document comparison is order-sensitive.
 }
+\details{
+Now includes RECURSIVE sorting of all nested structures to ensure
+complete deterministic ordering at all nesting levels.
+}
 \examples{
-params <- list(c = 3, a = 1, b = 2)
+params <- list(c = 3, a = 1, b = list(z = 10, x = 5))
 sorted_params <- sort_parameters(params)
-# Returns: list(a = 1, b = 2, c = 3)
+# Returns: list(a = 1, b = list(x = 5, z = 10), c = 3)
 }
