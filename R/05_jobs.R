@@ -19,13 +19,17 @@
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
 #' content <- "Hello, World!"
 #' job <- query_job(config, content, "analyze_data", list(parameter1 = "value1"))
+#' 
+#' # For multi-file methods, use query_job_by_hash with file_inputs
+#' file_inputs <- list(input_a = "hash1", input_b = "hash2")
+#' job <- query_job_by_hash(config, file_hash = NULL, "concat", list(), file_inputs = file_inputs)
 #' }
 query_job <- function(config, content, method_name, parameters = list(), validate_parameters = TRUE) {
   # Calculate content hash
   file_hash <- hash_content(content)
   
   # Call the _by_hash version
-  return(query_job_by_hash(config, file_hash, method_name, parameters, validate_parameters))
+  return(query_job_by_hash(config, file_hash, method_name, parameters, validate_parameters = validate_parameters))
 }
 
 #' Get the status of a job
@@ -128,9 +132,10 @@ wait_for_job_results <- function(config, content, method_name, parameters = list
 #' Query a job execution by hash
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the content (as returned by hash_content)
+#' @param file_hash Hash of the content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_name Name of the method to execute
 #' @param parameters Named list of parameters for the method
+#' @param file_inputs Named list of file hashes for multi-file jobs (e.g., list(input_a="hash1", input_b="hash2")). Supports single hashes or arrays (e.g., list(inputs=c("hash1", "hash2")))
 #' @param validate_parameters Whether to validate parameters against method specification (default: TRUE)
 #'
 #' @return A list with job information including status, output, and error details
@@ -141,11 +146,30 @@ wait_for_job_results <- function(config, content, method_name, parameters = list
 #' config <- create_api_config("http://localhost", 9000, "please_change_me")
 #' file_hash <- "abc123..."
 #' job <- query_job_by_hash(config, file_hash, "analyze_data", list(parameter1 = "value1"))
+#' 
+#' # Multi-file example
+#' file_inputs <- list(input_a = "hash1", input_b = "hash2")
+#' job <- query_job_by_hash(config, file_hash = NULL, "concat", list(), file_inputs = file_inputs)
 #' }
-query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters = list(), validate_parameters = TRUE) {
-  # Validate the inputs (file_hash can be NULL for params-only jobs)
+query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters = list(), file_inputs = NULL, validate_parameters = TRUE) {
+  # Validate the inputs (file_hash can be NULL for params-only jobs or when using file_inputs)
   if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
     stop("file_hash must be NULL or a single character string")
+  }
+  
+  # Validate file_inputs if provided
+  if (!is.null(file_inputs)) {
+    if (!is.list(file_inputs) || is.null(names(file_inputs))) {
+      stop("file_inputs must be a named list")
+    }
+  }
+  
+  # Ensure exactly one of file_hash or file_inputs is provided (or neither for params-only jobs)
+  has_hash <- !is.null(file_hash)
+  has_inputs <- !is.null(file_inputs)
+  
+  if (has_hash && has_inputs) {
+    stop("Provide either file_hash OR file_inputs, not both")
   }
   
   if (!is.character(method_name) || length(method_name) != 1) {
@@ -174,8 +198,13 @@ query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters 
     parameters = sorted_params
   )
   
-  # Only include file_hash if provided (not NULL)
-  if (!is.null(file_hash)) {
+  # Add file input (single or multi)
+  if (!is.null(file_inputs)) {
+    # Multi-file: sort file_inputs by name for consistency
+    sorted_inputs <- sort_file_inputs(file_inputs)
+    body$file_inputs <- sorted_inputs
+  } else if (!is.null(file_hash)) {
+    # Single file (legacy)
     body$file_hash <- file_hash
   }
   
@@ -188,9 +217,10 @@ query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters 
 #' Get the status of a job by hash
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the content (as returned by hash_content)
+#' @param file_hash Hash of the content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
+#' @param file_inputs Named list of file hashes for multi-file jobs (optional)
 #'
 #' @return The status of the job as a string
 #' @export
@@ -201,9 +231,9 @@ query_job_by_hash <- function(config, file_hash = NULL, method_name, parameters 
 #' file_hash <- "abc123..."
 #' status <- get_job_status_by_hash(config, file_hash, "count_black_pixels", list(threshold = 30))
 #' }
-get_job_status_by_hash <- function(config, file_hash, method_name, parameters = list()) {
+get_job_status_by_hash <- function(config, file_hash, method_name, parameters = list(), file_inputs = NULL) {
   # Query the job
-  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, validate_parameters = FALSE)
+  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, file_inputs, validate_parameters = FALSE)
   
   # Return just the status
   return(job_info$status)
@@ -212,9 +242,10 @@ get_job_status_by_hash <- function(config, file_hash, method_name, parameters = 
 #' Check if a job succeeded by hash
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the content (as returned by hash_content)
+#' @param file_hash Hash of the content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
+#' @param file_inputs Named list of file hashes for multi-file jobs (optional)
 #'
 #' @return TRUE if the job completed successfully, FALSE otherwise
 #' @export
@@ -227,9 +258,9 @@ get_job_status_by_hash <- function(config, file_hash, method_name, parameters = 
 #'   print("Job completed successfully")
 #' }
 #' }
-job_succeeded_by_hash <- function(config, file_hash, method_name, parameters = list()) {
+job_succeeded_by_hash <- function(config, file_hash, method_name, parameters = list(), file_inputs = NULL) {
   # Query the job
-  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, validate_parameters = FALSE)
+  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, file_inputs, validate_parameters = FALSE)
   
   # Check if status is "CD" (completed)
   return(!is.null(job_info$status) && job_info$status == "CD")
@@ -238,10 +269,11 @@ job_succeeded_by_hash <- function(config, file_hash, method_name, parameters = l
 #' Get the output of a completed job by hash
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the content (as returned by hash_content)
+#' @param file_hash Hash of the content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
 #' @param parse_json Whether to parse the output as JSON (default: TRUE)
+#' @param file_inputs Named list of file hashes for multi-file jobs (optional)
 #'
 #' @return The job output, parsed as JSON if requested
 #' @export
@@ -252,9 +284,9 @@ job_succeeded_by_hash <- function(config, file_hash, method_name, parameters = l
 #' file_hash <- "abc123..."
 #' output <- get_job_output_by_hash(config, file_hash, "count_black_pixels", list(threshold = 30))
 #' }
-get_job_output_by_hash <- function(config, file_hash, method_name, parameters = list(), parse_json = TRUE) {
+get_job_output_by_hash <- function(config, file_hash, method_name, parameters = list(), parse_json = TRUE, file_inputs = NULL) {
   # Query the job
-  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, validate_parameters = FALSE)
+  job_info <- query_job_by_hash(config, file_hash, method_name, parameters, file_inputs, validate_parameters = FALSE)
   
   # Check if job is completed
   if (is.null(job_info$status) || job_info$status != "CD") {
@@ -281,13 +313,14 @@ get_job_output_by_hash <- function(config, file_hash, method_name, parameters = 
 #' Wait for a job to complete and return results by hash
 #'
 #' @param config API configuration created by create_api_config
-#' @param file_hash Hash of the content (as returned by hash_content)
+#' @param file_hash Hash of the content (as returned by hash_content), or NULL for params-only jobs
 #' @param method_name Name of the method executed
 #' @param parameters Parameters used for the method
 #' @param timeout Maximum time to wait in seconds (default: NA for no timeout)
 #' @param interval Polling interval in seconds (default: 5)
 #' @param parse_json Whether to parse the output as JSON (default: TRUE)
 #' @param validate_parameters Whether to validate parameters against method specification (default: TRUE)
+#' @param file_inputs Named list of file hashes for multi-file jobs (optional)
 #'
 #' @return The job output if completed within timeout, otherwise throws an error
 #' @export
@@ -300,13 +333,26 @@ get_job_output_by_hash <- function(config, file_hash, method_name, parameters = 
 #' }
 wait_for_job_results_by_hash <- function(config, file_hash = NULL, method_name, parameters = list(), 
                                          timeout = NA, interval = 5, parse_json = TRUE,
-                                         validate_parameters = TRUE) {
-  # Validate the hash input (can be NULL for params-only jobs)
+                                         validate_parameters = TRUE, file_inputs = NULL) {
+  # Validate the hash input (can be NULL for params-only jobs or when using file_inputs)
   if (!is.null(file_hash) && (!is.character(file_hash) || length(file_hash) != 1)) {
     stop("file_hash must be NULL or a single character string")
   }
   
-  # Ensure interval is not too small
+  # Validate file_inputs if provided
+  if (!is.null(file_inputs)) {
+    if (!is.list(file_inputs) || is.null(names(file_inputs))) {
+      stop("file_inputs must be a named list")
+    }
+  }
+  
+  # Ensure exactly one of file_hash or file_inputs is provided (or neither for params-only jobs)
+  has_hash <- !is.null(file_hash)
+  has_inputs <- !is.null(file_inputs)
+  
+  if (has_hash && has_inputs) {
+    stop("Provide either file_hash OR file_inputs, not both")
+  }
   interval <- max(interval, 1)
   
   # Start timer
@@ -330,8 +376,13 @@ wait_for_job_results_by_hash <- function(config, file_hash = NULL, method_name, 
     parameters = sorted_params
   )
   
-  # Only include file_hash if provided (not NULL)
-  if (!is.null(file_hash)) {
+  # Add file input (single or multi)
+  if (!is.null(file_inputs)) {
+    # Multi-file: sort file_inputs by name for consistency
+    sorted_inputs <- sort_file_inputs(file_inputs)
+    body$file_inputs <- sorted_inputs
+  } else if (!is.null(file_hash)) {
+    # Single file (legacy)
     body$file_hash <- file_hash
   }
   
