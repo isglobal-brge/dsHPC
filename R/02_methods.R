@@ -112,3 +112,48 @@ validate_method_parameters <- function(method_name, params, method_spec) {
   
   return(TRUE)
 }
+
+
+#' Check if specific methods are available
+#'
+#' Queries the HPC API to check if the specified methods are available.
+#'
+#' @param config API configuration created by create_api_config
+#' @param method_names Character vector of method names to check
+#'
+#' @return A list with:
+#'   - all_available: Logical, TRUE if all requested methods are available
+#'   - available: Character vector of available methods (from requested)
+#'   - missing: Character vector of missing methods (from requested)
+#'   - all_methods: Character vector of all methods available on the HPC
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' config <- create_api_config("http://localhost", 9000, "please_change_me")
+#' result <- has_methods(config, c("lungmask", "pyradiomics"))
+#' if (!result$all_available) {
+#'   stop(paste("Missing methods:", paste(result$missing, collapse = ", ")))
+#' }
+#' }
+has_methods <- function(config, method_names) {
+  if (!is.character(method_names) || length(method_names) == 0) {
+    stop("method_names must be a non-empty character vector")
+  }
+
+  # Get all available methods
+  methods <- get_methods(config)
+  available_names <- names(methods)
+
+  # Check which requested methods are available
+  available <- intersect(method_names, available_names)
+  missing <- setdiff(method_names, available_names)
+
+  list(
+    all_available = length(missing) == 0,
+    available = available,
+    missing = missing,
+    all_methods = available_names
+  )
+}
