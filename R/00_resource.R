@@ -66,6 +66,16 @@ HPCResourceClient <- R6::R6Class(
     },
     
     #' @description
+    #' Get the resource value (API config object)
+    #' This method is called by resourcer::as.resource.object()
+    #'
+    #' @param ... Additional arguments (ignored)
+    #' @return An API config object created by create_api_config()
+    getValue = function(...) {
+      private$.getAPIConfig()
+    },
+
+    #' @description
     #' Get available methods from the API
     #'
     #' @return A list of available methods
