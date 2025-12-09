@@ -26,14 +26,14 @@ var dsHPC = {
             {
               "key": "host",
               "type": "string",
-              "title": "Host name or IP address",
-              "description": "The hostname or IP address of the dsHPC API"
+              "title": "Host",
+              "description": "The hostname or IP address of the HPC API"
             },
             {
               "key": "port",
               "type": "integer",
-              "title": "Port number",
-              "description": "The port number of the dsHPC API"
+              "title": "Port",
+              "description": "The port number of the HPC API"
             }
           ],
           "required": ["host", "port"],
@@ -45,7 +45,7 @@ var dsHPC = {
             {
               "key": "apikey",
               "type": "string",
-              "title": "API Key",
+              "title": "HPC Key",
               "format": "password",
               "description": "The API key for authentication"
             }
@@ -65,11 +65,11 @@ var dsHPC = {
         secret: credentials.apikey
       };
     };
-    
+
     var toResourceFactories = {
       "dshpc-api-endpoint": toHPCResource
     };
-    
+
     if (toResourceFactories[type]) {
       return toResourceFactories[type](name, params, credentials);
     }
