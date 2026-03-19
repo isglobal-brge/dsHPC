@@ -1,12 +1,24 @@
 # Module: Job Results
 
 #' @export
-ds.jobs.result <- function(conns, symbol) {
-  results <- .ds_safe_aggregate(conns, expr = call("jobResultDS", symbol))
-  all_ready <- all(vapply(results, function(r) isTRUE(r$ready), logical(1)))
-  warnings <- if (!all_ready) {
-    not_ready <- names(Filter(function(r) !isTRUE(r$ready), results))
-    paste("Results not ready on:", paste(not_ready, collapse = ", "))
-  } else character(0)
-  dsjobs_result(per_site = results, meta = list(scope = "per_site", warnings = warnings))
+ds.jobs.result <- function(conns, job_id) {
+  results <- list()
+  for (srv in names(conns)) {
+    backend <- .detect_backend(conns[[srv]])
+    if (identical(backend$type, "dslite")) {
+      results[[srv]] <- tryCatch({
+        r <- DSI::datashield.aggregate(conns[srv], expr = call("jobResultDS", job_id))
+        r[[srv]]
+      }, error = function(e) list(ready = FALSE, error = e$message))
+    } else {
+      res <- backend$cp_read_result(job_id)
+      if (!is.null(res)) { res$ready <- TRUE; results[[srv]] <- res }
+      else {
+        st <- backend$cp_read_status(job_id)
+        results[[srv]] <- list(job_id = job_id, ready = FALSE,
+                                state = st$state %||% "PENDING")
+      }
+    }
+  }
+  dsjobs_result(per_site = results)
 }

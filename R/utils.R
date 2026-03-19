@@ -1,5 +1,10 @@
 # Module: Client Utilities
-# Transport encoding, symbol generation, resilient aggregation.
+
+#' @keywords internal
+.generate_job_id <- function() {
+  hex <- paste(sample(c(0:9, letters[1:6]), 12, replace = TRUE), collapse = "")
+  paste0("job_", format(Sys.time(), "%Y%m%d_%H%M%S"), "_", hex)
+}
 
 #' @keywords internal
 .generate_symbol <- function(prefix = "dsJ") {
@@ -16,9 +21,7 @@
     b64 <- gsub("/", "_", b64)
     b64 <- gsub("=+$", "", b64)
     paste0("B64:", b64)
-  } else {
-    x
-  }
+  } else x
 }
 
 #' @keywords internal
@@ -30,9 +33,7 @@
     tryCatch({
       res <- DSI::datashield.aggregate(conns[srv], expr = expr)
       results[[srv]] <- res[[srv]]
-    }, error = function(e) {
-      errors[[srv]] <<- e$message
-    })
+    }, error = function(e) { errors[[srv]] <<- e$message })
   }
   if (length(errors) > 0) attr(results, "ds_errors") <- errors
   results

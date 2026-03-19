@@ -6,12 +6,10 @@ Authors@R: c(
     person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
     person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))
 Description: Client-side DataSHIELD package for composing and orchestrating
-    durable federated jobs. Provides generic step constructors for session-plane
-    (DataSHIELD assign/aggregate) and artifact-plane (allowlisted subprocess
-    runners) operations. Jobs are submitted as immutable specs, executed durably
-    on hospital nodes, and return disclosure-safe results. Domain-specific DSLs
-    (radiomics, imaging, preprocessing) live in upstream packages and compile
-    down to generic dsJobsClient jobs.
+    durable federated jobs. Backend-agnostic control plane with adapters
+    for Opal (via opalr) and Armadillo (via MolgenisArmadillo). Provides
+    generic step constructors for session-plane and artifact-plane operations.
+    Domain-specific DSLs live in upstream packages.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
@@ -20,6 +18,10 @@ Imports:
     DSI,
     jsonlite
 Suggests:
+    opalr,
+    DSOpal,
+    MolgenisArmadillo,
+    DSMolgenisArmadillo,
     testthat (>= 3.0.0),
     withr,
     DSLite

@@ -1,9 +1,15 @@
 # Module: Job Cancellation
 
 #' @export
-ds.jobs.cancel <- function(conns, symbol) {
-  DSI::datashield.assign.expr(conns, symbol = symbol,
-    expr = call("jobCancelDS", symbol))
-  results <- .ds_safe_aggregate(conns, expr = call("jobStatusDS", symbol))
-  dsjobs_result(per_site = results, meta = list(scope = "per_site"))
+ds.jobs.cancel <- function(conns, job_id) {
+  for (srv in names(conns)) {
+    backend <- .detect_backend(conns[[srv]])
+    if (identical(backend$type, "dslite")) {
+      tryCatch(DSI::datashield.assign.expr(conns[srv], symbol = job_id,
+        expr = call("jobCancelDS", job_id)), error = function(e) NULL)
+    } else {
+      backend$cp_cancel(job_id)
+    }
+  }
+  invisible(NULL)
 }

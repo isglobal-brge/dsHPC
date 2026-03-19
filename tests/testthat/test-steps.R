@@ -14,9 +14,9 @@ test_that("artifact step has runner field", {
   expect_equal(s$config$mask, "auto")
 })
 
-test_that("input_from field is preserved", {
-  s <- ds_step_run_artifact("stage_parquet", input_from = 2L)
-  expect_equal(s$input_from, 2L)
+test_that("inputs field is preserved", {
+  s <- ds_step_run_artifact("stage_parquet", inputs = list(2L))
+  expect_equal(s$inputs, list(2L))
 })
 
 test_that("publish_asset has correct fields", {

@@ -1,17 +1,19 @@
 # Module: Job Listing
 
-#' List all jobs on all nodes
-#'
-#' @param conns DSI connections object.
-#' @param label Character or NULL; filter by label (e.g. "dsRadiomics").
-#'   Domain packages use this to show only their own jobs.
-#' @return A dsjobs_result with per-site job listings.
 #' @export
 ds.jobs.list <- function(conns, label = NULL) {
-  if (is.null(label)) {
-    results <- .ds_safe_aggregate(conns, expr = call("jobListDS"))
-  } else {
-    results <- .ds_safe_aggregate(conns, expr = call("jobListDS", label))
+  results <- list()
+  for (srv in names(conns)) {
+    backend <- .detect_backend(conns[[srv]])
+    if (identical(backend$type, "dslite")) {
+      results[[srv]] <- tryCatch({
+        if (is.null(label)) r <- DSI::datashield.aggregate(conns[srv], expr = call("jobListDS"))
+        else r <- DSI::datashield.aggregate(conns[srv], expr = call("jobListDS", label))
+        r[[srv]]
+      }, error = function(e) .empty_job_list())
+    } else {
+      results[[srv]] <- backend$cp_list_jobs(label)
+    }
   }
-  dsjobs_result(per_site = results, meta = list(scope = "per_site"))
+  dsjobs_result(per_site = results)
 }

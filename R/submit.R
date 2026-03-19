@@ -1,54 +1,56 @@
 # Module: Job Submission
+# Routes through the detected backend (Opal/Armadillo/DSLite).
 
 #' Submit a job to all nodes
 #'
-#' Returns a \code{dsjobs_submission} with per-node job IDs.
-#' The job_ids are the key for all subsequent operations
-#' (status, result, load_output, cancel).
+#' Detects the backend for each connection and submits via the
+#' appropriate control plane (Opal filesystem, Armadillo project, or
+#' DSLite DS method fallback).
 #'
 #' @param conns DSI connections object.
 #' @param job A dsjobs_job object.
-#' @param symbol Character; symbol name for the job handle on server.
-#' @return A \code{dsjobs_submission} with job_ids, symbol, and initial status.
+#' @return A dsjobs_submission with job_id and per-server details.
 #' @export
-ds.jobs.submit <- function(conns, job, symbol = NULL) {
+ds.jobs.submit <- function(conns, job) {
   if (!inherits(job, "dsjobs_job"))
     stop("'job' must be a dsjobs_job object.", call. = FALSE)
-  if (is.null(symbol)) symbol <- .generate_symbol("dsJ")
 
-  spec_encoded <- .ds_encode(as.list(job))
-  DSI::datashield.assign.expr(conns, symbol = symbol,
-    expr = call("jobSubmitDS", spec_encoded))
+  job_id <- .generate_job_id()
+  spec <- as.list(job)
+  spec$job_id <- job_id
 
-  # Get immediate status to capture job_ids
- results <- .ds_safe_aggregate(conns, expr = call("jobStatusDS", symbol))
+  submissions <- list()
+  for (srv in names(conns)) {
+    backend <- .detect_backend(conns[[srv]])
 
-  job_ids <- list()
-  for (srv in names(results))
-    if (!is.null(results[[srv]]$job_id))
-      job_ids[[srv]] <- results[[srv]]$job_id
+    if (identical(backend$type, "dslite")) {
+      # DSLite fallback: use DS method directly
+      spec_enc <- .ds_encode(spec)
+      DSI::datashield.assign.expr(conns[srv], symbol = job_id,
+        expr = call("jobSubmitDS", spec_enc))
+      submissions[[srv]] <- list(method = "ds_method", username = backend$username)
+    } else {
+      # Opal or Armadillo: submit via control plane backend
+      backend$cp_submit(job_id, spec)
+      submissions[[srv]] <- list(method = backend$type, username = backend$username)
+    }
+  }
 
-  submission <- list(
-    symbol = symbol,
-    job_ids = job_ids,
-    label = job$label,
-    servers = names(conns),
-    submitted_at = Sys.time(),
-    status = results
-  )
-  class(submission) <- c("dsjobs_submission", "list")
-  submission
+  result <- list(job_id = job_id, label = job$label, visibility = job$visibility,
+    servers = names(conns), submissions = submissions, submitted_at = Sys.time())
+  class(result) <- c("dsjobs_submission", "list")
+  result
 }
 
 #' @export
 print.dsjobs_submission <- function(x, ...) {
   cat("dsjobs_submission\n")
-  cat("  Symbol:", x$symbol, "\n")
+  cat("  Job ID:", x$job_id, "\n")
   if (!is.null(x$label)) cat("  Label:", x$label, "\n")
   cat("  Submitted:", format(x$submitted_at, "%Y-%m-%d %H:%M:%S"), "\n")
-  for (srv in names(x$job_ids)) {
-    st <- x$status[[srv]]$state %||% "?"
-    cat("  ", srv, ":", x$job_ids[[srv]], "(", st, ")\n")
+  for (srv in names(x$submissions)) {
+    s <- x$submissions[[srv]]
+    cat("  ", srv, ": ", s$method, " (", s$username, ")\n", sep = "")
   }
   invisible(x)
 }
