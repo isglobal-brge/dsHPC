@@ -1,10 +1,22 @@
 # Module: Armadillo Backend (uses MolgenisArmadillo)
 # Control plane via Armadillo project store per-user.
 # Project naming: dsjobs__<username> for private, dsjobs__global for shared.
+#
+# Verified against DSMolgenisArmadillo source (github.com/molgenis/molgenis-r-datashield):
+#   ArmadilloConnection S4 class: slots = name, handle, user, cookies, token
+#   conn@user = authenticated username
+#   conn@token = Bearer token (if OAuth) or "" (if basic auth)
+#
+# Verified against MolgenisArmadillo source (github.com/molgenis/molgenis-r-armadillo):
+#   armadillo.create_project(project_name, users)
+#   armadillo.upload_resource(project, folder, resource, name)
+#     -> resource is an R object, uploaded as .rds
+#   armadillo.list_resources(project) -> character vector of "folder/name"
+#   armadillo.load_resource(project, folder, name) -> loads .rds from store
+#   Auth: armadillo.login() (OAuth2 device flow) or armadillo.login_basic()
 
 #' @keywords internal
 .backend_armadillo <- function(conn) {
-  # ArmadilloConnection stores username in @user slot
   username <- tryCatch(conn@user, error = function(e) "anonymous")
 
   list(
@@ -14,61 +26,69 @@
     cp_submit = function(job_id, spec) {
       project <- paste0("dsjobs__", username)
       .armadillo_ensure_project(project)
-      spec_json <- jsonlite::toJSON(spec, auto_unbox = TRUE, null = "null")
-      # Upload spec as a resource in the project
-      tmp <- tempfile(paste0(job_id, "_"), fileext = ".json")
-      on.exit(unlink(tmp))
-      writeLines(spec_json, tmp)
+      # armadillo.upload_resource takes an R object (serialized as .rds)
       MolgenisArmadillo::armadillo.upload_resource(
-        project = project, folder = "inbox", name = job_id, filepath = tmp)
+        project = project, folder = "inbox",
+        resource = spec, name = job_id)
     },
 
     cp_read_status = function(job_id) {
       project <- paste0("dsjobs__", username)
-      tryCatch({
-        tmp <- tempfile(fileext = ".json")
-        on.exit(unlink(tmp))
+      tryCatch(
         MolgenisArmadillo::armadillo.load_resource(
-          project = project, folder = "jobs", name = paste0(job_id, "_state"),
-          destination = tmp)
-        jsonlite::fromJSON(readLines(tmp, warn = FALSE), simplifyVector = FALSE)
-      }, error = function(e) NULL)
+          project = project, folder = "jobs",
+          name = paste0(job_id, "_state")),
+        error = function(e) NULL)
     },
 
     cp_read_result = function(job_id) {
       project <- paste0("dsjobs__", username)
-      tryCatch({
-        tmp <- tempfile(fileext = ".json")
-        on.exit(unlink(tmp))
+      tryCatch(
         MolgenisArmadillo::armadillo.load_resource(
-          project = project, folder = "jobs", name = paste0(job_id, "_result"),
-          destination = tmp)
-        jsonlite::fromJSON(readLines(tmp, warn = FALSE), simplifyVector = FALSE)
-      }, error = function(e) NULL)
+          project = project, folder = "jobs",
+          name = paste0(job_id, "_result")),
+        error = function(e) NULL)
     },
 
     cp_list_jobs = function(label = NULL) {
       project <- paste0("dsjobs__", username)
       tryCatch({
         resources <- MolgenisArmadillo::armadillo.list_resources(project = project)
-        # Filter to job state resources in the "jobs" folder
-        job_resources <- resources[grepl("^jobs/.*_state$", resources)]
-        if (length(job_resources) == 0) return(.empty_job_list())
-        # Would need to download each state -- simplified for now
-        .empty_job_list()
+        # Resources are "folder/name" strings. Filter to inbox entries.
+        inbox_items <- resources[grepl("^inbox/", resources)]
+        if (length(inbox_items) == 0) return(.empty_job_list())
+
+        # Read each state from jobs folder
+        rows <- lapply(inbox_items, function(item) {
+          jid <- sub("^inbox/", "", item)
+          st <- tryCatch(
+            MolgenisArmadillo::armadillo.load_resource(
+              project = project, folder = "jobs",
+              name = paste0(jid, "_state")),
+            error = function(e) NULL)
+          if (is.null(st)) return(NULL)
+          if (!is.null(label) && !identical(st$label, label)) return(NULL)
+          data.frame(job_id = jid, state = st$state %||% "UNKNOWN",
+            label = st$label %||% NA_character_,
+            visibility = st$visibility %||% "private",
+            submitted_at = st$submitted_at %||% "",
+            progress = paste0(st$step_index %||% 0, "/", st$total_steps %||% 0),
+            stringsAsFactors = FALSE)
+        })
+        rows <- Filter(Negate(is.null), rows)
+        if (length(rows) == 0) return(.empty_job_list())
+        do.call(rbind, rows)
       }, error = function(e) .empty_job_list())
     },
 
     cp_cancel = function(job_id) {
       project <- paste0("dsjobs__", username)
-      tmp <- tempfile("cancel_", fileext = ".json")
-      on.exit(unlink(tmp))
-      writeLines(jsonlite::toJSON(list(action = "cancel"),
-        auto_unbox = TRUE), tmp)
       tryCatch(
         MolgenisArmadillo::armadillo.upload_resource(
           project = project, folder = "jobs",
-          name = paste0(job_id, "_cancel"), filepath = tmp),
+          resource = list(action = "cancel",
+            requested_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")),
+          name = paste0(job_id, "_cancel")),
         error = function(e) NULL)
     }
   )
@@ -78,5 +98,5 @@
 .armadillo_ensure_project <- function(project) {
   tryCatch(
     MolgenisArmadillo::armadillo.create_project(project),
-    error = function(e) NULL)  # Already exists
+    error = function(e) NULL)
 }
