@@ -15,8 +15,13 @@ ds.jobs.submit <- function(conns, job) {
     stop("'job' must be a dsjobs_job object.", call. = FALSE)
 
   job_id <- .generate_job_id()
+  access_token <- .generate_access_token()
+
   spec <- as.list(job)
   spec$job_id <- job_id
+  # Client generates token, sends hash to server. Token never leaves client.
+  spec$.access_token_hash <- digest::digest(access_token, algo = "sha256",
+                                             serialize = FALSE)
 
   submissions <- list()
   for (srv in names(conns)) {
@@ -28,7 +33,6 @@ ds.jobs.submit <- function(conns, job) {
     }
 
     # 2. Also submit via DS method for immediate execution
-    #    Inject the verified username from the backend
     spec$.owner <- backend$username
     spec_enc <- .ds_encode(spec)
     DSI::datashield.assign.expr(conns[srv], symbol = job_id,
@@ -43,7 +47,8 @@ ds.jobs.submit <- function(conns, job) {
   # Get initial status
   results <- .ds_safe_aggregate(conns, expr = call("jobStatusDS", job_id))
 
-  result <- list(job_id = job_id, label = job$label, visibility = job$visibility,
+  result <- list(job_id = job_id, access_token = access_token,
+    label = job$label, visibility = job$visibility,
     servers = names(conns), submissions = submissions,
     submitted_at = Sys.time(), status = results)
   class(result) <- c("dsjobs_submission", "list")

@@ -28,6 +28,12 @@
   } else x
 }
 
+#' Generate a high-entropy access token (256 bits hex)
+#' @keywords internal
+.generate_access_token <- function() {
+  paste(sample(c(0:9, letters[1:6]), 64, replace = TRUE), collapse = "")
+}
+
 #' @keywords internal
 .ds_safe_aggregate <- function(conns, expr) {
   server_names <- names(conns)
