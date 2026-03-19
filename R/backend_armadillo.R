@@ -4,8 +4,8 @@
 
 #' @keywords internal
 .backend_armadillo <- function(conn) {
-  # Extract username from ArmadilloConnection
-  username <- tryCatch(conn@name, error = function(e) "anonymous")
+  # ArmadilloConnection stores username in @user slot
+  username <- tryCatch(conn@user, error = function(e) "anonymous")
 
   list(
     type = "armadillo",
