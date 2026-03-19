@@ -1,18 +1,14 @@
 # Module: Blocking Wait
-# Polls job status until completion or timeout.
 
 #' Wait for a job to complete on all nodes
 #'
-#' Blocking poll with progress messages.
-#'
 #' @param conns DSI connections object.
 #' @param symbol Character; job handle symbol.
-#' @param timeout Numeric; max seconds to wait (default 3600).
-#' @param poll_interval Numeric; seconds between polls (default 5).
-#' @return A \code{dsjobs_result} with final per-site status.
+#' @param timeout Numeric; max seconds to wait.
+#' @param poll_interval Numeric; seconds between polls.
+#' @return A dsjobs_result with final per-site status.
 #' @export
-ds.jobs.wait <- function(conns, symbol, timeout = 3600,
-                          poll_interval = 5) {
+ds.jobs.wait <- function(conns, symbol, timeout = 3600, poll_interval = 5) {
   deadline <- Sys.time() + timeout
   srv_names <- names(conns)
   done <- stats::setNames(rep(FALSE, length(srv_names)), srv_names)
@@ -25,16 +21,13 @@ ds.jobs.wait <- function(conns, symbol, timeout = 3600,
     pending <- srv_names[!done]
     if (length(pending) == 0) break
 
-    statuses <- .ds_safe_aggregate(
-      conns[pending],
-      expr = call("jobStatusDS", symbol)
-    )
+    statuses <- .ds_safe_aggregate(conns[pending],
+      expr = call("jobStatusDS", symbol))
 
     for (srv in pending) {
       st <- statuses[[srv]]
       if (is.null(st)) next
 
-      # Print progress if changed
       progress_key <- paste0(st$step_index, "/", st$total_steps, ":", st$state)
       if (!identical(last_progress[[srv]], progress_key)) {
         message("  ", srv, ": ", st$state,
@@ -55,16 +48,10 @@ ds.jobs.wait <- function(conns, symbol, timeout = 3600,
   }
 
   if (!all(done)) {
-    failed <- srv_names[!done]
-    warning("Timeout waiting for job on: ", paste(failed, collapse = ", "),
-            call. = FALSE)
+    warning("Timeout waiting for job on: ",
+            paste(srv_names[!done], collapse = ", "), call. = FALSE)
   }
 
-  # Return final status
   final <- .ds_safe_aggregate(conns, expr = call("jobStatusDS", symbol))
-
-  dsjobs_result(
-    per_site = final,
-    meta = list(scope = "per_site")
-  )
+  dsjobs_result(per_site = final, meta = list(scope = "per_site"))
 }

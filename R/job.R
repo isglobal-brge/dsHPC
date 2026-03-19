@@ -1,48 +1,35 @@
 # Module: Job Constructor
-# Composes steps into an immutable job specification.
 
 #' Create a job specification
 #'
-#' @param steps List of \code{dsjobs_step} objects.
-#' @param publish Named list with publish config (dataset_id, asset_name,
-#'   asset_type), or NULL.
-#' @param resource_class Character; resource class hint (default "default").
-#' @param ... Additional metadata to include in the spec.
-#' @return A \code{dsjobs_job} S3 object.
+#' @param steps List of dsjobs_step objects.
+#' @param publish Named list with publish config, or NULL.
+#' @param resource_class Character; resource class hint.
+#' @param ... Additional metadata.
+#' @return A dsjobs_job object.
 #' @export
 ds_job <- function(steps, publish = NULL, resource_class = NULL, ...) {
   if (!is.list(steps) || length(steps) == 0) {
     stop("A job must contain at least one step.", call. = FALSE)
   }
-
-  # Validate all steps are dsjobs_step objects
   for (i in seq_along(steps)) {
     if (!inherits(steps[[i]], "dsjobs_step")) {
-      stop("Step ", i, " is not a dsjobs_step object. ",
-           "Use ds_step_*() constructors.", call. = FALSE)
+      stop("Step ", i, " is not a dsjobs_step object.", call. = FALSE)
     }
   }
 
-  # Strip S3 class from steps for clean serialization
   steps_plain <- lapply(steps, function(s) {
     s_list <- as.list(s)
     class(s_list) <- NULL
     s_list
   })
 
-  job <- list(
-    steps = steps_plain,
-    publish = publish,
-    resource_class = resource_class %||% "default",
-    ...
-  )
+  job <- list(steps = steps_plain, publish = publish,
+              resource_class = resource_class %||% "default", ...)
   class(job) <- c("dsjobs_job", "list")
   job
 }
 
-#' Print a dsjobs_job
-#' @param x A dsjobs_job object.
-#' @param ... Additional arguments (ignored).
 #' @export
 print.dsjobs_job <- function(x, ...) {
   cat("dsjobs_job\n")
@@ -51,13 +38,11 @@ print.dsjobs_job <- function(x, ...) {
   if (!is.null(x$publish)) {
     cat("  Publish:", x$publish$asset_name %||% "(configured)", "\n")
   }
-
   for (i in seq_along(x$steps)) {
     s <- x$steps[[i]]
     cat("  [", i, "] ", s$type, " (", s$plane, ")",
         if (!is.null(s$runner)) paste0(" runner=", s$runner) else "",
         "\n", sep = "")
   }
-
   invisible(x)
 }

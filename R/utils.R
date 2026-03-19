@@ -1,22 +1,12 @@
 # Module: Client Utilities
-# Transport encoding, symbol generation, and resilient aggregation.
+# Transport encoding, symbol generation, resilient aggregation.
 
-#' Generate a unique temporary symbol name
-#'
-#' @param prefix Character; prefix for the generated symbol.
-#' @return Character; a unique symbol string.
 #' @keywords internal
 .generate_symbol <- function(prefix = "dsJ") {
   paste0(prefix, ".",
-         paste(sample(c(letters, LETTERS, 0:9), 6,
-                       replace = TRUE),
-               collapse = ""))
+         paste(sample(c(letters, LETTERS, 0:9), 6, replace = TRUE), collapse = ""))
 }
 
-#' Encode a complex R object for DataSHIELD transport
-#'
-#' @param x An R object to encode.
-#' @return A B64-encoded string if x is complex, or x unchanged if scalar.
 #' @keywords internal
 .ds_encode <- function(x) {
   if (is.list(x) || (is.vector(x) && length(x) > 1)) {
@@ -31,11 +21,6 @@
   }
 }
 
-#' Resilient datashield.aggregate that tolerates per-server failures
-#'
-#' @param conns DSI connections object.
-#' @param expr The call expression to evaluate.
-#' @return Named list of results (only successful servers).
 #' @keywords internal
 .ds_safe_aggregate <- function(conns, expr) {
   server_names <- names(conns)
@@ -49,8 +34,6 @@
       errors[[srv]] <<- e$message
     })
   }
-  if (length(errors) > 0) {
-    attr(results, "ds_errors") <- errors
-  }
+  if (length(errors) > 0) attr(results, "ds_errors") <- errors
   results
 }
