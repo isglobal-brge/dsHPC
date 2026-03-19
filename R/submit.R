@@ -1,11 +1,10 @@
 # Module: Job Submission
-# Routes through the detected backend (Opal/Armadillo/DSLite).
+# Dual-path: filesystem for identity + DS method for execution.
 
 #' Submit a job to all nodes
 #'
-#' Detects the backend for each connection and submits via the
-#' appropriate control plane (Opal filesystem, Armadillo project, or
-#' DSLite DS method fallback).
+#' For Opal/Armadillo: writes spec to user's inbox (identity) AND
+#' calls jobSubmitDS (execution). For DSLite: DS method only.
 #'
 #' @param conns DSI connections object.
 #' @param job A dsjobs_job object.
@@ -23,21 +22,30 @@ ds.jobs.submit <- function(conns, job) {
   for (srv in names(conns)) {
     backend <- .detect_backend(conns[[srv]])
 
-    if (identical(backend$type, "dslite")) {
-      # DSLite fallback: use DS method directly
-      spec_enc <- .ds_encode(spec)
-      DSI::datashield.assign.expr(conns[srv], symbol = job_id,
-        expr = call("jobSubmitDS", spec_enc))
-      submissions[[srv]] <- list(method = "ds_method", username = backend$username)
-    } else {
-      # Opal or Armadillo: submit via control plane backend
-      backend$cp_submit(job_id, spec)
-      submissions[[srv]] <- list(method = backend$type, username = backend$username)
+    # 1. Write to filesystem for identity/audit trail
+    if (!identical(backend$type, "dslite")) {
+      tryCatch(backend$cp_submit(job_id, spec), error = function(e) NULL)
     }
+
+    # 2. Also submit via DS method for immediate execution
+    #    Inject the verified username from the backend
+    spec$.owner <- backend$username
+    spec_enc <- .ds_encode(spec)
+    DSI::datashield.assign.expr(conns[srv], symbol = job_id,
+      expr = call("jobSubmitDS", spec_enc))
+
+    submissions[[srv]] <- list(
+      method = backend$type,
+      username = backend$username
+    )
   }
 
+  # Get initial status
+  results <- .ds_safe_aggregate(conns, expr = call("jobStatusDS", job_id))
+
   result <- list(job_id = job_id, label = job$label, visibility = job$visibility,
-    servers = names(conns), submissions = submissions, submitted_at = Sys.time())
+    servers = names(conns), submissions = submissions,
+    submitted_at = Sys.time(), status = results)
   class(result) <- c("dsjobs_submission", "list")
   result
 }
@@ -51,6 +59,14 @@ print.dsjobs_submission <- function(x, ...) {
   for (srv in names(x$submissions)) {
     s <- x$submissions[[srv]]
     cat("  ", srv, ": ", s$method, " (", s$username, ")\n", sep = "")
+  }
+  if (!is.null(x$status)) {
+    for (srv in names(x$status)) {
+      st <- x$status[[srv]]
+      if (!is.null(st$state))
+        cat("  ", srv, ": ", st$state, " [", st$step_index %||% 0,
+            "/", st$total_steps %||% 0, "]\n", sep = "")
+    }
   }
   invisible(x)
 }
