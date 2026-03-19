@@ -1,11 +1,27 @@
 Package: dsJobsClient
-Title: 
+Type: Package
+Title: DataSHIELD Client for Durable Federated Job Runtime
 Version: 0.1.0
-Authors@R:
-    c(person("David", "Sarrat González", , "david.sarrat@isglobal.org", role = c("aut", "cre")),
-      person("Juan R", "González", , "juanr.gonzalez@isglobal.org", role = c("aut")))
-Description: 
+Authors@R: c(
+    person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
+    person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))
+Description: Client-side DataSHIELD package for composing and orchestrating
+    durable federated jobs. Provides step constructors for session-plane
+    (DataSHIELD assign/aggregate/checkpoint) and artifact-plane (radiomics,
+    preprocessing, staging) operations. Jobs are submitted as immutable specs,
+    executed durably on hospital nodes, and return disclosure-safe results.
+    Includes domain DSLs for radiomics extraction and imaging preprocessing.
 License: MIT + file LICENSE
 Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    DSI,
+    jsonlite
+Suggests:
+    testthat (>= 3.0.0),
+    withr,
+    DSLite
+Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
