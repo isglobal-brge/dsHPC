@@ -28,12 +28,6 @@
   } else x
 }
 
-#' Generate a high-entropy access token (256 bits hex)
-#' @keywords internal
-.generate_access_token <- function() {
-  paste(sample(c(0:9, letters[1:6]), 64, replace = TRUE), collapse = "")
-}
-
 #' @keywords internal
 .ds_safe_aggregate <- function(conns, expr) {
   server_names <- names(conns)
@@ -47,4 +41,12 @@
   }
   if (length(errors) > 0) attr(results, "ds_errors") <- errors
   results
+}
+
+#' @keywords internal
+.empty_job_list <- function() {
+  data.frame(job_id = character(0), state = character(0),
+    label = character(0), visibility = character(0),
+    owner_id = character(0), submitted_at = character(0),
+    progress = character(0), stringsAsFactors = FALSE)
 }

@@ -11,12 +11,11 @@ ds.jobs.wait <- function(conns, job_id, timeout = 3600, poll_interval = 5) {
   message("Waiting for job '", job_id, "' ...")
   while (Sys.time() < deadline) {
     for (srv in srv_names[!done]) {
-      backend <- .detect_backend(conns[[srv]])
-      st <- if (identical(backend$type, "dslite")) {
-        tryCatch({ r <- DSI::datashield.aggregate(conns[srv],
-          expr = call("jobStatusDS", job_id)); r[[srv]] },
-          error = function(e) NULL)
-      } else backend$cp_read_status(job_id)
+      st <- tryCatch({
+        r <- DSI::datashield.aggregate(conns[srv],
+          expr = call("jobStatusDS", job_id))
+        r[[srv]]
+      }, error = function(e) NULL)
 
       if (is.null(st)) next
       key <- paste0(st$step_index %||% 0, "/", st$total_steps %||% 0, ":", st$state)

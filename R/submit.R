@@ -1,33 +1,25 @@
 # Module: Job Submission
-# Dual-path: filesystem for identity + DS method for execution.
+# DS method path: spec is submitted via datashield.assign.expr.
 
 #' Submit a job to all nodes
 #'
 #' @param conns DSI connections object.
 #' @param job A dsjobs_job object.
-#' @return A dsjobs_submission with job_id, access_token, per-server details.
+#' @return A dsjobs_submission with job_id and per-server details.
 #' @export
 ds.jobs.submit <- function(conns, job) {
   if (!inherits(job, "dsjobs_job"))
     stop("'job' must be a dsjobs_job object.", call. = FALSE)
 
   job_id <- .generate_job_id()
-  access_token <- .generate_access_token()
 
   spec <- as.list(job)
   spec$job_id <- job_id
-  spec$.access_token_hash <- digest::digest(access_token, algo = "sha256",
-                                             serialize = FALSE)
 
   submissions <- list()
   for (srv in names(conns)) {
     backend <- .detect_backend(conns[[srv]])
-
-    if (!identical(backend$type, "dslite")) {
-      spec$.owner <- backend$username
-      tryCatch(backend$cp_submit(job_id, spec), error = function(e)
-        warning("Inbox write failed on ", srv, ": ", e$message, call. = FALSE))
-    }
+    spec$.owner <- backend$username
 
     spec_enc <- .ds_encode(spec)
     DSI::datashield.assign.expr(conns[srv], symbol = job_id,
@@ -36,7 +28,7 @@ ds.jobs.submit <- function(conns, job) {
     submissions[[srv]] <- list(method = backend$type, username = backend$username)
   }
 
-  result <- list(job_id = job_id, access_token = access_token,
+  result <- list(job_id = job_id,
     label = job$label, visibility = job$visibility,
     servers = names(conns), submissions = submissions,
     submitted_at = Sys.time())

@@ -1,17 +1,17 @@
 # Module: Job Outputs
 
 #' @export
-ds.jobs.outputs <- function(conns, job_id, access_token = NULL) {
+ds.jobs.outputs <- function(conns, job_id) {
   results <- .ds_safe_aggregate(conns,
-    expr = call("jobOutputsDS", job_id, access_token))
+    expr = call("jobOutputsDS", job_id))
   dsjobs_result(per_site = results)
 }
 
 #' @export
 ds.jobs.load_output <- function(conns, job_id, output_name,
-                                 symbol = output_name, access_token = NULL) {
+                                 symbol = output_name) {
   DSI::datashield.assign.expr(conns, symbol = symbol,
-    expr = call("jobLoadOutputDS", job_id, output_name, access_token))
+    expr = call("jobLoadOutputDS", job_id, output_name))
   invisible(NULL)
 }
 
@@ -22,8 +22,8 @@ ds.jobs.capabilities <- function(conns) {
 }
 
 #' @export
-ds.jobs.logs <- function(conns, job_id, last_n = 50L, access_token = NULL) {
+ds.jobs.logs <- function(conns, job_id, last_n = 50L) {
   results <- .ds_safe_aggregate(conns,
-    expr = call("jobLogsDS", job_id, as.integer(last_n), access_token))
+    expr = call("jobLogsDS", job_id, as.integer(last_n)))
   dsjobs_result(per_site = results)
 }
