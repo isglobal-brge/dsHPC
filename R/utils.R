@@ -2,12 +2,7 @@
 
 #' @keywords internal
 .generate_job_id <- function() {
-  if (requireNamespace("uuid", quietly = TRUE)) {
-    paste0("job_", uuid::UUIDgenerate())
-  } else {
-    hex <- paste(sample(c(0:9, letters[1:6]), 32, replace = TRUE), collapse = "")
-    paste0("job_", hex)
-  }
+  paste0("job_", gsub("-", "", uuid::UUIDgenerate()))
 }
 
 #' @keywords internal
