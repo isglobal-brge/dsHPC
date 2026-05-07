@@ -18,6 +18,19 @@
   }
 
   args <- .build_runner_args(runner_config, step, step_dir, input_dir)
+
+  # Wrap with /usr/bin/env so runner-declared env vars in runner_config$env are
+  # actually applied to the spawned process, regardless of how processx handles
+  # the `env =` argument (some configurations silently drop appended entries).
+  if (!is.null(runner_config$env) && is.list(runner_config$env) &&
+      length(runner_config$env) > 0 && file.exists("/usr/bin/env")) {
+    env_args <- c(unname(vapply(names(runner_config$env), function(k) {
+      v <- as.character(runner_config$env[[k]])
+      paste0(k, "=", v)
+    }, character(1))), command)
+    args <- c(env_args, args)
+    command <- "/usr/bin/env"
+  }
   output_dir <- file.path(step_dir, "output")
 
   # processx expects named character vector: c(VAR = "value", ...)
@@ -29,7 +42,11 @@
     DSJOBS_STEP_DIR = step_dir,
     DSJOBS_OUTPUT_DIR = output_dir,
     DSJOBS_JOB_ID = job_id,
-    DSJOBS_STEP_INDEX = as.character(step_index))
+    DSJOBS_STEP_INDEX = as.character(step_index),
+    # MKL workaround for amd64-on-arm64 Rosetta emulation. Harmless on other
+    # platforms. (Without these, Intel oneMKL refuses to load libtorch_cpu.so.)
+    MKL_SERVICE_FORCE_INTEL = "0",
+    MKL_THREADING_LAYER = "GNU")
   if (!is.null(input_dir))
     env_vars <- c(env_vars, DSJOBS_INPUT_DIR = input_dir)
   if (!is.null(step$config)) {
@@ -46,6 +63,27 @@
       env_vars <- c(env_vars, new_var)
     }
   }
+
+  # Runner-declared env vars from the YAML config (e.g. MKL workarounds for
+  # torch under Rosetta emulation). Anything in runner_config$env is merged in.
+  if (!is.null(runner_config$env) && is.list(runner_config$env)) {
+    for (nm in names(runner_config$env)) {
+      if (!nzchar(nm)) next
+      if (toupper(nm) %in% .BLOCKED_ENV_VARS) next
+      v <- as.character(runner_config$env[[nm]])
+      names(v) <- nm
+      env_vars <- c(env_vars, v)
+    }
+  }
+
+  # Persist the resolved command/args/env next to the step output. Useful for
+  # post-mortem debugging when a runner exits non-zero; harmless otherwise.
+  tryCatch(writeLines(
+    c(paste0("# job=", job_id, " step=", step_index),
+      paste0("# command=", command),
+      paste0("# args=", paste(args, collapse = " ")),
+      paste(names(env_vars), env_vars, sep = "=")),
+    file.path(step_dir, "env.log")), error = function(e) NULL)
 
   proc <- processx::process$new(
     command = command, args = args,

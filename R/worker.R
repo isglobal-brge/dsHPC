@@ -20,10 +20,16 @@
   }
   log_file <- file.path(home, "worker.log")
   worker_script <- system.file("worker", "main.R", package = "dsJobs")
+  # Inherit current env, but force MKL/OpenMP settings that are known to be
+  # required for torch to load under some hosts (notably Apple Silicon Rosetta
+  # emulation of amd64). Harmless on native amd64/arm64 Linux.
   proc <- processx::process$new(
     command = file.path(R.home("bin"), "Rscript"),
     args = c(worker_script, home),
     stdout = log_file, stderr = log_file,
+    env = c("current",
+            MKL_SERVICE_FORCE_INTEL = "0",
+            MKL_THREADING_LAYER = "GNU"),
     cleanup = FALSE, cleanup_tree = FALSE)
   writeLines(as.character(proc$get_pid()), pid_file)
   .dsjobs_env$.worker <- proc
