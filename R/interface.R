@@ -369,9 +369,21 @@ jobCapabilitiesDS <- function() {
   names(runner_details) <- runners
 
   worker_health <- .dsjobs_worker_health()
+  active <- tryCatch({
+    db <- .db_connect()
+    on.exit(.db_close(db), add = TRUE)
+    DBI::dbGetQuery(db,
+      "SELECT state, COUNT(*) AS n FROM jobs
+       WHERE state IN ('PENDING','RUNNING') GROUP BY state")
+  }, error = function(e) {
+    data.frame(state = character(0), n = integer(0), stringsAsFactors = FALSE)
+  })
 
   list(dsjobs_version = as.character(utils::packageVersion("dsJobs")),
        runners = runner_details, publishers = .list_publishers(),
+       home = .dsjobs_home(must_exist = FALSE),
+       directories = .dsjobs_home_health(),
+       active_jobs = active,
        max_jobs_global = settings$max_jobs_global,
        max_steps_per_job = settings$max_steps_per_job,
        worker = worker_health,
@@ -457,4 +469,3 @@ jobAdminCancelDS <- function(job_id, admin_key = NULL) {
   .db_log_event(db, job_id, "admin_cancelled")
   list(job_id = job_id, state = "CANCELLED")
 }
-

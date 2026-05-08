@@ -1,6 +1,6 @@
 # Module: Worker Daemon
 # External process. NOT started from .onAttach().
-# Started by admin via: Rscript inst/worker/main.R /var/lib/dsjobs
+# Started by admin via: Rscript inst/worker/main.R /srv/dsjobs
 # Or by helper: dsJobs:::.dsjobs_worker_start()
 # Supervised by systemd, Docker restart policy, or cron.
 

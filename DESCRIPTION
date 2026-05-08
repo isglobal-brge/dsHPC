@@ -38,6 +38,8 @@ AggregateMethods:
     jobListDS,
     jobOutputsDS,
     jobCapabilitiesDS,
+    jobAdminListDS,
+    jobAdminCancelDS,
     c=base::c,
     list=base::list
 AssignMethods:
