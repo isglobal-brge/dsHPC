@@ -36,6 +36,7 @@
     delegates_resources = .executor_delegates_resources(settings),
     reason = "ok",
     commands = list(),
+    capabilities = .backend_capabilities(settings),
     container = .backend_container_status(settings),
     path_mappings = .backend_path_mappings(settings))
 
@@ -149,8 +150,9 @@
   required <- as.integer(profile$gpus %||% 0L)
   optional <- as.integer(profile$optional_gpus %||% 0L)
   policy <- tolower(as.character(settings$backend_request_optional_gpus %||% "auto")[1])
-  backend_count_raw <- settings$backend_gpu_count %||% "auto"
-  backend_count <- suppressWarnings(as.integer(backend_count_raw))
+  capacity <- .backend_gpu_capacity(settings)
+  backend_count_raw <- capacity$configured
+  backend_count <- capacity$count
   requested <- required
   if (requested <= 0L && optional > 0L) {
     if (policy %in% c("always", "true", "yes", "1")) {
@@ -164,7 +166,178 @@
     }
   }
   list(required = required, optional = optional, requested = requested,
-       policy = policy, backend_gpu_count = backend_count_raw)
+       policy = policy, backend_gpu_count = backend_count_raw,
+       backend_gpu_source = capacity$source)
+}
+
+#' @keywords internal
+.backend_gpu_capacity <- function(settings = .dsjobs_settings()) {
+  configured <- settings$backend_gpu_count %||% "auto"
+  if (is.numeric(configured) && length(configured) == 1 && is.finite(configured)) {
+    return(list(count = max(0L, as.integer(configured)),
+                source = "option", configured = configured))
+  }
+  configured_chr <- as.character(configured %||% "auto")[1]
+  if (!nzchar(configured_chr)) configured_chr <- "auto"
+  if (!identical(tolower(configured_chr), "auto")) {
+    num <- suppressWarnings(as.integer(configured_chr))
+    if (is.finite(num)) {
+      return(list(count = max(0L, num), source = "option",
+                  configured = configured_chr))
+    }
+  }
+
+  caps <- .backend_capabilities(settings)
+  count <- suppressWarnings(as.integer(caps$gpus %||% NA_integer_))
+  if (is.finite(count)) {
+    return(list(count = max(0L, count),
+                source = caps$source %||% "backend_capabilities",
+                configured = configured_chr))
+  }
+  list(count = NA_integer_, source = caps$source %||% "unknown",
+       configured = configured_chr)
+}
+
+#' @keywords internal
+.backend_capabilities <- function(settings = .dsjobs_settings(), force = FALSE) {
+  backend <- .executor_backend_name(settings)
+  key <- paste(backend,
+               paste(as.character(settings$backend_capabilities_cmd %||% ""), collapse = "\001"),
+               as.character(settings$slurm_sinfo %||% ""),
+               as.character(settings$slurm_partition %||% ""),
+               sep = "\002")
+  ttl <- suppressWarnings(as.numeric(settings$backend_capabilities_ttl_secs %||% 30))
+  if (!is.finite(ttl) || ttl < 0) ttl <- 30
+  cache <- .dsjobs_env$.backend_capabilities_cache
+  now <- Sys.time()
+  if (!force && is.list(cache) && identical(cache$key, key) &&
+      isTRUE(difftime(now, cache$time, units = "secs") < ttl)) {
+    return(cache$value)
+  }
+
+  value <- switch(backend,
+    slurm = .backend_slurm_capabilities(settings),
+    external = .backend_external_capabilities(settings),
+    embedded = .backend_local_capabilities(settings),
+    list(source = "unsupported", available = FALSE, gpus = NA_integer_,
+         gpu_memory_mb = NA_integer_))
+  .dsjobs_env$.backend_capabilities_cache <- list(key = key, time = now,
+                                                  value = value)
+  value
+}
+
+#' @keywords internal
+.backend_local_capabilities <- function(settings = .dsjobs_settings()) {
+  gpu <- .scheduler_gpu_inventory(settings)
+  list(source = gpu$backend, available = TRUE, gpus = gpu$count,
+       gpu_memory_mb = gpu$total_memory_mb)
+}
+
+#' @keywords internal
+.backend_external_capabilities <- function(settings = .dsjobs_settings()) {
+  cmd <- .backend_command_parts(settings$backend_capabilities_cmd)
+  if (!nzchar(cmd$command)) {
+    return(list(source = "external_capabilities_not_configured",
+                available = FALSE, gpus = NA_integer_,
+                gpu_memory_mb = NA_integer_))
+  }
+  out <- tryCatch(system2(cmd$command, cmd$args, stdout = TRUE, stderr = TRUE),
+    error = function(e) structure(character(0), status = 127L,
+                                  condition = conditionMessage(e)))
+  status <- attr(out, "status") %||% 0L
+  if (!identical(as.integer(status), 0L)) {
+    return(list(source = "external_capabilities_cmd_failed",
+                available = FALSE, gpus = NA_integer_,
+                gpu_memory_mb = NA_integer_))
+  }
+  .backend_parse_capabilities_output(out, "external_capabilities_cmd")
+}
+
+#' @keywords internal
+.backend_slurm_capabilities <- function(settings = .dsjobs_settings()) {
+  sinfo <- .backend_resolve_cmd(settings$slurm_sinfo, "sinfo")
+  if (!nzchar(sinfo)) {
+    return(list(source = "slurm_sinfo_not_found", available = FALSE,
+                gpus = NA_integer_, gpu_memory_mb = NA_integer_))
+  }
+  args <- c("-h", "-o", "%G")
+  if (nzchar(settings$slurm_partition %||% "")) {
+    args <- c("-p", settings$slurm_partition, args)
+  }
+  out <- tryCatch(system2(sinfo, args, stdout = TRUE, stderr = FALSE),
+    error = function(e) structure(character(0), status = 127L))
+  status <- attr(out, "status") %||% 0L
+  if (!identical(as.integer(status), 0L)) {
+    return(list(source = "slurm_sinfo_failed", available = FALSE,
+                gpus = NA_integer_, gpu_memory_mb = NA_integer_))
+  }
+  list(source = "slurm_sinfo", available = TRUE,
+       gpus = .backend_parse_slurm_gpu_count(out),
+       gpu_memory_mb = NA_integer_)
+}
+
+#' @keywords internal
+.backend_parse_capabilities_output <- function(lines, source) {
+  text <- paste(lines, collapse = "\n")
+  json <- trimws(text)
+  if (nzchar(json) && substr(json, 1, 1) %in% c("{", "[")) {
+    parsed <- tryCatch(jsonlite::fromJSON(json, simplifyVector = FALSE),
+      error = function(e) NULL)
+    if (is.list(parsed)) {
+      resources <- parsed$resources %||% list()
+      gpus <- parsed$gpus %||% parsed$gpu_count %||%
+        parsed$backend_gpu_count %||% resources$gpus %||% resources$gpu_count
+      gpu_mem <- parsed$gpu_memory_mb %||% resources$gpu_memory_mb
+      return(list(source = source, available = TRUE,
+                  gpus = .backend_first_integer(gpus),
+                  gpu_memory_mb = .backend_first_integer(gpu_mem)))
+    }
+  }
+
+  pairs <- list()
+  for (line in lines) {
+    pair <- strsplit(trimws(line), "=", fixed = TRUE)[[1]]
+    if (length(pair) >= 2) {
+      pairs[[tolower(trimws(pair[1]))]] <- trimws(paste(pair[-1], collapse = "="))
+    }
+  }
+  gpus <- pairs$gpus %||% pairs$gpu_count %||%
+    pairs$backend_gpu_count %||% pairs$dsjobs_backend_gpu_count
+  gpu_mem <- pairs$gpu_memory_mb %||% pairs$backend_gpu_memory_mb
+  list(source = source, available = TRUE,
+       gpus = .backend_first_integer(gpus),
+       gpu_memory_mb = .backend_first_integer(gpu_mem))
+}
+
+#' @keywords internal
+.backend_first_integer <- function(value) {
+  if (is.null(value)) return(NA_integer_)
+  num <- suppressWarnings(as.integer(value[1]))
+  if (is.finite(num)) num else NA_integer_
+}
+
+#' @keywords internal
+.backend_parse_slurm_gpu_count <- function(lines) {
+  if (length(lines) == 0) return(NA_integer_)
+  counts <- integer(0)
+  for (line in lines) {
+    tokens <- unlist(strsplit(line, "[,[:space:]]+"))
+    tokens <- tokens[nzchar(tokens)]
+    for (token in tokens) {
+      token <- sub("\\(.*$", "", token)
+      if (!grepl("(^|/)gpu(:|$)", token, ignore.case = TRUE)) next
+      match <- regexec("(^|/)gpu(?::[^:]+)?:(\\d+)$", token,
+                       ignore.case = TRUE)
+      parts <- regmatches(token, match)[[1]]
+      if (length(parts) >= 3) {
+        counts <- c(counts, as.integer(parts[3]))
+      } else {
+        counts <- c(counts, 1L)
+      }
+    }
+  }
+  if (length(counts) == 0) return(0L)
+  max(counts, na.rm = TRUE)
 }
 
 #' @keywords internal
@@ -296,7 +469,8 @@
     DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
     DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
     DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
-    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"))
+    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
+    DSJOBS_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
   mapped
 }
 
@@ -421,7 +595,8 @@
     DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
     DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
     DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
-    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"))
+    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
+    DSJOBS_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
   out <- tryCatch(system2(submit$command, submit$args, stdout = TRUE,
     stderr = TRUE, env = .backend_env(env)), error = function(e)
       stop("External submit failed: ", conditionMessage(e), call. = FALSE))
