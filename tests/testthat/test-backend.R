@@ -430,14 +430,130 @@ test_that("optional backend GPUs are requested independently of Rock GPUs", {
   expect_true("--gres=gpu:1" %in% args)
 })
 
+test_that("slurm capabilities auto-detect backend GPUs for optional requests", {
+  home <- setup_test_home()
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  sbatch <- file.path(bin, "sbatch")
+  sinfo <- file.path(bin, "sinfo")
+  args_file <- file.path(home, "sbatch_auto_gpu_args.txt")
+  withr::local_envvar(c(DSJOBS_FAKE_SLURM_ARGS = args_file))
+  writeLines(c(
+    "#!/bin/sh",
+    "printf '%s\\n' \"$@\" > \"$DSJOBS_FAKE_SLURM_ARGS\"",
+    "echo 98765"
+  ), sbatch)
+  writeLines(c("#!/bin/sh", "echo gpu:a100:4"), sinfo)
+  Sys.chmod(c(sbatch, sinfo), "0755")
+  writeLines(c(
+    "name: gpu_optional_auto",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'true']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1",
+    "  optional_gpus: 1"
+  ), file.path(home, "runners", "gpu_optional_auto.yml"))
+
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.executor_backend = "slurm",
+    dsjobs.slurm_sbatch = sbatch,
+    dsjobs.slurm_sinfo = sinfo,
+    dsjobs.node_memory_mb = 1024,
+    dsjobs.memory_reserve_mb = 0,
+    dsjobs.cpu_slots = 1,
+    dsjobs.gpu_count = 0,
+    dsjobs.backend_gpu_count = "auto",
+    dsjobs.backend_request_optional_gpus = "auto",
+    dsjobs.backend_capabilities_ttl_secs = 0
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "gpu_optional_auto", config = list())))
+  decision <- dsJobs:::.scheduler_can_start_job(db, "job_gpu_auto", spec)
+  expect_true(decision$ok)
+  dsJobs:::.store_create_job(db, "job_gpu_auto", "user", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_gpu_auto", state = "RUNNING", step_index = 1L)
+  dsJobs:::.executor_run_step(db, "job_gpu_auto", 1L, spec)
+  args <- readLines(args_file, warn = FALSE)
+  expect_true("--gres=gpu:1" %in% args)
+  expect_equal(dsJobs:::.executor_backend_status()$capabilities$gpus, 4L)
+})
+
+test_that("external capabilities command drives optional GPU requests", {
+  home <- setup_test_home()
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  submit <- file.path(bin, "submit")
+  status <- file.path(bin, "status")
+  capabilities <- file.path(bin, "capabilities")
+  writeLines(c(
+    "#!/bin/sh",
+    "printf '%s\\n' \"$DSJOBS_GPUS_REQUESTED\" > \"$DSJOBS_LOCAL_STEP_DIR/gpus_requested.txt\"",
+    "printf '%s\\n' \"$DSJOBS_BACKEND_GPU_SOURCE\" > \"$DSJOBS_LOCAL_STEP_DIR/gpu_source.txt\"",
+    "sh \"$DSJOBS_STEP_SCRIPT\" >/dev/null 2>&1",
+    "echo ext-gpu-auto"
+  ), submit)
+  writeLines(c("#!/bin/sh", "echo SUCCEEDED 0"), status)
+  writeLines(c("#!/bin/sh", "printf '{\"gpus\":2}\\n'"), capabilities)
+  Sys.chmod(c(submit, status, capabilities), "0755")
+
+  writeLines(c(
+    "name: external_gpu_optional",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'mkdir -p {output_dir}; echo ok > {output_dir}/ok.txt']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1",
+    "  optional_gpus: 1"
+  ), file.path(home, "runners", "external_gpu_optional.yml"))
+
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.executor_backend = "external",
+    dsjobs.external_submit_cmd = submit,
+    dsjobs.external_status_cmd = status,
+    dsjobs.backend_capabilities_cmd = capabilities,
+    dsjobs.backend_capabilities_ttl_secs = 0,
+    dsjobs.gpu_count = 0,
+    dsjobs.backend_gpu_count = "auto",
+    dsjobs.backend_request_optional_gpus = "auto",
+    dsjobs.max_retries = 0
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "external_gpu_optional", config = list())))
+  dsJobs:::.store_create_job(db, "job_external_gpu", "user", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_external_gpu", state = "RUNNING", step_index = 1L)
+  dsJobs:::.executor_run_step(db, "job_external_gpu", 1L, spec)
+
+  step_dir <- file.path(home, "artifacts", "job_external_gpu", "step_001")
+  expect_equal(readLines(file.path(step_dir, "gpus_requested.txt"), warn = FALSE), "1")
+  expect_equal(readLines(file.path(step_dir, "gpu_source.txt"), warn = FALSE),
+    "external_capabilities_cmd")
+  expect_equal(dsJobs:::.executor_backend_status()$capabilities$gpus, 2L)
+})
+
 options(
   dsjobs.home = NULL,
   dsjobs.executor_backend = NULL,
   dsjobs.slurm_sbatch = NULL,
   dsjobs.slurm_squeue = NULL,
   dsjobs.slurm_sacct = NULL,
+  dsjobs.slurm_sinfo = NULL,
   dsjobs.external_submit_cmd = NULL,
   dsjobs.external_status_cmd = NULL,
+  dsjobs.backend_capabilities_cmd = NULL,
+  dsjobs.backend_capabilities_ttl_secs = NULL,
   dsjobs.external_enforce_runner_concurrency = NULL)
 options(dsjobs.backend_path_mappings = NULL,
         dsjobs.container_runtime = NULL,
