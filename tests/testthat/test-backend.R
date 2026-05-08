@@ -197,6 +197,121 @@ test_that("external backend can execute through a mapped backend path", {
   expect_true(file.exists(file.path(local_step, "output", "mapped.txt")))
 })
 
+test_that("container runners use container command and backend paths", {
+  home <- setup_test_home()
+  writeLines(c(
+    "name: containerized",
+    "plane: artifact",
+    "command: /missing/on/backend",
+    "args_template: ['--would-fail']",
+    "container:",
+    "  image: alpine:latest",
+    "  runtime: docker",
+    "  pull: never",
+    "  command: /bin/sh",
+    "  args_template:",
+    "    - -c",
+    "    - mkdir -p {output_dir}; echo from_container > {output_dir}/container.txt",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1"
+  ), file.path(home, "runners", "containerized.yml"))
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.executor_backend = "external",
+    dsjobs.container_runtime = "docker",
+    dsjobs.backend_path_mappings = c(stats::setNames("/hpc/dsjobs", home))
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  step <- list(type = "run", plane = "artifact", runner = "containerized",
+    config = list())
+  local_step <- file.path(home, "artifacts", "job_container", "step_001")
+  dir.create(file.path(local_step, "output"), recursive = TRUE)
+  prepared <- dsJobs:::.prepare_artifact_command(db, "job_container", 1L,
+    step, local_step, NULL)
+  prepared$script_path <- file.path(local_step, "run_step.sh")
+  prepared <- dsJobs:::.backend_map_prepared(prepared)
+  dsJobs:::.backend_write_step_script(file.path(local_step, "run_step.sh"), prepared)
+  script <- readLines(file.path(local_step, "run_step.sh"), warn = FALSE)
+
+  expect_true(any(grepl("docker.*run", script)))
+  expect_true(any(grepl("alpine:latest", script, fixed = TRUE)))
+  expect_true(any(grepl("/bin/sh", script, fixed = TRUE)))
+  expect_false(any(grepl("/missing/on/backend", script, fixed = TRUE)))
+  expect_true(any(grepl("/hpc/dsjobs", script, fixed = TRUE)))
+})
+
+test_that("external docker container runner can execute without backend deps", {
+  if (!identical(Sys.getenv("DSJOBS_RUN_DOCKER_TESTS", unset = ""), "1"))
+    skip("set DSJOBS_RUN_DOCKER_TESTS=1 to run Docker integration test")
+  docker <- Sys.which("docker")
+  if (!nzchar(docker)) skip("docker CLI is not available")
+  has_alpine <- identical(system2(docker, c("image", "inspect", "alpine:latest"),
+    stdout = FALSE, stderr = FALSE), 0L)
+  if (!has_alpine) skip("alpine:latest image is not available locally")
+
+  home <- setup_test_home()
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  submit <- file.path(bin, "submit")
+  status <- file.path(bin, "status")
+  writeLines(c(
+    "#!/bin/sh",
+    "sh \"$DSJOBS_STEP_SCRIPT\" >/dev/null 2>&1 || exit $?",
+    "echo ext-container-123"
+  ), submit)
+  writeLines(c("#!/bin/sh", "echo SUCCEEDED 0"), status)
+  Sys.chmod(c(submit, status), "0755")
+
+  writeLines(c(
+    "name: container_shell",
+    "plane: artifact",
+    "command: /missing/on/backend",
+    "args_template: ['--would-fail']",
+    "container:",
+    "  image: alpine:latest",
+    "  runtime: docker",
+    "  pull: never",
+    "  command: /bin/sh",
+    "  args_template:",
+    "    - -c",
+    "    - mkdir -p {output_dir}; echo container_ok > {output_dir}/container.txt",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1"
+  ), file.path(home, "runners", "container_shell.yml"))
+
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.executor_backend = "external",
+    dsjobs.external_submit_cmd = submit,
+    dsjobs.external_status_cmd = status,
+    dsjobs.container_runtime = "docker",
+    dsjobs.container_pull = "never",
+    dsjobs.max_retries = 0
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "container_shell", config = list())))
+  dsJobs:::.store_create_job(db, "job_container_external", "user", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_container_external",
+    state = "RUNNING", step_index = 1L)
+  dsJobs:::.executor_run_step(db, "job_container_external", 1L, spec)
+  dsJobs:::.worker_reap(db)
+
+  job <- dsJobs:::.store_get_job(db, "job_container_external")
+  expect_equal(job$state, "FINISHED")
+  out <- file.path(home, "artifacts", "job_container_external",
+    "step_001", "output", "container.txt")
+  expect_equal(readLines(out, warn = FALSE), "container_ok")
+})
+
 test_that("slurm backend submits with runner resources and reaps completion", {
   home <- setup_test_home()
   backend_home <- file.path(tempdir(), paste0("dsjobs_slurm_backend_view_", Sys.getpid()))
@@ -265,6 +380,56 @@ test_that("slurm backend submits with runner resources and reaps completion", {
   expect_equal(job$state, "FINISHED")
 })
 
+test_that("optional backend GPUs are requested independently of Rock GPUs", {
+  home <- setup_test_home()
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  sbatch <- file.path(bin, "sbatch")
+  args_file <- file.path(home, "sbatch_gpu_args.txt")
+  withr::local_envvar(c(DSJOBS_FAKE_SLURM_ARGS = args_file))
+  writeLines(c(
+    "#!/bin/sh",
+    "printf '%s\\n' \"$@\" > \"$DSJOBS_FAKE_SLURM_ARGS\"",
+    "echo 54321"
+  ), sbatch)
+  Sys.chmod(sbatch, "0755")
+  writeLines(c(
+    "name: gpu_optional",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'true']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1",
+    "  optional_gpus: 1"
+  ), file.path(home, "runners", "gpu_optional.yml"))
+
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.executor_backend = "slurm",
+    dsjobs.slurm_sbatch = sbatch,
+    dsjobs.node_memory_mb = 1024,
+    dsjobs.memory_reserve_mb = 0,
+    dsjobs.cpu_slots = 1,
+    dsjobs.gpu_count = 0,
+    dsjobs.backend_gpu_count = 1,
+    dsjobs.backend_request_optional_gpus = "auto"
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "gpu_optional", config = list())))
+  decision <- dsJobs:::.scheduler_can_start_job(db, "job_gpu_backend", spec)
+  expect_true(decision$ok)
+  dsJobs:::.store_create_job(db, "job_gpu_backend", "user", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_gpu_backend", state = "RUNNING", step_index = 1L)
+  dsJobs:::.executor_run_step(db, "job_gpu_backend", 1L, spec)
+  args <- readLines(args_file, warn = FALSE)
+  expect_true("--gres=gpu:1" %in% args)
+})
+
 options(
   dsjobs.home = NULL,
   dsjobs.executor_backend = NULL,
@@ -274,4 +439,8 @@ options(
   dsjobs.external_submit_cmd = NULL,
   dsjobs.external_status_cmd = NULL,
   dsjobs.external_enforce_runner_concurrency = NULL)
-options(dsjobs.backend_path_mappings = NULL)
+options(dsjobs.backend_path_mappings = NULL,
+        dsjobs.container_runtime = NULL,
+        dsjobs.container_pull = NULL,
+        dsjobs.backend_gpu_count = NULL,
+        dsjobs.backend_request_optional_gpus = NULL)

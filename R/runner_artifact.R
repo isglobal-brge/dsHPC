@@ -38,7 +38,8 @@
   runner_config <- .load_runner_config(runner_name)
   if (is.null(runner_config)) stop("Runner '", runner_name, "' not found.", call. = FALSE)
 
-  command <- runner_config$command %||% "python"
+  raw_command <- runner_config$command %||% "python"
+  command <- raw_command
   if (identical(command, "python")) {
     py <- .resolve_python_env(runner_config)
     command <- py$python
@@ -119,7 +120,8 @@
       paste0("# args=", paste(args, collapse = " ")),
       paste(names(env_vars), env_vars, sep = "=")),
     file.path(step_dir, "env.log")), error = function(e) NULL)
-  list(command = command, args = args, env_vars = env_vars,
+  list(command = command, raw_command = raw_command, args = args,
+       env_vars = env_vars, step = step, input_dir = input_dir,
        step_dir = step_dir,
        output_dir = output_dir, runner_config = runner_config)
 }
