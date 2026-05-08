@@ -53,6 +53,7 @@ test_that("scheduler gates pending jobs by memory budget", {
   ), file.path(home, "runners", "heavy.yml"))
   withr::local_options(list(
     dsjobs.home = home,
+    dsjobs.executor_backend = "embedded",
     dsjobs.node_memory_mb = 6144,
     dsjobs.memory_reserve_mb = 1024,
     dsjobs.cpu_slots = 4
@@ -107,6 +108,7 @@ test_that("optional GPU runners receive devices only when available", {
   ), file.path(home, "runners", "gpuish.yml"))
   withr::local_options(list(
     dsjobs.home = home,
+    dsjobs.executor_backend = "embedded",
     dsjobs.node_memory_mb = 8192,
     dsjobs.memory_reserve_mb = 1024,
     dsjobs.cpu_slots = 4,

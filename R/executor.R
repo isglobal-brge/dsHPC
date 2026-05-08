@@ -54,6 +54,19 @@
 #' @keywords internal
 .executor_kill <- function(db, job_id) {
   job <- .store_get_job(db, job_id)
+  if (!is.null(job)) {
+    step <- DBI::dbGetQuery(db,
+      "SELECT external_backend, external_id FROM steps
+       WHERE job_id = ? AND step_index = ?",
+      params = list(job_id, as.integer(job$step_index %||% 0L)))
+    if (nrow(step) > 0 && !is.na(step$external_id[1]) &&
+        nzchar(step$external_id[1])) {
+      .backend_cancel_step(step$external_backend[1], step$external_id[1])
+      .scheduler_release_leases(db, job_id)
+      .store_update_job(db, job_id, worker_pid = NA_integer_)
+      return(invisible(TRUE))
+    }
+  }
   if (!is.null(job) && !is.na(job$worker_pid)) {
     pid <- as.integer(job$worker_pid)
     if (.pid_is_alive(pid)) {

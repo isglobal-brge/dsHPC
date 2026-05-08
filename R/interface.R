@@ -395,6 +395,7 @@ jobCapabilitiesDS <- function() {
        active_jobs = active,
        max_jobs_global = settings$max_jobs_global,
        max_steps_per_job = settings$max_steps_per_job,
+       executor = .executor_backend_status(settings),
        scheduler = .scheduler_status(),
        worker = worker_health,
        admin_enabled = .admin_is_configured())

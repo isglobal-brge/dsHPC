@@ -7,6 +7,33 @@
 
 #' @keywords internal
 .run_artifact_step <- function(db, job_id, step_index, step, step_dir, input_dir) {
+  prepared <- .prepare_artifact_command(db, job_id, step_index, step, step_dir, input_dir)
+  backend <- .executor_backend_name()
+  if (!identical(backend, "embedded")) {
+    .backend_submit_artifact_step(db, job_id, step_index, step, step_dir,
+      input_dir, prepared = prepared)
+    return(invisible(TRUE))
+  }
+
+  proc <- processx::process$new(
+    command = prepared$command, args = prepared$args,
+    stdout = file.path(step_dir, "stdout.log"),
+    stderr = file.path(step_dir, "stderr.log"),
+    env = prepared$env_vars, cleanup = TRUE, cleanup_tree = TRUE)
+
+  # Store handle in registry for reliable exit status checking
+  key <- paste0(job_id, "_", step_index)
+  .proc_registry[[key]] <- proc
+
+  .store_update_job(db, job_id, worker_pid = proc$get_pid())
+  .db_log_event(db, job_id, "artifact_started",
+    list(step_index = step_index, runner = step$runner, pid = proc$get_pid(),
+         backend = "embedded"))
+}
+
+#' Prepare an allowlisted artifact runner command for an executor backend.
+#' @keywords internal
+.prepare_artifact_command <- function(db, job_id, step_index, step, step_dir, input_dir) {
   runner_name <- step$runner
   runner_config <- .load_runner_config(runner_name)
   if (is.null(runner_config)) stop("Runner '", runner_name, "' not found.", call. = FALSE)
@@ -92,20 +119,8 @@
       paste0("# args=", paste(args, collapse = " ")),
       paste(names(env_vars), env_vars, sep = "=")),
     file.path(step_dir, "env.log")), error = function(e) NULL)
-
-  proc <- processx::process$new(
-    command = command, args = args,
-    stdout = file.path(step_dir, "stdout.log"),
-    stderr = file.path(step_dir, "stderr.log"),
-    env = env_vars, cleanup = TRUE, cleanup_tree = TRUE)
-
-  # Store handle in registry for reliable exit status checking
-  key <- paste0(job_id, "_", step_index)
-  .proc_registry[[key]] <- proc
-
-  .store_update_job(db, job_id, worker_pid = proc$get_pid())
-  .db_log_event(db, job_id, "artifact_started",
-    list(step_index = step_index, runner = runner_name, pid = proc$get_pid()))
+  list(command = command, args = args, env_vars = env_vars,
+       output_dir = output_dir, runner_config = runner_config)
 }
 
 #' Check if a job's artifact step is still running via processx handle
