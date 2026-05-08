@@ -320,6 +320,8 @@
   plan <- .scheduler_job_plan(spec, settings)
   usage <- .scheduler_running_usage(db, settings)
   budget <- .scheduler_node_budget(settings)
+  delegated <- .executor_delegates_resources(settings)
+  enforce_runner_concurrency <- .executor_enforces_runner_concurrency(settings)
 
   if (!identical(settings$scheduler, "adaptive")) {
     running_n <- DBI::dbGetQuery(db,
@@ -332,16 +334,16 @@
   if (usage$running_jobs >= settings$max_jobs_global)
     return(list(ok = FALSE, reason = "max_jobs_global", plan = plan,
                 usage = usage, budget = budget))
-  if (usage$memory_mb + plan$memory_mb > budget$memory_mb)
+  if (!delegated && usage$memory_mb + plan$memory_mb > budget$memory_mb)
     return(list(ok = FALSE, reason = "memory_budget", plan = plan,
                 usage = usage, budget = budget))
-  if (usage$cpu_slots + plan$cpu_slots > budget$cpu_slots)
+  if (!delegated && usage$cpu_slots + plan$cpu_slots > budget$cpu_slots)
     return(list(ok = FALSE, reason = "cpu_budget", plan = plan,
                 usage = usage, budget = budget))
-  if (usage$gpus + plan$gpus > budget$gpus)
+  if (!delegated && usage$gpus + plan$gpus > budget$gpus)
     return(list(ok = FALSE, reason = "gpu_budget", plan = plan,
                 usage = usage, budget = budget))
-  if (is.finite(budget$gpu_memory_mb) &&
+  if (!delegated && is.finite(budget$gpu_memory_mb) &&
       usage$gpu_memory_mb + plan$gpu_memory_mb >
         max(0L, budget$gpu_memory_mb - settings$gpu_memory_reserve_mb))
     return(list(ok = FALSE, reason = "gpu_memory_budget", plan = plan,
@@ -350,7 +352,7 @@
   assigned_gpus <- character(0)
   wanted_gpus <- plan$gpus
   optional_gpus <- plan$optional_gpus %||% 0L
-  if (wanted_gpus > 0L || optional_gpus > 0L) {
+  if (!delegated && (wanted_gpus > 0L || optional_gpus > 0L)) {
     available <- .scheduler_available_gpu_devices(db, budget$gpu_devices)
     if (length(available) < wanted_gpus) {
       return(list(ok = FALSE, reason = "gpu_devices", plan = plan,
@@ -365,18 +367,20 @@
     return(list(ok = FALSE, reason = paste0("cooldown:", cooldown$runner),
                 plan = plan, usage = usage, budget = budget, cooldown = cooldown))
 
-  for (profile in plan$profiles) {
-    runner_count <- .scheduler_named_count(usage$runners, profile$runner)
-    if (is.finite(profile$max_concurrent) &&
-        runner_count >= profile$max_concurrent) {
-      return(list(ok = FALSE, reason = paste0("runner_concurrency:", profile$runner),
-                  plan = plan, usage = usage, budget = budget))
-    }
-    group_count <- .scheduler_named_count(usage$groups, profile$concurrency_group)
-    if (is.finite(profile$max_concurrent) &&
-        group_count >= profile$max_concurrent) {
-      return(list(ok = FALSE, reason = paste0("group_concurrency:", profile$concurrency_group),
-                  plan = plan, usage = usage, budget = budget))
+  if (enforce_runner_concurrency) {
+    for (profile in plan$profiles) {
+      runner_count <- .scheduler_named_count(usage$runners, profile$runner)
+      if (is.finite(profile$max_concurrent) &&
+          runner_count >= profile$max_concurrent) {
+        return(list(ok = FALSE, reason = paste0("runner_concurrency:", profile$runner),
+                    plan = plan, usage = usage, budget = budget))
+      }
+      group_count <- .scheduler_named_count(usage$groups, profile$concurrency_group)
+      if (is.finite(profile$max_concurrent) &&
+          group_count >= profile$max_concurrent) {
+        return(list(ok = FALSE, reason = paste0("group_concurrency:", profile$concurrency_group),
+                    plan = plan, usage = usage, budget = budget))
+      }
     }
   }
 
@@ -506,6 +510,7 @@
   settings <- .dsjobs_settings()
   list(
     mode = settings$scheduler,
+    executor = .executor_backend_status(settings),
     cell = .scheduler_cell_status(db, settings),
     node = .scheduler_node_budget(settings),
     usage = .scheduler_running_usage(db, settings),

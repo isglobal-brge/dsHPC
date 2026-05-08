@@ -223,78 +223,108 @@
 #' @keywords internal
 .worker_reap <- function(db) {
   running <- DBI::dbGetQuery(db,
-    "SELECT job_id, worker_pid, step_index FROM jobs
-     WHERE state = 'RUNNING' AND worker_pid IS NOT NULL")
+    "SELECT j.job_id, j.worker_pid, j.step_index,
+            s.runner, s.external_backend, s.external_id
+     FROM jobs j
+     LEFT JOIN steps s
+       ON s.job_id = j.job_id AND s.step_index = j.step_index
+     WHERE j.state = 'RUNNING'")
   if (nrow(running) == 0) return()
 
   for (i in seq_len(nrow(running))) {
-    pid <- as.integer(running$worker_pid[i])
     jid <- running$job_id[i]
     sidx <- as.integer(running$step_index[i])
+    runner_name <- running$runner[i]
+    external_id <- running$external_id[i]
+    external_backend <- running$external_backend[i]
+    step_dir <- file.path(.dsjobs_home(), "artifacts", jid,
+                           sprintf("step_%03d", sidx))
+
+    if (!is.na(external_id) && nzchar(external_id)) {
+      status <- .backend_step_status(external_backend, external_id, step_dir)
+      if (identical(status$state, "running")) {
+        if (!is.null(status$external_state)) {
+          tryCatch(.store_update_step(db, jid, sidx,
+            external_status = status$external_state), error = function(e) NULL)
+        }
+        next
+      }
+      exit_code <- as.integer(status$exit_code %||% 1L)
+      .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code,
+        external_status = status$external_state %||% status$state)
+      next
+    }
+
+    if (is.na(running$worker_pid[i])) next
+    pid <- as.integer(running$worker_pid[i])
 
     # Use processx handle if available (reliable), fall back to PID check
     still_alive <- .proc_is_alive(jid, sidx)
     if (!still_alive) still_alive <- .pid_is_alive(pid)
 
     if (!still_alive) {
-      step_dir <- file.path(.dsjobs_home(), "artifacts", jid,
-                             sprintf("step_%03d", sidx))
       # Use processx exit status if available
       proc_exit <- .proc_get_exit(jid, sidx)
       exit_code <- if (!is.na(proc_exit)) proc_exit else .read_exit_code(step_dir)
-      step_row <- DBI::dbGetQuery(db,
-        "SELECT runner FROM steps WHERE job_id = ? AND step_index = ?",
-        params = list(jid, sidx))
-      runner_name <- if (nrow(step_row) > 0) step_row$runner[1] else NA_character_
-
-      DBI::dbExecute(db, "BEGIN IMMEDIATE")
-      tryCatch({
-        if (identical(exit_code, 0L)) {
-          output_ref <- file.path("artifacts", jid,
-                                   sprintf("step_%03d", sidx), "output")
-          # Register artifact outputs
-          out_dir <- file.path(.dsjobs_home(), output_ref)
-          if (dir.exists(out_dir)) {
-            files <- list.files(out_dir, full.names = TRUE)
-            for (f in files) {
-              .db_register_output(db, jid, sidx, basename(f),
-                "artifact_file", f, file.info(f)$size, safe_for_client = FALSE)
-            }
-          }
-          .store_update_step(db, jid, sidx, state = "done", exit_code = 0L,
-            output_ref = output_ref,
-            finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
-          .store_update_job(db, jid, worker_pid = NA_integer_)
-          .db_log_event(db, jid, "step_done", list(step_index = sidx))
-          .executor_advance(db, jid)
-        } else {
-          settings <- .dsjobs_settings()
-          job <- .store_get_job(db, jid)
-          retries <- as.integer(job$retry_count %||% 0L)
-          .scheduler_record_runner_failure(db, runner_name, exit_code,
-            reason = "artifact_step_failed")
-          .store_update_step(db, jid, sidx, state = "failed",
-            exit_code = exit_code, error_message = paste("Exit:", exit_code),
-            finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
-          .scheduler_release_leases(db, jid)
-          if (retries < settings$max_retries) {
-            .store_update_job(db, jid, state = "PENDING",
-              retry_count = retries + 1L, worker_pid = NA_integer_)
-          } else {
-            .store_update_job(db, jid, state = "FAILED",
-              error_message = paste("Step", sidx, "failed (exit", exit_code, ")"),
-              worker_pid = NA_integer_,
-              finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
-          }
-        }
-        DBI::dbExecute(db, "COMMIT")
-      }, error = function(e) {
-        tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
-        .worker_log("Reap error for ", jid, " step ", sidx, ": ",
-          conditionMessage(e))
-      })
+      .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code)
     }
   }
+}
+
+#' @keywords internal
+.worker_finalize_artifact_step <- function(db, jid, sidx, runner_name,
+                                           exit_code,
+                                           external_status = NULL) {
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    if (identical(as.integer(exit_code), 0L)) {
+      output_ref <- file.path("artifacts", jid,
+                               sprintf("step_%03d", sidx), "output")
+      out_dir <- file.path(.dsjobs_home(), output_ref)
+      if (dir.exists(out_dir)) {
+        files <- list.files(out_dir, full.names = TRUE)
+        for (f in files) {
+          .db_register_output(db, jid, sidx, basename(f),
+            "artifact_file", f, file.info(f)$size, safe_for_client = FALSE)
+        }
+      }
+      updates <- list(state = "done", exit_code = 0L,
+        output_ref = output_ref,
+        finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+      if (!is.null(external_status)) updates$external_status <- external_status
+      do.call(.store_update_step, c(list(db, jid, sidx), updates))
+      .store_update_job(db, jid, worker_pid = NA_integer_)
+      .db_log_event(db, jid, "step_done", list(step_index = sidx))
+      .executor_advance(db, jid)
+    } else {
+      settings <- .dsjobs_settings()
+      job <- .store_get_job(db, jid)
+      retries <- as.integer(job$retry_count %||% 0L)
+      .scheduler_record_runner_failure(db, runner_name, exit_code,
+        reason = "artifact_step_failed")
+      updates <- list(state = "failed",
+        exit_code = as.integer(exit_code),
+        error_message = paste("Exit:", exit_code),
+        finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+      if (!is.null(external_status)) updates$external_status <- external_status
+      do.call(.store_update_step, c(list(db, jid, sidx), updates))
+      .scheduler_release_leases(db, jid)
+      if (retries < settings$max_retries) {
+        .store_update_job(db, jid, state = "PENDING",
+          retry_count = retries + 1L, worker_pid = NA_integer_)
+      } else {
+        .store_update_job(db, jid, state = "FAILED",
+          error_message = paste("Step", sidx, "failed (exit", exit_code, ")"),
+          worker_pid = NA_integer_,
+          finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+      }
+    }
+    DBI::dbExecute(db, "COMMIT")
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    .worker_log("Reap error for ", jid, " step ", sidx, ": ",
+      conditionMessage(e))
+  })
 }
 
 #' @keywords internal

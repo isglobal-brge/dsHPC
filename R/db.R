@@ -58,9 +58,17 @@
       exit_code    INTEGER,
       error_class  TEXT,
       error_message TEXT,
+      external_backend TEXT,
+      external_id  TEXT,
+      external_status TEXT,
       PRIMARY KEY (job_id, step_index),
       FOREIGN KEY (job_id) REFERENCES jobs(job_id)
     )")
+
+  .db_ensure_columns(db, "steps", list(
+    external_backend = "TEXT",
+    external_id = "TEXT",
+    external_status = "TEXT"))
 
   DBI::dbExecute(db, "
     CREATE TABLE IF NOT EXISTS outputs (
@@ -136,11 +144,22 @@
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_spec_hash ON jobs(spec_hash)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_outputs_job ON outputs(job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_steps_external ON steps(external_backend, external_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_runner_cooldowns_until ON runner_cooldowns(until)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_resource_leases_resource ON resource_leases(resource)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_cell ON worker_nodes(cell_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_heartbeat ON worker_nodes(last_heartbeat)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_scheduler_locks_expires ON scheduler_locks(expires_at)")
+}
+
+#' @keywords internal
+.db_ensure_columns <- function(db, table, columns) {
+  existing <- DBI::dbListFields(db, table)
+  for (nm in names(columns)) {
+    if (!nm %in% existing) {
+      DBI::dbExecute(db, paste("ALTER TABLE", table, "ADD COLUMN", nm, columns[[nm]]))
+    }
+  }
 }
 
 #' @keywords internal

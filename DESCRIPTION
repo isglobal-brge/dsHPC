@@ -5,6 +5,9 @@ Version: 0.1.0
 Authors@R: c(
     person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
     person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))
+Author: David Sarrat González [aut, cre],
+    Juan R González [aut]
+Maintainer: David Sarrat González <david.sarrat@isglobal.org>
 Description: Server-side DataSHIELD package for durable federated job execution.
     Provides a two-plane execution model: session-plane steps (DataSHIELD
     assign/aggregate) and artifact-plane steps (processx-isolated subprocesses
