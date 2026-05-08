@@ -25,6 +25,14 @@
 # =============================================================================
 
 #' Submit a Job
+#'
+#' DataSHIELD assign method used by clients and domain packages to enqueue a
+#' validated job specification. The specification may be a decoded list, JSON,
+#' or a `B64:`-prefixed JSON payload.
+#'
+#' @param spec_encoded Job specification as a list, JSON string, or `B64:`
+#'   encoded JSON string.
+#' @return Named list containing `job_id`, `state`, and `submitted_at`.
 #' @export
 jobSubmitDS <- function(spec_encoded) {
   spec <- .ds_arg(spec_encoded)
@@ -244,6 +252,13 @@ jobLoadOutputDS <- function(job_id_or_symbol, output_name,
 # =============================================================================
 
 #' Get Job Status
+#'
+#' Return disclosure-safe state for one job.
+#'
+#' @param job_id_or_symbol Job id, or a symbol resolving to an object with a
+#'   `job_id` field in the server session.
+#' @return Named list with job id, state, progress, timestamps, sanitized error
+#'   string, and retry count.
 #' @export
 jobStatusDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)
@@ -266,6 +281,14 @@ jobStatusDS <- function(job_id_or_symbol) {
 }
 
 #' Get Job Result
+#'
+#' Return the disclosure-safe result object for a completed job. Raw artifact
+#' outputs are never returned directly through this method.
+#'
+#' @param job_id_or_symbol Job id, or a symbol resolving to an object with a
+#'   `job_id` field in the server session.
+#' @return A named list. If the job is not complete, the list contains
+#'   `ready = FALSE`; otherwise it contains the safe result metadata.
 #' @export
 jobResultDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)
@@ -292,6 +315,14 @@ jobResultDS <- function(job_id_or_symbol) {
 }
 
 #' Get Job Logs
+#'
+#' Return a sanitized tail of stdout/stderr logs for a job.
+#'
+#' @param job_id_or_symbol Job id, or a symbol resolving to an object with a
+#'   `job_id` field in the server session.
+#' @param last_n Maximum number of log lines to return. Values above 200 are
+#'   capped server-side.
+#' @return Character vector of sanitized log lines.
 #' @export
 jobLogsDS <- function(job_id_or_symbol, last_n = 50L) {
   job_id <- .resolve_job_id(job_id_or_symbol)
@@ -342,6 +373,12 @@ jobListDS <- function(label = NULL) {
 }
 
 #' List Available Outputs for a Job
+#'
+#' Return output names and metadata for a job without loading the output values.
+#'
+#' @param job_id_or_symbol Job id, or a symbol resolving to an object with a
+#'   `job_id` field in the server session.
+#' @return Data frame with output name, kind, disclosure flag, and size.
 #' @export
 jobOutputsDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)

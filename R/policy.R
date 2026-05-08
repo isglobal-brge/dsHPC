@@ -3,8 +3,8 @@
 
 #' Read a dsJobs option with DataSHIELD double-fallback
 #'
-#' Option chain: dsjobs.{name} -> default.dsjobs.{name} -> default.
-#' @keywords internal
+#' Option chain: dsjobs.<name> -> default.dsjobs.<name> -> default.
+#' @noRd
 .dsj_disclosure_settings <- function() {
   list(
     nfilter_subset = as.numeric(
@@ -13,7 +13,7 @@
   )
 }
 
-#' @keywords internal
+#' @noRd
 .sanitize_job_logs <- function(lines, last_n = 50L) {
   if (is.null(lines) || length(lines) == 0) return(character(0))
   last_n <- min(as.integer(last_n), 200L)
