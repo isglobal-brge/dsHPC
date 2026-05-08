@@ -20,12 +20,28 @@
   }
   log_file <- file.path(home, "worker.log")
   worker_script <- system.file("worker", "main.R", package = "dsJobs")
-  # Inherit current env, but force MKL/OpenMP settings that are known to be
-  # required for torch to load under some hosts (notably Apple Silicon Rosetta
-  # emulation of amd64). Harmless on native amd64/arm64 Linux.
+
+  # Spawn the worker as a detached process via setsid + nohup so that it does
+  # not inherit Rserve's session/process group. Some embedded R hosts
+  # (Rserve under Rosetta amd64-on-arm64) propagate process state to grand-
+  # children through processx in ways that break torch's MKL loader; running
+  # the daemon under its own session sidesteps that entirely.
+  #
+  # MKL workaround vars are also exported so any nested torch loads in the
+  # daemon itself inherit them. They are no-ops on native hosts.
+  rscript <- file.path(R.home("bin"), "Rscript")
+  setsid <- Sys.which("setsid")
+  if (!nzchar(setsid)) setsid <- NULL
+  if (!is.null(setsid) && file.exists("/usr/bin/env")) {
+    cmd <- "/usr/bin/env"
+    args <- c("MKL_SERVICE_FORCE_INTEL=0", "MKL_THREADING_LAYER=GNU",
+              setsid, "-f", rscript, worker_script, home)
+  } else {
+    cmd <- rscript
+    args <- c(worker_script, home)
+  }
   proc <- processx::process$new(
-    command = file.path(R.home("bin"), "Rscript"),
-    args = c(worker_script, home),
+    command = cmd, args = args,
     stdout = log_file, stderr = log_file,
     env = c("current",
             MKL_SERVICE_FORCE_INTEL = "0",
