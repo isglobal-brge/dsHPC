@@ -66,7 +66,7 @@
   set_clauses <- paste0(names(updates), " = ?")
   sql <- paste0("UPDATE jobs SET ", paste(set_clauses, collapse = ", "),
                 " WHERE job_id = ?")
-  DBI::dbExecute(db, sql, params = c(unname(updates), list(job_id)))
+  DBI::dbExecute(db, sql, params = c(as.list(unname(updates)), list(job_id)))
 }
 
 #' @keywords internal
@@ -76,7 +76,8 @@
   set_clauses <- paste0(names(updates), " = ?")
   sql <- paste0("UPDATE steps SET ", paste(set_clauses, collapse = ", "),
                 " WHERE job_id = ? AND step_index = ?")
-  DBI::dbExecute(db, sql, params = c(unname(updates), list(job_id, step_index)))
+  DBI::dbExecute(db, sql,
+    params = c(as.list(unname(updates)), list(job_id, step_index)))
 }
 
 #' @keywords internal
@@ -100,4 +101,3 @@
   if (length(params) > 0) DBI::dbGetQuery(db, sql, params = params)
   else DBI::dbGetQuery(db, sql)
 }
-

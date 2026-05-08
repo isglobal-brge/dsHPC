@@ -363,8 +363,17 @@ jobCapabilitiesDS <- function() {
   runner_details <- lapply(runners, function(r) {
     cfg <- .load_runner_config(r)
     if (is.null(cfg)) return(list(name = r))
+    profile <- .scheduler_runner_profile(r, settings)
     list(name = cfg$name %||% r, plane = cfg$plane %||% "artifact",
-         resource_class = cfg$resource_class %||% "default")
+         resource_class = cfg$resource_class %||% "default",
+         resources = list(
+           memory_mb = profile$memory_mb,
+           cpu_slots = profile$cpu_slots,
+           gpus = profile$gpus,
+           optional_gpus = profile$optional_gpus,
+           max_concurrent = profile$max_concurrent,
+           concurrency_group = profile$concurrency_group,
+           accelerator = profile$accelerator))
   })
   names(runner_details) <- runners
 
@@ -386,8 +395,15 @@ jobCapabilitiesDS <- function() {
        active_jobs = active,
        max_jobs_global = settings$max_jobs_global,
        max_steps_per_job = settings$max_steps_per_job,
+       scheduler = .scheduler_status(),
        worker = worker_health,
        admin_enabled = .admin_is_configured())
+}
+
+#' Get Scheduler Status
+#' @export
+jobSchedulerStatusDS <- function() {
+  .scheduler_status()
 }
 
 # =============================================================================
@@ -464,6 +480,7 @@ jobAdminCancelDS <- function(job_id, admin_key = NULL) {
     stop("Job already in terminal state: ", job$state, call. = FALSE)
 
   .executor_kill(db, job_id)
+  .scheduler_release_leases(db, job_id)
   .store_update_job(db, job_id, state = "CANCELLED", worker_pid = NA_integer_,
     finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"))
   .db_log_event(db, job_id, "admin_cancelled")
