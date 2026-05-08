@@ -8,7 +8,7 @@
 #   - Runner configs (YAML files registered by other packages)
 #   - Published assets (disclosure-safe results)
 #
-# All paths are created under DSJOBS_HOME (default /var/lib/dsjobs).
+# All paths are created under DSJOBS_HOME (default /srv/dsjobs).
 # Ownership is set to the 'rock' user if it exists (Rock/DataSHIELD).
 # If the directory cannot be created (no permissions), the script
 # exits gracefully and the R .onLoad() fallback handles it.
@@ -22,14 +22,16 @@ log_warn() { echo "${LOG_PREFIX} WARNING: $*" >&2; }
 log_info "Setting up DSJOBS_HOME: ${DSJOBS_HOME}"
 
 # Create home and subdirectories
-for dir in "" "/artifacts" "/runners" "/publish"; do
+for dir in "" "/artifacts" "/runners" "/publish" "/staging"; do
   target="${DSJOBS_HOME}${dir}"
   if [ ! -d "${target}" ]; then
     if mkdir -p "${target}" 2>/dev/null; then
-      chmod 750 "${target}" 2>/dev/null || true
+      chmod 0777 "${target}" 2>/dev/null || true
     else
       log_warn "Cannot create ${target}. Will retry at runtime via .onLoad()."
     fi
+  else
+    chmod 0777 "${target}" 2>/dev/null || true
   fi
 done
 

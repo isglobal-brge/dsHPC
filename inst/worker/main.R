@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # dsJobs Worker Daemon
 # Launched by .dsjobs_worker_start() as a background R process.
-# Usage: Rscript main.R /var/lib/dsjobs
+# Usage: Rscript main.R /srv/dsjobs
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1) {

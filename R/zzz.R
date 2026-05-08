@@ -16,14 +16,15 @@
   # but Opal/Rock API installs may skip configure scripts entirely.
   # This fallback creates the structure at package load time.
   home <- .dsj_option("home", "/srv/dsjobs")
-  subdirs <- c("artifacts", "runners", "publish")
+  subdirs <- c("artifacts", "runners", "publish", "staging")
   for (d in c(home, file.path(home, subdirs))) {
     if (!dir.exists(d)) {
       tryCatch(
-        dir.create(d, recursive = TRUE, showWarnings = FALSE, mode = "0750"),
+        dir.create(d, recursive = TRUE, showWarnings = FALSE, mode = "0777"),
         error = function(e) NULL
       )
     }
+    tryCatch(Sys.chmod(d, "0777"), error = function(e) NULL)
   }
   invisible(NULL)
 }
@@ -94,6 +95,27 @@
   if (!grepl("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$", x))
     stop(field_name, " contains invalid characters.", call. = FALSE)
   x
+}
+
+#' Check DSJOBS_HOME directories and permissions.
+#' @keywords internal
+.dsjobs_home_health <- function() {
+  home <- .dsjobs_home(must_exist = FALSE)
+  subdirs <- c("runners", "artifacts", "publish", "staging")
+  paths <- c(home, file.path(home, subdirs))
+  names(paths) <- c("home", subdirs)
+  rows <- lapply(names(paths), function(nm) {
+    path <- paths[[nm]]
+    data.frame(
+      name = nm,
+      path = path,
+      exists = !is.null(path) && dir.exists(path),
+      writable = !is.null(path) && dir.exists(path) &&
+        file.access(path, mode = 2) == 0,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
 }
 
 #' Generate unique job ID (UUIDv4, 122 bits entropy)

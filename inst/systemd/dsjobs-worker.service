@@ -7,12 +7,13 @@ Documentation=https://github.com/isglobal-brge/dsFlower-framework
 Type=simple
 User=rock
 Group=rock
-ExecStart=/usr/bin/Rscript /usr/local/lib/R/site-library/dsJobs/worker/main.R /var/lib/dsjobs
-WorkingDirectory=/var/lib/dsjobs
+Environment=DSJOBS_HOME=/srv/dsjobs
+ExecStart=/usr/bin/Rscript /usr/local/lib/R/site-library/dsJobs/worker/main.R ${DSJOBS_HOME}
+WorkingDirectory=/srv/dsjobs
 Restart=always
 RestartSec=5
-StandardOutput=append:/var/lib/dsjobs/worker.log
-StandardError=append:/var/lib/dsjobs/worker.log
+StandardOutput=append:/srv/dsjobs/worker.log
+StandardError=append:/srv/dsjobs/worker.log
 
 # Resource limits
 LimitNOFILE=4096
@@ -21,7 +22,7 @@ MemoryMax=2G
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/dsjobs
+ReadWritePaths=/srv/dsjobs
 
 [Install]
 WantedBy=multi-user.target
