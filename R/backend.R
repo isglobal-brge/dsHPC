@@ -36,6 +36,7 @@
     delegates_resources = .executor_delegates_resources(settings),
     reason = "ok",
     commands = list(),
+    container = .backend_container_status(settings),
     path_mappings = .backend_path_mappings(settings))
 
   if (identical(backend, "embedded")) return(out)
@@ -99,6 +100,71 @@
   value <- value[nzchar(value)]
   if (length(value) == 0) return(list(command = "", args = character(0)))
   list(command = value[1], args = value[-1])
+}
+
+#' @keywords internal
+.backend_container_status <- function(settings = .dsjobs_settings()) {
+  runtime <- .backend_resolve_container_runtime(settings$container_runtime)
+  list(runtime = runtime$name, command = runtime$command,
+       available = nzchar(runtime$command),
+       pull = as.character(settings$container_pull %||% "missing"),
+       network = as.character(settings$container_network %||% "none"))
+}
+
+#' @keywords internal
+.backend_resolve_container_runtime <- function(value = "auto") {
+  value <- tolower(as.character(value %||% "auto")[1])
+  if (!nzchar(value) || identical(value, "none") || identical(value, "false"))
+    return(list(name = "none", command = ""))
+  candidates <- if (identical(value, "auto")) c("docker", "podman", "apptainer", "singularity") else value
+  for (candidate in candidates) {
+    cmd <- .backend_resolve_cmd(candidate, candidate)
+    if (nzchar(cmd)) return(list(name = candidate, command = cmd))
+  }
+  list(name = value, command = "")
+}
+
+#' @keywords internal
+.backend_runner_container <- function(runner_config, settings = .dsjobs_settings()) {
+  container <- runner_config$container %||% list()
+  image <- container$image %||% runner_config$image %||%
+    runner_config$container_image %||% ""
+  image <- as.character(image %||% "")[1]
+  if (!nzchar(image)) return(NULL)
+  runtime_value <- container$runtime %||% settings$container_runtime
+  runtime <- .backend_resolve_container_runtime(runtime_value)
+  list(
+    image = image,
+    runtime = runtime,
+    command = container$command %||% runner_config$container_command %||% NULL,
+    args_template = container$args_template %||% runner_config$container_args_template %||% NULL,
+    pull = container$pull %||% settings$container_pull,
+    workdir = container$workdir %||% NULL,
+    extra_args = c(as.character(settings$container_extra_args %||% character(0)),
+                   as.character(container$extra_args %||% character(0))))
+}
+
+#' @keywords internal
+.backend_gpu_request <- function(profile, settings = .dsjobs_settings()) {
+  required <- as.integer(profile$gpus %||% 0L)
+  optional <- as.integer(profile$optional_gpus %||% 0L)
+  policy <- tolower(as.character(settings$backend_request_optional_gpus %||% "auto")[1])
+  backend_count_raw <- settings$backend_gpu_count %||% "auto"
+  backend_count <- suppressWarnings(as.integer(backend_count_raw))
+  requested <- required
+  if (requested <= 0L && optional > 0L) {
+    if (policy %in% c("always", "true", "yes", "1")) {
+      requested <- optional
+    } else if (policy %in% c("never", "false", "no", "0")) {
+      requested <- 0L
+    } else if (is.finite(backend_count) && backend_count > 0L) {
+      requested <- min(optional, backend_count)
+    } else if (isTRUE(settings$slurm_request_optional_gpus)) {
+      requested <- optional
+    }
+  }
+  list(required = required, optional = optional, requested = requested,
+       policy = policy, backend_gpu_count = backend_count_raw)
 }
 
 #' @keywords internal
@@ -196,8 +262,19 @@
 #' @keywords internal
 .backend_map_prepared <- function(prepared, settings = .dsjobs_settings()) {
   mapped <- prepared
-  mapped$command <- .backend_map_text(prepared$command, "local_to_backend", settings)
-  mapped$args <- .backend_map_text(prepared$args, "local_to_backend", settings)
+  container <- .backend_runner_container(prepared$runner_config, settings)
+  if (!is.null(container)) {
+    command <- container$command %||% prepared$raw_command %||% prepared$command
+    mapped$command <- as.character(command)[1]
+    if (!is.null(container$args_template)) {
+      cfg <- prepared$runner_config
+      cfg$args_template <- container$args_template
+      mapped$args <- .build_runner_args(cfg, prepared$step,
+        prepared$step_dir, prepared$input_dir)
+    }
+  }
+  mapped$command <- .backend_map_text(mapped$command, "local_to_backend", settings)
+  mapped$args <- .backend_map_text(mapped$args, "local_to_backend", settings)
   mapped$env_vars <- .backend_map_text(prepared$env_vars, "local_to_backend", settings)
   mapped$output_dir <- .backend_map_path(prepared$output_dir, "local_to_backend", settings)
   mapped$step_dir <- .backend_map_path(prepared$step_dir, "local_to_backend", settings)
@@ -205,13 +282,21 @@
   mapped$local_step_dir <- prepared$step_dir
   mapped$local_output_dir <- prepared$output_dir
   mapped$local_script_path <- prepared$script_path
+  profile <- .scheduler_runner_profile(prepared$step$runner, settings)
+  gpu_request <- .backend_gpu_request(profile, settings)
   mapped$env_vars <- c(mapped$env_vars,
     DSJOBS_BACKEND_STEP_DIR = mapped$step_dir,
     DSJOBS_BACKEND_OUTPUT_DIR = mapped$output_dir,
     DSJOBS_BACKEND_STEP_SCRIPT = mapped$script_path,
     DSJOBS_LOCAL_STEP_DIR = prepared$step_dir,
     DSJOBS_LOCAL_OUTPUT_DIR = prepared$output_dir,
-    DSJOBS_LOCAL_STEP_SCRIPT = prepared$script_path)
+    DSJOBS_LOCAL_STEP_SCRIPT = prepared$script_path,
+    DSJOBS_GPUS = as.character(gpu_request$requested %||% 0L),
+    DSJOBS_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
+    DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
+    DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
+    DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
+    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"))
   mapped
 }
 
@@ -286,9 +371,8 @@
   if (nzchar(settings$slurm_time %||% ""))
     args <- c(args, paste0("--time=", settings$slurm_time))
 
-  gpu_n <- as.integer(profile$gpus %||% 0L)
-  if (gpu_n <= 0L && isTRUE(settings$slurm_request_optional_gpus))
-    gpu_n <- as.integer(profile$optional_gpus %||% 0L)
+  gpu_request <- .backend_gpu_request(profile, settings)
+  gpu_n <- as.integer(gpu_request$requested %||% 0L)
   if (gpu_n > 0L) args <- c(args, paste0("--gres=gpu:", gpu_n))
 
   extra <- as.character(settings$slurm_extra_args %||% character(0))
@@ -316,6 +400,7 @@
   script <- file.path(step_dir, "run_step.sh")
   .backend_write_step_script(script, prepared)
   profile <- .scheduler_runner_profile(step$runner, settings)
+  gpu_request <- .backend_gpu_request(profile, settings)
   env <- c(
     DSJOBS_JOB_ID = job_id,
     DSJOBS_STEP_INDEX = as.character(step_index),
@@ -331,7 +416,12 @@
     DSJOBS_LOCAL_STEP_SCRIPT = prepared$local_script_path %||% script,
     DSJOBS_MEMORY_MB = as.character(profile$memory_mb %||% 0L),
     DSJOBS_CPU_SLOTS = as.character(profile$cpu_slots %||% 0L),
-    DSJOBS_GPUS = as.character(profile$gpus %||% 0L))
+    DSJOBS_GPUS = as.character(gpu_request$requested %||% 0L),
+    DSJOBS_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
+    DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
+    DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
+    DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
+    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"))
   out <- tryCatch(system2(submit$command, submit$args, stdout = TRUE,
     stderr = TRUE, env = .backend_env(env)), error = function(e)
       stop("External submit failed: ", conditionMessage(e), call. = FALSE))
@@ -472,7 +562,7 @@
 }
 
 #' @keywords internal
-.backend_write_step_script <- function(path, prepared) {
+.backend_write_step_script <- function(path, prepared, settings = .dsjobs_settings()) {
   env <- prepared$env_vars
   env_names <- names(env)
   keep <- !is.na(env_names) & nzchar(env_names)
@@ -482,8 +572,7 @@
       paste0("export ", nm, "=", shQuote(as.character(env[[nm]])))
     }, character(1))
   } else character(0)
-  command <- paste(c(shQuote(prepared$command), shQuote(prepared$args)),
-    collapse = " ")
+  command <- .backend_step_command(prepared, settings)
   lines <- c(
     "#!/usr/bin/env bash",
     "set -u",
@@ -497,4 +586,138 @@
   writeLines(lines, path)
   tryCatch(Sys.chmod(path, "0755"), error = function(e) NULL)
   path
+}
+
+#' @keywords internal
+.backend_step_command <- function(prepared, settings = .dsjobs_settings()) {
+  container <- .backend_runner_container(prepared$runner_config, settings)
+  if (is.null(container))
+    return(paste(c(shQuote(prepared$command), shQuote(prepared$args)),
+      collapse = " "))
+
+  runtime <- container$runtime
+  if (!nzchar(runtime$command)) {
+    return(paste0("echo ", shQuote(paste0("Container runtime '",
+      runtime$name, "' is not available")), " >&2; exit 127"))
+  }
+
+  if (runtime$name %in% c("docker", "podman"))
+    return(.backend_docker_like_command(runtime, container, prepared, settings))
+  if (runtime$name %in% c("apptainer", "singularity"))
+    return(.backend_apptainer_command(runtime, container, prepared, settings))
+
+  paste0("echo ", shQuote(paste0("Unsupported container runtime: ",
+    runtime$name)), " >&2; exit 127")
+}
+
+#' @keywords internal
+.backend_container_mount <- function(settings = .dsjobs_settings()) {
+  local_home <- .dsjobs_home(must_exist = FALSE)
+  backend_home <- .backend_map_path(local_home, "local_to_backend", settings)
+  list(source = backend_home, target = backend_home)
+}
+
+#' @keywords internal
+.backend_container_env_args <- function(prepared, flag = "--env") {
+  env <- prepared$env_vars
+  nms <- names(env)
+  keep <- !is.na(nms) & nzchar(nms)
+  nms <- unique(nms[keep])
+  if (length(nms) == 0) return(character(0))
+  as.vector(rbind(flag, nms))
+}
+
+#' @keywords internal
+.backend_container_gpu_lines <- function(runtime_name) {
+  if (identical(runtime_name, "docker")) {
+    return(c(
+      "gpu_args=\"\"",
+      "if [ \"${DSJOBS_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
+      "  gpu_args=\"--gpus ${DSJOBS_GPUS_REQUIRED}\"",
+      "elif [ \"${DSJOBS_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSJOBS_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
+      "  gpu_args=\"--gpus ${DSJOBS_GPUS_REQUESTED}\"",
+      "fi"))
+  }
+  if (runtime_name %in% c("apptainer", "singularity")) {
+    return(c(
+      "gpu_args=\"\"",
+      "if [ \"${DSJOBS_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
+      "  gpu_args=\"--nv\"",
+      "elif [ \"${DSJOBS_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSJOBS_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
+      "  gpu_args=\"--nv\"",
+      "fi"))
+  }
+  "gpu_args=\"\""
+}
+
+#' @keywords internal
+.backend_docker_like_command <- function(runtime, container, prepared,
+                                         settings = .dsjobs_settings()) {
+  mount <- .backend_container_mount(settings)
+  workdir <- container$workdir %||% prepared$step_dir
+  network <- as.character(settings$container_network %||% "none")[1]
+  pull <- tolower(as.character(container$pull %||% "missing")[1])
+  extra <- as.character(container$extra_args %||% character(0))
+  extra <- extra[nzchar(extra)]
+  env_args <- .backend_container_env_args(prepared, "--env")
+  user_args <- character(0)
+  if (isTRUE(settings$container_run_as_current_user)) {
+    ids <- .backend_current_uid_gid()
+    if (!is.null(ids)) user_args <- c("--user", paste(ids$uid, ids$gid, sep = ":"))
+  }
+  run_args <- c("run", "--rm", "$gpu_args")
+  if (nzchar(network)) run_args <- c(run_args, "--network", network)
+  run_args <- c(run_args, user_args, extra,
+    "-v", paste0(mount$source, ":", mount$target),
+    "-w", workdir,
+    env_args,
+    container$image,
+    prepared$command,
+    prepared$args)
+  pull_lines <- character(0)
+  if (identical(pull, "always")) {
+    pull_lines <- paste(shQuote(runtime$command), "pull", shQuote(container$image))
+  } else if (identical(pull, "missing")) {
+    pull_lines <- paste0("if ! ", shQuote(runtime$command), " image inspect ",
+      shQuote(container$image), " >/dev/null 2>&1; then ",
+      shQuote(runtime$command), " pull ", shQuote(container$image), "; fi")
+  }
+  paste(c(pull_lines, .backend_container_gpu_lines(runtime$name),
+    .backend_shell_join(c(runtime$command, run_args), raw = "$gpu_args")),
+    collapse = "\n")
+}
+
+#' @keywords internal
+.backend_current_uid_gid <- function() {
+  id <- Sys.which("id")
+  if (!nzchar(id)) return(NULL)
+  uid <- suppressWarnings(as.integer(system2(id, "-u", stdout = TRUE, stderr = FALSE)[1]))
+  gid <- suppressWarnings(as.integer(system2(id, "-g", stdout = TRUE, stderr = FALSE)[1]))
+  if (!is.finite(uid) || !is.finite(gid)) return(NULL)
+  list(uid = uid, gid = gid)
+}
+
+#' @keywords internal
+.backend_apptainer_command <- function(runtime, container, prepared,
+                                       settings = .dsjobs_settings()) {
+  mount <- .backend_container_mount(settings)
+  workdir <- container$workdir %||% prepared$step_dir
+  extra <- as.character(container$extra_args %||% character(0))
+  extra <- extra[nzchar(extra)]
+  exec_args <- c("exec", "$gpu_args", extra,
+    "--bind", paste0(mount$source, ":", mount$target),
+    "--pwd", workdir,
+    container$image,
+    prepared$command,
+    prepared$args)
+  paste(c(.backend_container_gpu_lines(runtime$name),
+    .backend_shell_join(c(runtime$command, exec_args), raw = "$gpu_args")),
+    collapse = "\n")
+}
+
+#' @keywords internal
+.backend_shell_join <- function(args, raw = character(0)) {
+  paste(vapply(as.character(args), function(x) {
+    if (x %in% raw) x else shQuote(x)
+  }, character(1)), collapse = " ")
 }

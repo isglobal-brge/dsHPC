@@ -364,8 +364,15 @@ jobCapabilitiesDS <- function() {
     cfg <- .load_runner_config(r)
     if (is.null(cfg)) return(list(name = r))
     profile <- .scheduler_runner_profile(r, settings)
+    container <- .backend_runner_container(cfg, settings)
     list(name = cfg$name %||% r, plane = cfg$plane %||% "artifact",
          resource_class = cfg$resource_class %||% "default",
+         container = if (!is.null(container)) list(
+           image = container$image,
+           runtime = container$runtime$name,
+           runtime_available = nzchar(container$runtime$command),
+           pull = container$pull
+         ) else NULL,
          resources = list(
            memory_mb = profile$memory_mb,
            cpu_slots = profile$cpu_slots,
