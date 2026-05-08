@@ -38,6 +38,10 @@ register_dsjobs_publisher <- function(kind, fn) {
 .execute_publish <- function(job_id, step, output_dir, db) {
   publish_kind <- step$publish_kind %||% "generic"
   publisher <- .get_publisher(publish_kind)
+  if (is.null(publisher)) {
+    .load_publisher_packages(step)
+    publisher <- .get_publisher(publish_kind)
+  }
 
   if (!is.null(publisher)) {
     # Delegate to domain-specific publisher
@@ -46,6 +50,27 @@ register_dsjobs_publisher <- function(kind, fn) {
 
   # Generic fallback: copy output to publish dir
   .publish_generic(job_id, step, output_dir, db)
+}
+
+#' Load publisher plugin packages requested by a job step
+#' @keywords internal
+.load_publisher_packages <- function(step) {
+  cfg <- step$config %||% list()
+  pkgs <- c(
+    step$publisher_package,
+    step$package,
+    step$requires,
+    cfg$publisher_package,
+    .dsj_option("publisher_packages", character(0)),
+    .dsj_option("plugin_packages", character(0))
+  )
+  pkgs <- unique(as.character(unlist(pkgs, use.names = FALSE)))
+  pkgs <- pkgs[nzchar(pkgs)]
+  if (length(pkgs) == 0) return(invisible(FALSE))
+  for (pkg in pkgs) {
+    tryCatch(requireNamespace(pkg, quietly = TRUE), error = function(e) FALSE)
+  }
+  invisible(TRUE)
 }
 
 #' Generic filesystem publisher

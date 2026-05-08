@@ -49,6 +49,14 @@
     MKL_THREADING_LAYER = "GNU")
   if (!is.null(input_dir))
     env_vars <- c(env_vars, DSJOBS_INPUT_DIR = input_dir)
+  gpu_devices <- .scheduler_job_gpu_devices(db, job_id)
+  if (length(gpu_devices) > 0) {
+    gpu_csv <- paste(gpu_devices, collapse = ",")
+    env_vars <- c(env_vars,
+      CUDA_VISIBLE_DEVICES = gpu_csv,
+      NVIDIA_VISIBLE_DEVICES = gpu_csv,
+      DSJOBS_GPU_DEVICES = gpu_csv)
+  }
   if (!is.null(step$config)) {
     for (nm in names(step$config)) {
       val <- step$config[[nm]]
@@ -143,12 +151,18 @@
   in_dir <- input_dir %||% step_dir
   out_dir <- file.path(step_dir, "output")
   vapply(tmpl, function(a) {
-    a <- gsub("\\{input_dir\\}", in_dir, a)
-    a <- gsub("\\{output_dir\\}", out_dir, a)
-    a <- gsub("\\{step_dir\\}", step_dir, a)
-    if (!is.null(step$config))
-      for (nm in names(step$config))
-        a <- gsub(paste0("\\{", nm, "\\}"), as.character(step$config[[nm]]), a)
+    a <- gsub("{input_dir}", in_dir, a, fixed = TRUE)
+    a <- gsub("{output_dir}", out_dir, a, fixed = TRUE)
+    a <- gsub("{step_dir}", step_dir, a, fixed = TRUE)
+    if (!is.null(step$config)) {
+      for (nm in names(step$config)) {
+        val <- step$config[[nm]]
+        if (is.null(val) || is.list(val)) next
+        val <- as.character(val)
+        if (length(val) > 1) val <- paste(val, collapse = ",")
+        a <- gsub(paste0("{", nm, "}"), val, a, fixed = TRUE)
+      }
+    }
     a
   }, character(1))
 }

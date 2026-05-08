@@ -41,6 +41,25 @@ test_that("job update is atomic", {
   expect_equal(as.integer(job$step_index), 1L)
 })
 
+test_that("job update accepts SQL NULL values", {
+  home <- setup_test_home()
+  withr::local_options(list(dsjobs.home = home))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+
+  spec <- make_test_spec()
+  dsJobs:::.store_create_job(db, "job_null_update", "user_a", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_null_update", worker_pid = 123L)
+  dsJobs:::.store_update_job(db, "job_null_update",
+    worker_pid = NA_integer_, finished_at = NA_character_)
+
+  job <- dsJobs:::.store_get_job(db, "job_null_update")
+  expect_true(is.na(job$worker_pid))
+  expect_true(is.na(job$finished_at))
+})
+
 test_that("listing jobs filters by owner", {
   home <- setup_test_home()
   withr::local_options(list(dsjobs.home = home))

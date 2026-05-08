@@ -39,6 +39,7 @@
     .build_job_result(db, job_id)
     .store_update_job(db, job_id, state = "FINISHED", worker_pid = NA_integer_,
       finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+    .scheduler_release_leases(db, job_id)
     .db_log_event(db, job_id, "finished")
     return()
   }
@@ -60,6 +61,7 @@
       Sys.sleep(2)
       if (.pid_is_alive(pid)) tools::pskill(pid, signal = 9L)
     }
+    .scheduler_release_leases(db, job_id)
     .store_update_job(db, job_id, worker_pid = NA_integer_)
   }
 }

@@ -10,7 +10,10 @@
   DBI::dbExecute(db, "PRAGMA journal_mode=WAL")
   DBI::dbExecute(db, "PRAGMA busy_timeout=5000")
   DBI::dbExecute(db, "PRAGMA foreign_keys=ON")
-  if (first_time) .db_create_schema(db)
+  # Always run the idempotent schema path. Opal/Rock deployments keep
+  # persistent volumes across package upgrades, so new scheduler tables must be
+  # created on load/connect even when the database already exists.
+  .db_create_schema(db)
   db
 }
 
@@ -83,11 +86,61 @@
       FOREIGN KEY (job_id) REFERENCES jobs(job_id)
     )")
 
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS runner_cooldowns (
+      runner          TEXT PRIMARY KEY,
+      concurrency_group TEXT,
+      reason          TEXT NOT NULL,
+      until           TEXT NOT NULL,
+      last_exit_code  INTEGER,
+      failure_count   INTEGER NOT NULL DEFAULT 1,
+      updated_at      TEXT NOT NULL
+    )")
+
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS resource_leases (
+      job_id          TEXT NOT NULL,
+      resource        TEXT NOT NULL,
+      amount          REAL NOT NULL DEFAULT 0,
+      details_json    TEXT,
+      acquired_at     TEXT NOT NULL,
+      PRIMARY KEY (job_id, resource),
+      FOREIGN KEY (job_id) REFERENCES jobs(job_id)
+    )")
+
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS worker_nodes (
+      worker_id       TEXT PRIMARY KEY,
+      cell_id         TEXT NOT NULL,
+      node_id         TEXT NOT NULL,
+      hostname        TEXT,
+      pid             INTEGER,
+      state           TEXT NOT NULL DEFAULT 'running',
+      started_at      TEXT NOT NULL,
+      last_heartbeat  TEXT NOT NULL,
+      resources_json  TEXT,
+      details_json    TEXT
+    )")
+
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS scheduler_locks (
+      name            TEXT PRIMARY KEY,
+      holder          TEXT NOT NULL,
+      acquired_at     TEXT NOT NULL,
+      heartbeat_at    TEXT NOT NULL,
+      expires_at      TEXT NOT NULL
+    )")
+
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_spec_hash ON jobs(spec_hash)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_outputs_job ON outputs(job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_runner_cooldowns_until ON runner_cooldowns(until)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_resource_leases_resource ON resource_leases(resource)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_cell ON worker_nodes(cell_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_heartbeat ON worker_nodes(last_heartbeat)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_scheduler_locks_expires ON scheduler_locks(expires_at)")
 }
 
 #' @keywords internal

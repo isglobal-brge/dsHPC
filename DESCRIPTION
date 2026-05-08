@@ -38,6 +38,7 @@ AggregateMethods:
     jobListDS,
     jobOutputsDS,
     jobCapabilitiesDS,
+    jobSchedulerStatusDS,
     jobAdminListDS,
     jobAdminCancelDS,
     c=base::c,

@@ -18,7 +18,7 @@ test_that("global quota blocks excess submissions", {
   withr::local_options(list(
     dsjobs.home = home,
     dsjobs.max_jobs_per_user = 10L,
-    dsjobs.max_jobs_global = 2L
+    dsjobs.max_queued_jobs_global = 2L
   ))
   on.exit(cleanup_test_home(home))
 

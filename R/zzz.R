@@ -26,7 +26,33 @@
     }
     tryCatch(Sys.chmod(d, "0777"), error = function(e) NULL)
   }
+  tryCatch({
+    db <- .db_connect()
+    .db_close(db)
+  }, error = function(e) NULL)
+  if (.dsjobs_should_autostart_worker()) {
+    tryCatch(.dsjobs_worker_start(), error = function(e) NULL)
+  }
   invisible(NULL)
+}
+
+#' @keywords internal
+.dsjobs_should_autostart_worker <- function() {
+  mode <- .dsj_option("worker_autostart", "auto")
+  if (isFALSE(mode)) return(FALSE)
+  if (identical(Sys.getenv("DSJOBS_WORKER", unset = ""), "1")) return(FALSE)
+  if (identical(Sys.getenv("DSJOBS_DISABLE_AUTOSTART", unset = ""), "1")) return(FALSE)
+  if (nzchar(Sys.getenv("_R_CHECK_PACKAGE_NAME_", unset = ""))) return(FALSE)
+  if (nzchar(Sys.getenv("TESTTHAT", unset = ""))) return(FALSE)
+  home <- .dsjobs_home(must_exist = FALSE)
+  if (is.null(home) || !dir.exists(home) || file.access(home, mode = 2) != 0)
+    return(FALSE)
+  if (isTRUE(mode)) return(TRUE)
+  if (is.character(mode) && identical(mode, "true")) return(TRUE)
+  if (identical(Sys.getenv("DSJOBS_FORCE_AUTOSTART", unset = ""), "1"))
+    return(TRUE)
+  cmdline <- paste(commandArgs(FALSE), collapse = " ")
+  grepl("Rserve|rock", cmdline, ignore.case = TRUE)
 }
 
 # --- Core utilities ---
