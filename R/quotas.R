@@ -61,5 +61,7 @@
     external_submit_cmd = .dsj_option("external_submit_cmd", Sys.getenv("DSJOBS_EXTERNAL_SUBMIT_CMD", unset = "")),
     external_status_cmd = .dsj_option("external_status_cmd", Sys.getenv("DSJOBS_EXTERNAL_STATUS_CMD", unset = "")),
     external_cancel_cmd = .dsj_option("external_cancel_cmd", Sys.getenv("DSJOBS_EXTERNAL_CANCEL_CMD", unset = "")),
+    backend_path_mappings = .dsj_option("backend_path_mappings",
+      .dsj_option("path_mappings", Sys.getenv("DSJOBS_BACKEND_PATH_MAPPINGS", unset = ""))),
     runner_overrides = .dsj_option("runner_overrides", list()))
 }

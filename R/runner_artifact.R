@@ -120,6 +120,7 @@
       paste(names(env_vars), env_vars, sep = "=")),
     file.path(step_dir, "env.log")), error = function(e) NULL)
   list(command = command, args = args, env_vars = env_vars,
+       step_dir = step_dir,
        output_dir = output_dir, runner_config = runner_config)
 }
 

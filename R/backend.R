@@ -35,7 +35,8 @@
     available = TRUE,
     delegates_resources = .executor_delegates_resources(settings),
     reason = "ok",
-    commands = list())
+    commands = list(),
+    path_mappings = .backend_path_mappings(settings))
 
   if (identical(backend, "embedded")) return(out)
 
@@ -101,6 +102,120 @@
 }
 
 #' @keywords internal
+.backend_path_mappings <- function(settings = .dsjobs_settings()) {
+  value <- settings$backend_path_mappings %||% list()
+  if (is.character(value) && length(value) > 0 && !is.null(names(value)) &&
+      any(nzchar(names(value)))) {
+    value <- lapply(names(value), function(local) {
+      list(local = local, backend = unname(value[[local]]))
+    })
+  } else if (is.character(value) && length(value) == 1 && nzchar(value)) {
+    if (startsWith(trimws(value), "[") || startsWith(trimws(value), "{")) {
+      value <- tryCatch(jsonlite::fromJSON(value, simplifyVector = FALSE),
+        error = function(e) value)
+    } else {
+      parts <- strsplit(value, ";", fixed = TRUE)[[1]]
+      value <- lapply(parts[nzchar(parts)], function(x) {
+        pair <- strsplit(x, "=", fixed = TRUE)[[1]]
+        list(local = pair[1] %||% "", backend = pair[2] %||% "")
+      })
+    }
+  }
+
+  rows <- list()
+  if (is.list(value) && length(value) > 0) {
+    for (item in value) {
+      if (is.null(item)) next
+      if (is.character(item) && length(item) >= 2) {
+        local <- item[[1]]
+        backend <- item[[2]]
+      } else {
+        local <- item$local %||% item$from %||% item$rock %||% item$container
+        backend <- item$backend %||% item$to %||% item$host %||% item$external
+      }
+      local <- .backend_trim_path(as.character(local %||% ""))
+      backend <- .backend_trim_path(as.character(backend %||% ""))
+      if (nzchar(local) && nzchar(backend)) {
+        rows[[length(rows) + 1L]] <- data.frame(local = local, backend = backend,
+          stringsAsFactors = FALSE)
+      }
+    }
+  }
+  if (length(rows) == 0)
+    return(data.frame(local = character(0), backend = character(0),
+      stringsAsFactors = FALSE))
+  out <- do.call(rbind, rows)
+  out[order(nchar(out$local), decreasing = TRUE), , drop = FALSE]
+}
+
+#' @keywords internal
+.backend_trim_path <- function(path) {
+  path <- as.character(path %||% "")[1]
+  if (!nzchar(path)) return("")
+  if (identical(path, "/")) return("/")
+  sub("/+$", "", path)
+}
+
+#' @keywords internal
+.backend_map_path <- function(path, direction = c("local_to_backend", "backend_to_local"),
+                              settings = .dsjobs_settings()) {
+  direction <- match.arg(direction)
+  if (is.null(path) || length(path) == 0) return(path)
+  maps <- .backend_path_mappings(settings)
+  if (nrow(maps) == 0) return(path)
+  vapply(as.character(path), function(one) {
+    if (is.na(one) || !nzchar(one)) return(one)
+    for (i in seq_len(nrow(maps))) {
+      from <- if (identical(direction, "local_to_backend")) maps$local[i] else maps$backend[i]
+      to <- if (identical(direction, "local_to_backend")) maps$backend[i] else maps$local[i]
+      if (identical(one, from) || startsWith(one, paste0(from, "/"))) {
+        return(paste0(to, substring(one, nchar(from) + 1L)))
+      }
+    }
+    one
+  }, character(1), USE.NAMES = FALSE)
+}
+
+#' @keywords internal
+.backend_map_text <- function(x, direction = c("local_to_backend", "backend_to_local"),
+                              settings = .dsjobs_settings()) {
+  direction <- match.arg(direction)
+  if (is.null(x) || length(x) == 0) return(x)
+  maps <- .backend_path_mappings(settings)
+  if (nrow(maps) == 0) return(x)
+  out <- as.character(x)
+  for (i in seq_len(nrow(maps))) {
+    from <- if (identical(direction, "local_to_backend")) maps$local[i] else maps$backend[i]
+    to <- if (identical(direction, "local_to_backend")) maps$backend[i] else maps$local[i]
+    out <- gsub(from, to, out, fixed = TRUE)
+  }
+  names(out) <- names(x)
+  out
+}
+
+#' @keywords internal
+.backend_map_prepared <- function(prepared, settings = .dsjobs_settings()) {
+  mapped <- prepared
+  mapped$command <- .backend_map_text(prepared$command, "local_to_backend", settings)
+  mapped$args <- .backend_map_text(prepared$args, "local_to_backend", settings)
+  mapped$env_vars <- .backend_map_text(prepared$env_vars, "local_to_backend", settings)
+  mapped$output_dir <- .backend_map_path(prepared$output_dir, "local_to_backend", settings)
+  mapped$step_dir <- .backend_map_path(prepared$step_dir, "local_to_backend", settings)
+  mapped$script_path <- .backend_map_path(prepared$script_path, "local_to_backend", settings)
+  mapped$local_step_dir <- prepared$step_dir
+  mapped$local_output_dir <- prepared$output_dir
+  mapped$local_script_path <- prepared$script_path
+  mapped$env_vars <- c(mapped$env_vars,
+    DSJOBS_BACKEND_STEP_DIR = mapped$step_dir,
+    DSJOBS_BACKEND_OUTPUT_DIR = mapped$output_dir,
+    DSJOBS_BACKEND_STEP_SCRIPT = mapped$script_path,
+    DSJOBS_LOCAL_STEP_DIR = prepared$step_dir,
+    DSJOBS_LOCAL_OUTPUT_DIR = prepared$output_dir,
+    DSJOBS_LOCAL_STEP_SCRIPT = prepared$script_path)
+  mapped
+}
+
+#' @keywords internal
 .backend_submit_artifact_step <- function(db, job_id, step_index, step,
                                           step_dir, input_dir,
                                           prepared = NULL) {
@@ -116,13 +231,16 @@
 
   if (is.null(prepared))
     prepared <- .prepare_artifact_command(db, job_id, step_index, step, step_dir, input_dir)
+  local_script <- file.path(step_dir, "run_step.sh")
+  prepared$script_path <- local_script
+  backend_prepared <- .backend_map_prepared(prepared, settings)
 
   if (identical(backend, "slurm")) {
     external_id <- .backend_submit_slurm(job_id, step_index, step, step_dir,
-      prepared, settings)
+      backend_prepared, settings)
   } else if (identical(backend, "external")) {
     external_id <- .backend_submit_external(job_id, step_index, step, step_dir,
-      prepared, settings)
+      backend_prepared, settings)
   } else {
     stop("Executor backend '", backend, "' cannot submit artifact steps yet.",
          call. = FALSE)
@@ -153,9 +271,9 @@
     "_", step_index)
   args <- c("--parsable",
     paste0("--job-name=", job_name),
-    paste0("--output=", file.path(step_dir, "stdout.log")),
-    paste0("--error=", file.path(step_dir, "stderr.log")),
-    paste0("--chdir=", step_dir),
+    paste0("--output=", file.path(prepared$step_dir, "stdout.log")),
+    paste0("--error=", file.path(prepared$step_dir, "stderr.log")),
+    paste0("--chdir=", prepared$step_dir),
     paste0("--cpus-per-task=", max(1L, as.integer(profile$cpu_slots %||% 1L))),
     paste0("--mem=", max(1L, as.integer(profile$memory_mb %||% 1L))))
 
@@ -175,7 +293,7 @@
 
   extra <- as.character(settings$slurm_extra_args %||% character(0))
   if (length(extra) > 0) args <- c(args, extra[nzchar(extra)])
-  args <- c(args, script)
+  args <- c(args, prepared$script_path)
 
   out <- tryCatch(system2(sbatch, args, stdout = TRUE, stderr = TRUE),
     error = function(e) stop("sbatch failed: ", conditionMessage(e), call. = FALSE))
@@ -202,8 +320,15 @@
     DSJOBS_JOB_ID = job_id,
     DSJOBS_STEP_INDEX = as.character(step_index),
     DSJOBS_RUNNER = step$runner %||% "",
-    DSJOBS_STEP_DIR = step_dir,
-    DSJOBS_STEP_SCRIPT = script,
+    DSJOBS_STEP_DIR = prepared$step_dir,
+    DSJOBS_OUTPUT_DIR = prepared$output_dir,
+    DSJOBS_STEP_SCRIPT = prepared$script_path,
+    DSJOBS_BACKEND_STEP_DIR = prepared$step_dir,
+    DSJOBS_BACKEND_OUTPUT_DIR = prepared$output_dir,
+    DSJOBS_BACKEND_STEP_SCRIPT = prepared$script_path,
+    DSJOBS_LOCAL_STEP_DIR = prepared$local_step_dir %||% step_dir,
+    DSJOBS_LOCAL_OUTPUT_DIR = prepared$local_output_dir %||% file.path(step_dir, "output"),
+    DSJOBS_LOCAL_STEP_SCRIPT = prepared$local_script_path %||% script,
     DSJOBS_MEMORY_MB = as.character(profile$memory_mb %||% 0L),
     DSJOBS_CPU_SLOTS = as.character(profile$cpu_slots %||% 0L),
     DSJOBS_GPUS = as.character(profile$gpus %||% 0L))
@@ -291,7 +416,10 @@
   if (!nzchar(status$command))
     return(list(state = "failed", exit_code = 1L,
                 reason = "external_status_not_configured"))
-  env <- c(DSJOBS_EXTERNAL_ID = external_id, DSJOBS_STEP_DIR = step_dir)
+  backend_step_dir <- .backend_map_path(step_dir, "local_to_backend", settings)
+  env <- c(DSJOBS_EXTERNAL_ID = external_id,
+    DSJOBS_STEP_DIR = backend_step_dir,
+    DSJOBS_LOCAL_STEP_DIR = step_dir)
   out <- tryCatch(system2(status$command, c(status$args, external_id),
     stdout = TRUE, stderr = TRUE, env = .backend_env(env)), error = function(e)
       return(paste("FAILED", conditionMessage(e))))
@@ -359,7 +487,7 @@
   lines <- c(
     "#!/usr/bin/env bash",
     "set -u",
-    paste0("cd ", shQuote(dirname(path))),
+    paste0("cd ", shQuote(prepared$step_dir %||% dirname(path))),
     paste0("mkdir -p ", shQuote(prepared$output_dir)),
     exports,
     command,
