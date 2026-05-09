@@ -2,20 +2,20 @@
 # Add this to your Rock container's entrypoint or docker-compose.
 # Example docker-compose addition:
 #
-#   dsjobs-worker:
+#   dshpc-worker:
 #     image: datashield/rock-base:latest
-#     command: ["/bin/bash", "/opt/dsjobs/worker-entrypoint.sh"]
+#     command: ["/bin/bash", "/opt/dshpc/worker-entrypoint.sh"]
 #     volumes:
-#       - dsjobs_data:/srv/dsjobs
+#       - dshpc_data:/srv/dshpc
 #     restart: unless-stopped
 #
 # Or add to existing Rock entrypoint:
-#   Rscript /usr/local/lib/R/site-library/dsJobs/worker/main.R /srv/dsjobs &
+#   Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R /srv/dshpc &
 
-DSJOBS_HOME="${DSJOBS_HOME:-/srv/dsjobs}"
-mkdir -p "$DSJOBS_HOME"/runners "$DSJOBS_HOME"/artifacts \
-  "$DSJOBS_HOME"/publish "$DSJOBS_HOME"/staging
-chmod 0777 "$DSJOBS_HOME" "$DSJOBS_HOME"/runners "$DSJOBS_HOME"/artifacts \
-  "$DSJOBS_HOME"/publish "$DSJOBS_HOME"/staging 2>/dev/null || true
+DSHPC_HOME="${DSHPC_HOME:-/srv/dshpc}"
+mkdir -p "$DSHPC_HOME"/runners "$DSHPC_HOME"/artifacts \
+  "$DSHPC_HOME"/publish "$DSHPC_HOME"/staging
+chmod 0777 "$DSHPC_HOME" "$DSHPC_HOME"/runners "$DSHPC_HOME"/artifacts \
+  "$DSHPC_HOME"/publish "$DSHPC_HOME"/staging 2>/dev/null || true
 
-exec Rscript /usr/local/lib/R/site-library/dsJobs/worker/main.R "$DSJOBS_HOME"
+exec Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R "$DSHPC_HOME"

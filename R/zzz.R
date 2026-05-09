@@ -4,18 +4,18 @@
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 # Package-level environment (plugin registries, cached connections)
-.dsjobs_env <- new.env(parent = emptyenv())
+.dshpc_env <- new.env(parent = emptyenv())
 
 # Publisher plugin registry
-.dsjobs_env$.publishers <- list()
+.dshpc_env$.publishers <- list()
 
 #' @keywords internal
 .onLoad <- function(libname, pkgname) {
-  # Ensure DSJOBS_HOME exists with required subdirectories.
+  # Ensure DSHPC_HOME exists with required subdirectories.
   # The configure script should create these during R CMD INSTALL,
   # but Opal/Rock API installs may skip configure scripts entirely.
   # This fallback creates the structure at package load time.
-  home <- .dsj_option("home", "/srv/dsjobs")
+  home <- .dshpc_option("home", "/srv/dshpc")
   subdirs <- c("artifacts", "runners", "publish", "staging")
   for (d in c(home, file.path(home, subdirs))) {
     if (!dir.exists(d)) {
@@ -30,26 +30,26 @@
     db <- .db_connect()
     .db_close(db)
   }, error = function(e) NULL)
-  if (.dsjobs_should_autostart_worker()) {
-    tryCatch(.dsjobs_worker_start(), error = function(e) NULL)
+  if (.dshpc_should_autostart_worker()) {
+    tryCatch(.dshpc_worker_start(), error = function(e) NULL)
   }
   invisible(NULL)
 }
 
 #' @keywords internal
-.dsjobs_should_autostart_worker <- function() {
-  mode <- .dsj_option("worker_autostart", "auto")
+.dshpc_should_autostart_worker <- function() {
+  mode <- .dshpc_option("worker_autostart", "auto")
   if (isFALSE(mode)) return(FALSE)
-  if (identical(Sys.getenv("DSJOBS_WORKER", unset = ""), "1")) return(FALSE)
-  if (identical(Sys.getenv("DSJOBS_DISABLE_AUTOSTART", unset = ""), "1")) return(FALSE)
+  if (identical(Sys.getenv("DSHPC_WORKER", unset = ""), "1")) return(FALSE)
+  if (identical(Sys.getenv("DSHPC_DISABLE_AUTOSTART", unset = ""), "1")) return(FALSE)
   if (nzchar(Sys.getenv("_R_CHECK_PACKAGE_NAME_", unset = ""))) return(FALSE)
   if (nzchar(Sys.getenv("TESTTHAT", unset = ""))) return(FALSE)
-  home <- .dsjobs_home(must_exist = FALSE)
+  home <- .dshpc_home(must_exist = FALSE)
   if (is.null(home) || !dir.exists(home) || file.access(home, mode = 2) != 0)
     return(FALSE)
   if (isTRUE(mode)) return(TRUE)
   if (is.character(mode) && identical(mode, "true")) return(TRUE)
-  if (identical(Sys.getenv("DSJOBS_FORCE_AUTOSTART", unset = ""), "1"))
+  if (identical(Sys.getenv("DSHPC_FORCE_AUTOSTART", unset = ""), "1"))
     return(TRUE)
   cmdline <- paste(commandArgs(FALSE), collapse = " ")
   grepl("Rserve|rock", cmdline, ignore.case = TRUE)
@@ -58,22 +58,22 @@
 # --- Core utilities ---
 
 #' @keywords internal
-.dsjobs_home <- function(must_exist = TRUE) {
-  home <- .dsj_option("home", "/srv/dsjobs")
+.dshpc_home <- function(must_exist = TRUE) {
+  home <- .dshpc_option("home", "/srv/dshpc")
   if (must_exist && !dir.exists(home)) {
-    stop("DSJOBS_HOME does not exist: ", home, call. = FALSE)
+    stop("DSHPC_HOME does not exist: ", home, call. = FALSE)
   }
   home
 }
 
 #' @keywords internal
-.dsj_option <- function(name, default = NULL) {
-  value <- getOption(paste0("dsjobs.", name), NULL)
+.dshpc_option <- function(name, default = NULL) {
+  value <- getOption(paste0("dshpc.", name), NULL)
   if (!is.null(value)) return(value)
-  value <- getOption(paste0("default.dsjobs.", name), NULL)
+  value <- getOption(paste0("default.dshpc.", name), NULL)
   if (!is.null(value)) return(value)
 
-  env_name <- paste0("DSJOBS_", toupper(gsub("[^A-Za-z0-9]+", "_", name)))
+  env_name <- paste0("DSHPC_", toupper(gsub("[^A-Za-z0-9]+", "_", name)))
   env_value <- Sys.getenv(env_name, unset = NA_character_)
   if (!is.na(env_value) && nzchar(env_value)) return(env_value)
 
@@ -111,7 +111,7 @@
 #' @param spec_owner Character or NULL; owner from the job spec (.owner field).
 #' @keywords internal
 .get_owner_id <- function(spec_owner = NULL) {
-  # Best: explicit owner from client (injected by dsJobsClient)
+  # Best: explicit owner from client (injected by dsHPCClient)
   if (!is.null(spec_owner) && nzchar(spec_owner)) return(spec_owner)
   # DSLite / local fallback
   owner <- Sys.getenv("USER", unset = "")
@@ -131,10 +131,10 @@
   x
 }
 
-#' Check DSJOBS_HOME directories and permissions.
+#' Check DSHPC_HOME directories and permissions.
 #' @keywords internal
-.dsjobs_home_health <- function() {
-  home <- .dsjobs_home(must_exist = FALSE)
+.dshpc_home_health <- function() {
+  home <- .dshpc_home(must_exist = FALSE)
   subdirs <- c("runners", "artifacts", "publish", "staging")
   paths <- c(home, file.path(home, subdirs))
   names(paths) <- c("home", subdirs)

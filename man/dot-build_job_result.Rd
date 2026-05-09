@@ -9,8 +9,8 @@
 \description{
 DISCLOSURE RULE: Only outputs of kind "summary", "aggregate_result",
 or "job_metadata" can have their values returned to the client via
-jobResultDS(). All other outputs (emit_value, artifact_file, etc.)
+hpcResultDS(). All other outputs (emit_value, artifact_file, etc.)
 are listed by name/kind only -- their values stay server-side and
-must be loaded via jobLoadOutputDS() (assign) or published as assets.
+must be loaded via hpcLoadOutputDS() (assign) or published as assets.
 }
 \keyword{internal}

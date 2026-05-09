@@ -34,7 +34,7 @@
 #'   encoded JSON string.
 #' @return Named list containing `job_id`, `state`, and `submitted_at`.
 #' @export
-jobSubmitDS <- function(spec_encoded) {
+hpcSubmitDS <- function(spec_encoded) {
   spec <- .ds_arg(spec_encoded)
   spec <- .validate_job_spec(spec)
   owner_id <- .get_owner_id(spec$.owner)
@@ -117,7 +117,7 @@ jobSubmitDS <- function(spec_encoded) {
     )
   } else {
     # Has artifact steps -- needs the worker daemon
-    tryCatch(.dsjobs_worker_start(), error = function(e) NULL)
+    tryCatch(.dshpc_worker_start(), error = function(e) NULL)
   }
 
   job <- .store_get_job(db, job_id)
@@ -148,7 +148,7 @@ jobSubmitDS <- function(spec_encoded) {
 #' @param required_label If non-NULL, verify the job has this label (ownership check).
 #' @return The loaded object.
 #' @export
-jobLoadOutputDS <- function(job_id_or_symbol, output_name,
+hpcLoadOutputDS <- function(job_id_or_symbol, output_name,
                              as_descriptor = FALSE, required_label = NULL) {
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
@@ -181,7 +181,7 @@ jobLoadOutputDS <- function(job_id_or_symbol, output_name,
   # Disclosure control: tabular outputs must have >= nfilter rows
   # Non-tabular outputs (RDS, JSON, binary) also blocked if row count unknown
   n_rows <- .count_output_rows(path)
-  nfilter <- .dsj_disclosure_settings()$nfilter_subset
+  nfilter <- .dshpc_disclosure_settings()$nfilter_subset
   if (is.na(n_rows)) {
     # For RDS files, try to count if it's a data.frame
     if (grepl("\\.rds$", path, ignore.case = TRUE)) {
@@ -200,7 +200,7 @@ jobLoadOutputDS <- function(job_id_or_symbol, output_name,
     n_rows <- nrow(pf)
 
     desc <- list(
-      dataset_id  = paste0("dsjobs.", job_id, ".", output_name),
+      dataset_id  = paste0("dshpc.", job_id, ".", output_name),
       source_kind = "staged_parquet",
       metadata    = list(
         file    = path,
@@ -209,7 +209,7 @@ jobLoadOutputDS <- function(job_id_or_symbol, output_name,
         columns = col_names
       ),
       staged_token = paste0("job_", job_id),
-      origin       = "dsJobs"
+      origin       = "dsHPC"
     )
     class(desc) <- "FlowerDatasetDescriptor"
     return(desc)
@@ -260,7 +260,7 @@ jobLoadOutputDS <- function(job_id_or_symbol, output_name,
 #' @return Named list with job id, state, progress, timestamps, sanitized error
 #'   string, and retry count.
 #' @export
-jobStatusDS <- function(job_id_or_symbol) {
+hpcStatusDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -290,7 +290,7 @@ jobStatusDS <- function(job_id_or_symbol) {
 #' @return A named list. If the job is not complete, the list contains
 #'   `ready = FALSE`; otherwise it contains the safe result metadata.
 #' @export
-jobResultDS <- function(job_id_or_symbol) {
+hpcResultDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -304,7 +304,7 @@ jobResultDS <- function(job_id_or_symbol) {
                 error = safe_err))
   }
 
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   result_path <- file.path(home, "artifacts", job_id, "result", "result.rds")
   if (file.exists(result_path)) {
     result <- readRDS(result_path)
@@ -324,7 +324,7 @@ jobResultDS <- function(job_id_or_symbol) {
 #'   capped server-side.
 #' @return Character vector of sanitized log lines.
 #' @export
-jobLogsDS <- function(job_id_or_symbol, last_n = 50L) {
+hpcLogsDS <- function(job_id_or_symbol, last_n = 50L) {
   job_id <- .resolve_job_id(job_id_or_symbol)
   last_n <- as.integer(last_n %||% 50L)
   db <- .db_connect()
@@ -332,7 +332,7 @@ jobLogsDS <- function(job_id_or_symbol, last_n = 50L) {
   job <- .store_get_job(db, job_id)
   if (is.null(job)) stop("Job not found.", call. = FALSE)
 
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   lines <- character(0)
   art_dir <- file.path(home, "artifacts", job_id)
   if (dir.exists(art_dir)) {
@@ -358,7 +358,7 @@ jobLogsDS <- function(job_id_or_symbol, last_n = 50L) {
 #'
 #' @param label Character or NULL; filter by label.
 #' @export
-jobListDS <- function(label = NULL) {
+hpcListDS <- function(label = NULL) {
   db <- .db_connect()
   on.exit(.db_close(db))
 
@@ -380,7 +380,7 @@ jobListDS <- function(label = NULL) {
 #'   `job_id` field in the server session.
 #' @return Data frame with output name, kind, disclosure flag, and size.
 #' @export
-jobOutputsDS <- function(job_id_or_symbol) {
+hpcOutputsDS <- function(job_id_or_symbol) {
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -394,8 +394,8 @@ jobOutputsDS <- function(job_id_or_symbol) {
 
 #' Get Server Job Capabilities
 #' @export
-jobCapabilitiesDS <- function() {
-  settings <- .dsjobs_settings()
+hpcCapabilitiesDS <- function() {
+  settings <- .dshpc_settings()
   runners <- .list_runners()
   runner_details <- lapply(runners, function(r) {
     cfg <- .load_runner_config(r)
@@ -421,7 +421,7 @@ jobCapabilitiesDS <- function() {
   })
   names(runner_details) <- runners
 
-  worker_health <- .dsjobs_worker_health()
+  worker_health <- .dshpc_worker_health()
   active <- tryCatch({
     db <- .db_connect()
     on.exit(.db_close(db), add = TRUE)
@@ -432,10 +432,10 @@ jobCapabilitiesDS <- function() {
     data.frame(state = character(0), n = integer(0), stringsAsFactors = FALSE)
   })
 
-  list(dsjobs_version = as.character(utils::packageVersion("dsJobs")),
+  list(dshpc_version = as.character(utils::packageVersion("dsHPC")),
        runners = runner_details, publishers = .list_publishers(),
-       home = .dsjobs_home(must_exist = FALSE),
-       directories = .dsjobs_home_health(),
+       home = .dshpc_home(must_exist = FALSE),
+       directories = .dshpc_home_health(),
        active_jobs = active,
        max_jobs_global = settings$max_jobs_global,
        max_steps_per_job = settings$max_steps_per_job,
@@ -447,20 +447,20 @@ jobCapabilitiesDS <- function() {
 
 #' Get Scheduler Status
 #' @export
-jobSchedulerStatusDS <- function() {
+hpcSchedulerStatusDS <- function() {
   .scheduler_status()
 }
 
 # =============================================================================
-# Admin methods (disabled by default, enabled by dsjobs.admin_key option or
-# DSJOBS_ADMIN_KEY environment variable)
+# Admin methods (disabled by default, enabled by dshpc.admin_key option or
+# DSHPC_ADMIN_KEY environment variable)
 # =============================================================================
 
 #' Verify admin key. Disabled if no key configured.
 #' Key arrives B64-encoded from client to avoid Opal parser issues.
 #' @keywords internal
 .verify_admin_key <- function(admin_key) {
-  expected <- .dsj_option("admin_key", NULL)
+  expected <- .dshpc_option("admin_key", NULL)
 
   if (is.null(expected) || !nzchar(expected))
     stop("Admin access is not enabled on this server.", call. = FALSE)
@@ -481,20 +481,20 @@ jobSchedulerStatusDS <- function() {
 #' Check if admin is configured
 #' @keywords internal
 .admin_is_configured <- function() {
-  key <- .dsj_option("admin_key", NULL)
+  key <- .dshpc_option("admin_key", NULL)
   !is.null(key) && nzchar(key)
 }
 
 #' List ALL Jobs (admin only)
 #'
-#' Disabled by default. Enable by setting dsjobs.admin_key on the server:
-#'   dsadmin.set_option(con, "dsjobs.admin_key", "your_secret_key")
-#' or by setting DSJOBS_ADMIN_KEY in the Rock/HPC environment.
+#' Disabled by default. Enable by setting dshpc.admin_key on the server:
+#'   dsadmin.set_option(con, "dshpc.admin_key", "your_secret_key")
+#' or by setting DSHPC_ADMIN_KEY in the Rock/HPC environment.
 #'
 #' @param admin_key Character; the admin key.
 #' @param label Character or NULL; filter by label.
 #' @export
-jobAdminListDS <- function(admin_key = NULL, label = NULL) {
+hpcAdminListDS <- function(admin_key = NULL, label = NULL) {
   .verify_admin_key(admin_key)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -510,12 +510,12 @@ jobAdminListDS <- function(admin_key = NULL, label = NULL) {
 
 #' Cancel Any Job (admin only)
 #'
-#' Disabled by default. Enable by setting dsjobs.admin_key or DSJOBS_ADMIN_KEY.
+#' Disabled by default. Enable by setting dshpc.admin_key or DSHPC_ADMIN_KEY.
 #'
 #' @param job_id Character; job ID.
 #' @param admin_key Character; the admin key.
 #' @export
-jobAdminCancelDS <- function(job_id, admin_key = NULL) {
+hpcAdminCancelDS <- function(job_id, admin_key = NULL) {
   .verify_admin_key(admin_key)
   job_id <- .resolve_job_id(job_id)
   db <- .db_connect()

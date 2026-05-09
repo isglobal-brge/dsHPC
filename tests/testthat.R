@@ -1,4 +1,4 @@
 library(testthat)
-library(dsJobs)
+library(dsHPC)
 
-test_check("dsJobs")
+test_check("dsHPC")

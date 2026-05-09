@@ -64,7 +64,7 @@
   size <- file.info(out_path)$size
 
   # Emit outputs stay server-side -- NOT safe for client disclosure.
-  # Use jobLoadOutputDS (assign) to load them into the server R session.
+  # Use hpcLoadOutputDS (assign) to load them into the server R session.
   .db_register_output(db, job_id, step_index, output_name,
     "emit_value", out_path, size_bytes = size, safe_for_client = FALSE)
 

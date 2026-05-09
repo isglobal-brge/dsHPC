@@ -1,13 +1,13 @@
 # Module: Resource-aware scheduler
 #
-# dsJobs accepts work into a durable queue, then starts jobs only when their
+# dsHPC accepts work into a durable queue, then starts jobs only when their
 # declared runner resources fit the local node budget. This is intentionally
 # small and embedded: it follows the same "requests / consumable resources"
 # model used by production schedulers without making Slurm/Kubernetes mandatory
 # for ordinary DataSHIELD installations.
 
 #' @keywords internal
-.scheduler_node_budget <- function(settings = .dsjobs_settings()) {
+.scheduler_node_budget <- function(settings = .dshpc_settings()) {
   total_mem <- .scheduler_resolve_memory_mb(settings$node_memory_mb)
   reserve <- as.integer(settings$memory_reserve_mb %||% 0L)
   usable_mem <- if (is.finite(total_mem)) max(256L, total_mem - reserve) else Inf
@@ -27,15 +27,15 @@
 }
 
 #' @keywords internal
-.scheduler_cell_id <- function(settings = .dsjobs_settings()) {
+.scheduler_cell_id <- function(settings = .dshpc_settings()) {
   value <- settings$cell_id %||% "auto"
   if (is.character(value) && length(value) == 1 &&
       nzchar(value) && !identical(value, "auto")) {
     return(value)
   }
-  env <- Sys.getenv("DSJOBS_CELL_ID", unset = "")
+  env <- Sys.getenv("DSHPC_CELL_ID", unset = "")
   if (nzchar(env)) return(env)
-  home <- .dsjobs_home(must_exist = FALSE)
+  home <- .dshpc_home(must_exist = FALSE)
   home_key <- if (!is.null(home) && nzchar(home)) {
     tryCatch(normalizePath(home, mustWork = FALSE), error = function(e) home)
   } else "default"
@@ -43,21 +43,21 @@
 }
 
 #' @keywords internal
-.scheduler_node_id <- function(settings = .dsjobs_settings()) {
+.scheduler_node_id <- function(settings = .dshpc_settings()) {
   value <- settings$node_id %||% "auto"
   if (is.character(value) && length(value) == 1 &&
       nzchar(value) && !identical(value, "auto")) {
     return(value)
   }
-  env <- Sys.getenv("DSJOBS_NODE_ID", unset = "")
+  env <- Sys.getenv("DSHPC_NODE_ID", unset = "")
   if (nzchar(env)) return(env)
   host <- Sys.info()[["nodename"]] %||% Sys.getenv("HOSTNAME", unset = "node")
   paste0(gsub("[^A-Za-z0-9_.-]", "_", host), "@", .scheduler_cell_id(settings))
 }
 
 #' @keywords internal
-.scheduler_worker_id <- function(settings = .dsjobs_settings()) {
-  existing <- .dsjobs_env$.worker_id %||% Sys.getenv("DSJOBS_WORKER_ID", unset = "")
+.scheduler_worker_id <- function(settings = .dshpc_settings()) {
+  existing <- .dshpc_env$.worker_id %||% Sys.getenv("DSHPC_WORKER_ID", unset = "")
   if (nzchar(existing)) return(existing)
   paste(.scheduler_node_id(settings), Sys.getpid(), sep = ":")
 }
@@ -89,7 +89,7 @@
     bytes <- suppressWarnings(as.numeric(out[1]))
     if (is.finite(bytes)) return(as.integer(bytes / 1024^2))
   }
-  as.integer(.dsj_option("fallback_node_memory_mb", 8192L))
+  as.integer(.dshpc_option("fallback_node_memory_mb", 8192L))
 }
 
 #' @keywords internal
@@ -118,7 +118,7 @@
 }
 
 #' @keywords internal
-.scheduler_gpu_inventory <- function(settings = .dsjobs_settings()) {
+.scheduler_gpu_inventory <- function(settings = .dshpc_settings()) {
   opt <- settings$gpu_count
   if (is.numeric(opt) && length(opt) == 1 && is.finite(opt)) {
     count <- max(0L, as.integer(opt))
@@ -177,7 +177,7 @@
 }
 
 #' @keywords internal
-.scheduler_runner_profile <- function(runner_name, settings = .dsjobs_settings()) {
+.scheduler_runner_profile <- function(runner_name, settings = .dshpc_settings()) {
   if (is.null(runner_name) || is.na(runner_name) || !nzchar(runner_name)) {
     return(list(runner = NA_character_, memory_mb = 0L, cpu_slots = 0L,
                 max_concurrent = Inf, concurrency_group = NA_character_))
@@ -255,7 +255,7 @@
 }
 
 #' @keywords internal
-.scheduler_job_plan <- function(spec, settings = .dsjobs_settings()) {
+.scheduler_job_plan <- function(spec, settings = .dshpc_settings()) {
   steps <- spec$steps %||% list()
   profiles <- lapply(steps, function(step) {
     if (!identical(step$plane %||% .infer_step_plane(step$type), "artifact"))
@@ -281,7 +281,7 @@
 }
 
 #' @keywords internal
-.scheduler_running_usage <- function(db, settings = .dsjobs_settings()) {
+.scheduler_running_usage <- function(db, settings = .dshpc_settings()) {
   running <- DBI::dbGetQuery(db,
     "SELECT job_id, spec_json FROM jobs WHERE state = 'RUNNING'")
   memory_mb <- 0
@@ -316,7 +316,7 @@
 }
 
 #' @keywords internal
-.scheduler_can_start_job <- function(db, job_id, spec, settings = .dsjobs_settings()) {
+.scheduler_can_start_job <- function(db, job_id, spec, settings = .dshpc_settings()) {
   plan <- .scheduler_job_plan(spec, settings)
   usage <- .scheduler_running_usage(db, settings)
   budget <- .scheduler_node_budget(settings)
@@ -477,7 +477,7 @@
 }
 
 #' @keywords internal
-.scheduler_runner_throttle <- function(db, runner_name, settings = .dsjobs_settings()) {
+.scheduler_runner_throttle <- function(db, runner_name, settings = .dshpc_settings()) {
   hours <- suppressWarnings(as.numeric(settings$oom_throttle_hours %||% 0))
   if (!is.finite(hours) || hours <= 0) return(NULL)
   runner_name <- as.character(runner_name %||% "")[1]
@@ -497,7 +497,7 @@
 }
 
 #' @keywords internal
-.scheduler_active_throttles <- function(db, settings = .dsjobs_settings()) {
+.scheduler_active_throttles <- function(db, settings = .dshpc_settings()) {
   hours <- suppressWarnings(as.numeric(settings$oom_throttle_hours %||% 0))
   if (!is.finite(hours) || hours <= 0) return(data.frame())
   cutoff <- format(Sys.time() - hours * 3600,
@@ -519,7 +519,7 @@
 .scheduler_record_runner_failure <- function(db, runner_name, exit_code, reason = NULL) {
   if (is.null(runner_name) || is.na(runner_name) || !nzchar(runner_name))
     return(invisible(FALSE))
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   profile <- .scheduler_runner_profile(runner_name, settings)
   oom <- .scheduler_is_oom_exit(exit_code)
   if (!oom) return(invisible(FALSE))
@@ -553,7 +553,7 @@
     close_db <- TRUE
   }
   if (close_db) on.exit(.db_close(db))
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   list(
     mode = settings$scheduler,
     executor = .executor_backend_status(settings),
@@ -571,7 +571,7 @@
 }
 
 #' @keywords internal
-.scheduler_cell_status <- function(db, settings = .dsjobs_settings()) {
+.scheduler_cell_status <- function(db, settings = .dshpc_settings()) {
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   ttl <- .scheduler_worker_ttl_secs(settings)
   stale_cutoff <- format(Sys.time() - ttl * 2, "%Y-%m-%dT%H:%M:%OS3Z",
@@ -598,7 +598,7 @@
 }
 
 #' @keywords internal
-.scheduler_worker_ttl_secs <- function(settings = .dsjobs_settings()) {
+.scheduler_worker_ttl_secs <- function(settings = .dshpc_settings()) {
   ttl <- suppressWarnings(as.numeric(settings$worker_leader_ttl_secs %||% 30))
   poll <- suppressWarnings(as.numeric(settings$worker_poll_secs %||% 2))
   max(10, ttl, poll * 5)
@@ -630,7 +630,7 @@
 #' @keywords internal
 .scheduler_register_worker <- function(db, worker_id = .scheduler_worker_id(),
                                        resources = .scheduler_node_budget()) {
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   details <- list(
     r_version = paste(R.version$major, R.version$minor, sep = "."),
@@ -656,7 +656,7 @@
 #' @keywords internal
 .scheduler_renew_worker_leader <- function(db, worker_id = .scheduler_worker_id(),
                                            resources = .scheduler_node_budget()) {
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   now_time <- Sys.time()
   now <- format(now_time, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   expires <- format(now_time + .scheduler_worker_ttl_secs(settings),

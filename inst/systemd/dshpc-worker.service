@@ -1,5 +1,5 @@
 [Unit]
-Description=dsJobs Worker Daemon
+Description=dsHPC Worker Daemon
 After=network.target
 Documentation=https://github.com/isglobal-brge/dsFlower-framework
 
@@ -7,13 +7,13 @@ Documentation=https://github.com/isglobal-brge/dsFlower-framework
 Type=simple
 User=rock
 Group=rock
-Environment=DSJOBS_HOME=/srv/dsjobs
-ExecStart=/usr/bin/Rscript /usr/local/lib/R/site-library/dsJobs/worker/main.R ${DSJOBS_HOME}
-WorkingDirectory=/srv/dsjobs
+Environment=DSHPC_HOME=/srv/dshpc
+ExecStart=/usr/bin/Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R ${DSHPC_HOME}
+WorkingDirectory=/srv/dshpc
 Restart=always
 RestartSec=5
-StandardOutput=append:/srv/dsjobs/worker.log
-StandardError=append:/srv/dsjobs/worker.log
+StandardOutput=append:/srv/dshpc/worker.log
+StandardError=append:/srv/dshpc/worker.log
 
 # Resource limits
 LimitNOFILE=4096
@@ -22,7 +22,7 @@ MemoryMax=2G
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/srv/dsjobs
+ReadWritePaths=/srv/dshpc
 
 [Install]
 WantedBy=multi-user.target

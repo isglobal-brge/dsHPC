@@ -14,7 +14,7 @@ cancel_jobs_by_tag(
 \arguments{
 \item{tag_pattern}{Character; pattern to match against job tags (SQL LIKE).}
 
-\item{admin_key}{Character/list/B64 payload accepted by `jobAdminCancelDS`.}
+\item{admin_key}{Character/list/B64 payload accepted by `hpcAdminCancelDS`.}
 
 \item{reason}{Character; cancellation reason stored on each job.}
 

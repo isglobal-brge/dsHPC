@@ -1,11 +1,11 @@
 # Module: Disclosure Controls
-# Standard DataSHIELD disclosure settings for dsJobs.
+# Standard DataSHIELD disclosure settings for dsHPC.
 
-#' Read a dsJobs option with DataSHIELD double-fallback
+#' Read a dsHPC option with DataSHIELD double-fallback
 #'
-#' Option chain: dsjobs.<name> -> default.dsjobs.<name> -> default.
+#' Option chain: dshpc.<name> -> default.dshpc.<name> -> default.
 #' @noRd
-.dsj_disclosure_settings <- function() {
+.dshpc_disclosure_settings <- function() {
   list(
     nfilter_subset = as.numeric(
       getOption("nfilter.subset", getOption("default.nfilter.subset", 3))

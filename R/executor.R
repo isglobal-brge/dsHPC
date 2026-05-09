@@ -6,8 +6,8 @@
   "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP",
   "BASH_ENV", "ENV", "CDPATH", "IFS")
 
-# Output kinds that are safe to return to the client via jobResultDS.
-# Everything else stays server-side (loadable via jobLoadOutputDS).
+# Output kinds that are safe to return to the client via hpcResultDS.
+# Everything else stays server-side (loadable via hpcLoadOutputDS).
 .CLIENT_SAFE_KINDS <- c("summary", "aggregate_result", "job_metadata")
 
 #' Execute the current step of a job
@@ -70,7 +70,7 @@
   if (!is.null(job) && !is.na(job$worker_pid)) {
     pid <- as.integer(job$worker_pid)
     .terminate_pid(pid)
-    step_dir <- file.path(.dsjobs_home(), "artifacts", job_id,
+    step_dir <- file.path(.dshpc_home(), "artifacts", job_id,
                           sprintf("step_%03d",
                                   as.integer(job$step_index %||% 0L)))
     child_pid <- file.path(step_dir, "child.pid")
@@ -88,13 +88,13 @@
 #'
 #' DISCLOSURE RULE: Only outputs of kind "summary", "aggregate_result",
 #' or "job_metadata" can have their values returned to the client via
-#' jobResultDS(). All other outputs (emit_value, artifact_file, etc.)
+#' hpcResultDS(). All other outputs (emit_value, artifact_file, etc.)
 #' are listed by name/kind only -- their values stay server-side and
-#' must be loaded via jobLoadOutputDS() (assign) or published as assets.
+#' must be loaded via hpcLoadOutputDS() (assign) or published as assets.
 #'
 #' @keywords internal
 .build_job_result <- function(db, job_id) {
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   result_dir <- file.path(home, "artifacts", job_id, "result")
   dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -141,7 +141,7 @@
 
 #' @keywords internal
 .ensure_step_dir <- function(job_id, step_index) {
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   job_dir <- file.path(home, "artifacts", job_id)
   step_dir <- file.path(job_dir, sprintf("step_%03d", step_index))
   out_dir <- file.path(step_dir, "output")
@@ -166,7 +166,7 @@
           "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
           params = list(job_id, as.integer(ref)))
         if (nrow(row) > 0 && !is.na(row$output_ref[1]))
-          return(file.path(.dsjobs_home(), row$output_ref[1]))
+          return(file.path(.dshpc_home(), row$output_ref[1]))
       }
     }
   }
@@ -175,7 +175,7 @@
       "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
       params = list(job_id, step_index - 1L))
     if (nrow(row) > 0 && !is.na(row$output_ref[1]))
-      return(file.path(.dsjobs_home(), row$output_ref[1]))
+      return(file.path(.dshpc_home(), row$output_ref[1]))
   }
   NULL
 }

@@ -1,16 +1,16 @@
 test_that("job creation persists to database", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec(3)
-  dsJobs:::.store_create_job(db, "job_test_create", "user_a", spec, 3L)
+  dsHPC:::.store_create_job(db, "job_test_create", "user_a", spec, 3L)
 
   # Verify job row
-  job <- dsJobs:::.store_get_job(db, "job_test_create")
+  job <- dsHPC:::.store_get_job(db, "job_test_create")
   expect_equal(job$job_id, "job_test_create")
   expect_equal(job$owner_id, "user_a")
   expect_equal(job$state, "PENDING")
@@ -24,56 +24,56 @@ test_that("job creation persists to database", {
 
 test_that("job update is atomic", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_atomic", "user_a", spec, 1L)
+  dsHPC:::.store_create_job(db, "job_atomic", "user_a", spec, 1L)
 
-  dsJobs:::.store_update_job(db, "job_atomic",
+  dsHPC:::.store_update_job(db, "job_atomic",
     state = "RUNNING", step_index = 1L)
 
-  job <- dsJobs:::.store_get_job(db, "job_atomic")
+  job <- dsHPC:::.store_get_job(db, "job_atomic")
   expect_equal(job$state, "RUNNING")
   expect_equal(as.integer(job$step_index), 1L)
 })
 
 test_that("job update accepts SQL NULL values", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_null_update", "user_a", spec, 1L)
-  dsJobs:::.store_update_job(db, "job_null_update", worker_pid = 123L)
-  dsJobs:::.store_update_job(db, "job_null_update",
+  dsHPC:::.store_create_job(db, "job_null_update", "user_a", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_null_update", worker_pid = 123L)
+  dsHPC:::.store_update_job(db, "job_null_update",
     worker_pid = NA_integer_, finished_at = NA_character_)
 
-  job <- dsJobs:::.store_get_job(db, "job_null_update")
+  job <- dsHPC:::.store_get_job(db, "job_null_update")
   expect_true(is.na(job$worker_pid))
   expect_true(is.na(job$finished_at))
 })
 
 test_that("listing jobs filters by owner", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_owner_a", "user_a", spec, 1L)
-  dsJobs:::.store_create_job(db, "job_owner_b", "user_b", spec, 1L)
+  dsHPC:::.store_create_job(db, "job_owner_a", "user_a", spec, 1L)
+  dsHPC:::.store_create_job(db, "job_owner_b", "user_b", spec, 1L)
 
   # All jobs visible (global pool)
-  jobs_all <- dsJobs:::.store_list_jobs(db)
+  jobs_all <- dsHPC:::.store_list_jobs(db)
   expect_equal(nrow(jobs_all), 2L)
   expect_true("job_owner_a" %in% jobs_all$job_id)
   expect_true("job_owner_b" %in% jobs_all$job_id)
@@ -81,57 +81,57 @@ test_that("listing jobs filters by owner", {
 
 test_that("listing jobs filters by state", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_pending", "user_a", spec, 1L)
-  dsJobs:::.store_create_job(db, "job_running", "user_a", spec, 1L)
-  dsJobs:::.store_update_job(db, "job_running", state = "RUNNING")
+  dsHPC:::.store_create_job(db, "job_pending", "user_a", spec, 1L)
+  dsHPC:::.store_create_job(db, "job_running", "user_a", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_running", state = "RUNNING")
 
-  pending <- dsJobs:::.store_list_jobs(db, states = "PENDING")
+  pending <- dsHPC:::.store_list_jobs(db, states = "PENDING")
   expect_equal(nrow(pending), 1L)
   expect_equal(pending$job_id, "job_pending")
 
-  running <- dsJobs:::.store_list_jobs(db, states = "RUNNING")
+  running <- dsHPC:::.store_list_jobs(db, states = "RUNNING")
   expect_equal(nrow(running), 1L)
 })
 
 test_that("all jobs are visible in global pool", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec_a <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_a", "user_a", spec_a, 1L)
+  dsHPC:::.store_create_job(db, "job_a", "user_a", spec_a, 1L)
 
   spec_b <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_b", "user_b", spec_b, 1L)
+  dsHPC:::.store_create_job(db, "job_b", "user_b", spec_b, 1L)
 
   # All jobs visible to everyone
-  all <- dsJobs:::.store_list_jobs(db)
+  all <- dsHPC:::.store_list_jobs(db)
   expect_equal(nrow(all), 2L)
   expect_true(all(all$visibility == "global"))
 })
 
 test_that("spec retrieval returns parsed JSON", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   spec <- make_test_spec(2)
-  dsJobs:::.store_create_job(db, "job_spec", "user_a", spec, 2L)
+  dsHPC:::.store_create_job(db, "job_spec", "user_a", spec, 2L)
 
-  retrieved <- dsJobs:::.store_get_spec(db, "job_spec")
+  retrieved <- dsHPC:::.store_get_spec(db, "job_spec")
   expect_true(is.list(retrieved))
   expect_equal(length(retrieved$steps), 2L)
   expect_equal(retrieved$steps[[1]]$type, "emit")

@@ -8,7 +8,7 @@
   if (is.null(steps) || length(steps) == 0)
     stop("Job spec must contain at least one step.", call. = FALSE)
 
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   if (length(steps) > settings$max_steps_per_job)
     stop("Job exceeds maximum steps (", settings$max_steps_per_job, ").", call. = FALSE)
 
@@ -56,13 +56,13 @@
 #' @keywords internal
 .load_runner_config <- function(runner_name) {
   if (!grepl("^[a-zA-Z0-9_]+$", runner_name)) return(NULL)
-  home <- .dsjobs_home(must_exist = FALSE)
+  home <- .dshpc_home(must_exist = FALSE)
   if (!is.null(home)) {
     p <- file.path(home, "runners", paste0(runner_name, ".yml"))
     if (file.exists(p) && requireNamespace("yaml", quietly = TRUE))
       return(yaml::read_yaml(p))
   }
-  bp <- system.file("runners", paste0(runner_name, ".yml"), package = "dsJobs")
+  bp <- system.file("runners", paste0(runner_name, ".yml"), package = "dsHPC")
   if (nzchar(bp) && file.exists(bp) && requireNamespace("yaml", quietly = TRUE))
     return(yaml::read_yaml(bp))
   NULL
@@ -82,10 +82,10 @@
 #' @keywords internal
 .list_runners <- function() {
   runners <- character(0)
-  bd <- system.file("runners", package = "dsJobs")
+  bd <- system.file("runners", package = "dsHPC")
   if (nzchar(bd) && dir.exists(bd))
     runners <- sub("\\.yml$", "", list.files(bd, "\\.yml$"))
-  home <- .dsjobs_home(must_exist = FALSE)
+  home <- .dshpc_home(must_exist = FALSE)
   if (!is.null(home)) {
     ad <- file.path(home, "runners")
     if (dir.exists(ad))

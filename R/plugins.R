@@ -5,28 +5,28 @@
 #' Register a publisher plugin
 #'
 #' Called by domain packages (dsImaging, dsRadiomics) to register
-#' publish logic. dsJobs calls the registered function when a
+#' publish logic. dsHPC calls the registered function when a
 #' publish_asset or publish_dataset step completes.
 #'
 #' @param kind Character; publisher kind (e.g. "imaging_asset", "radiomics_dataset").
 #' @param fn Function; publisher function(job_id, step, output_dir, db) -> list.
 #' @export
-register_dsjobs_publisher <- function(kind, fn) {
+register_dshpc_publisher <- function(kind, fn) {
   if (!is.function(fn)) stop("Publisher must be a function.", call. = FALSE)
-  .dsjobs_env$.publishers[[kind]] <- fn
+  .dshpc_env$.publishers[[kind]] <- fn
   invisible(TRUE)
 }
 
 #' Get a registered publisher
 #' @keywords internal
 .get_publisher <- function(kind) {
-  .dsjobs_env$.publishers[[kind]]
+  .dshpc_env$.publishers[[kind]]
 }
 
 #' List registered publishers
 #' @keywords internal
 .list_publishers <- function() {
-  names(.dsjobs_env$.publishers)
+  names(.dshpc_env$.publishers)
 }
 
 #' Execute a publish step via plugin or fallback
@@ -61,8 +61,8 @@ register_dsjobs_publisher <- function(kind, fn) {
     step$package,
     step$requires,
     cfg$publisher_package,
-    .dsj_option("publisher_packages", character(0)),
-    .dsj_option("plugin_packages", character(0))
+    .dshpc_option("publisher_packages", character(0)),
+    .dshpc_option("plugin_packages", character(0))
   )
   pkgs <- unique(as.character(unlist(pkgs, use.names = FALSE)))
   pkgs <- pkgs[nzchar(pkgs)]
@@ -85,7 +85,7 @@ register_dsjobs_publisher <- function(kind, fn) {
   .validate_identifier(dataset_id, "dataset_id")
   .validate_identifier(asset_name, "asset_name")
 
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   lock_path <- .lock_acquire_dataset(dataset_id)
   tryCatch({
     publish_dir <- file.path(home, "publish", dataset_id, asset_name)
@@ -113,7 +113,7 @@ register_dsjobs_publisher <- function(kind, fn) {
 
 #' @keywords internal
 .lock_acquire_dataset <- function(dataset_id, timeout_secs = 60) {
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   lock_dir <- file.path(home, "locks")
   dir.create(lock_dir, recursive = TRUE, showWarnings = FALSE)
   lock_path <- file.path(lock_dir, paste0("dataset.", dataset_id, ".lock"))

@@ -1,13 +1,13 @@
 # Module: Worker Daemon
 # External process. NOT started from .onAttach().
-# Started by admin via: Rscript inst/worker/main.R /srv/dsjobs
-# Or by helper: dsJobs:::.dsjobs_worker_start()
+# Started by admin via: Rscript inst/worker/main.R /srv/dshpc
+# Or by helper: dsHPC:::.dshpc_worker_start()
 # Supervised by systemd, Docker restart policy, or cron.
 
 #' Start the worker daemon (admin/setup helper, NOT auto-start)
 #' @keywords internal
-.dsjobs_worker_start <- function() {
-  home <- .dsjobs_home()
+.dshpc_worker_start <- function() {
+  home <- .dshpc_home()
   active <- tryCatch({
     db <- .db_connect()
     on.exit(.db_close(db), add = TRUE)
@@ -19,7 +19,7 @@
     leader
   }, error = function(e) NULL)
   if (!is.null(active)) {
-    message("dsJobs worker already running for cell (", active$holder, ")")
+    message("dsHPC worker already running for cell (", active$holder, ")")
     return(invisible(active$holder))
   }
 
@@ -28,13 +28,13 @@
     pid <- tryCatch(as.integer(readLines(pid_file, n = 1, warn = FALSE)),
                      error = function(e) NA_integer_)
     if (.pid_is_alive(pid)) {
-      message("dsJobs worker already running (PID ", pid, ")")
+      message("dsHPC worker already running (PID ", pid, ")")
       return(invisible(NULL))
     }
     unlink(pid_file)
   }
   log_file <- file.path(home, "worker.log")
-  worker_script <- system.file("worker", "main.R", package = "dsJobs")
+  worker_script <- system.file("worker", "main.R", package = "dsHPC")
 
   # Spawn the worker as a detached process via setsid + nohup so that it does
   # not inherit Rserve's session/process group. Some embedded R hosts
@@ -50,7 +50,7 @@
   if (!is.null(setsid) && file.exists("/usr/bin/env")) {
     cmd <- "/usr/bin/env"
     args <- c("MKL_SERVICE_FORCE_INTEL=0", "MKL_THREADING_LAYER=GNU",
-              "DSJOBS_WORKER=1",
+              "DSHPC_WORKER=1",
               setsid, "-f", rscript, worker_script, home)
   } else {
     cmd <- rscript
@@ -60,12 +60,12 @@
     command = cmd, args = args,
     stdout = log_file, stderr = log_file,
     env = c("current",
-            DSJOBS_WORKER = "1",
+            DSHPC_WORKER = "1",
             MKL_SERVICE_FORCE_INTEL = "0",
             MKL_THREADING_LAYER = "GNU"),
     cleanup = FALSE, cleanup_tree = FALSE)
   writeLines(as.character(proc$get_pid()), pid_file)
-  .dsjobs_env$.worker <- proc
+  .dshpc_env$.worker <- proc
 
   # When launched through `setsid -f`, processx sees the short-lived launcher
   # PID, while the actual R worker gets a different PID. Wait briefly for the
@@ -73,18 +73,18 @@
   actual_pid <- .wait_for_worker_pid(home, timeout_secs = 5)
   if (!is.na(actual_pid)) {
     writeLines(as.character(actual_pid), pid_file)
-    message("dsJobs worker started (PID ", actual_pid, ")")
+    message("dsHPC worker started (PID ", actual_pid, ")")
     return(invisible(actual_pid))
   }
 
-  message("dsJobs worker start requested (launcher PID ", proc$get_pid(), ")")
+  message("dsHPC worker start requested (launcher PID ", proc$get_pid(), ")")
   invisible(proc$get_pid())
 }
 
 #' Stop the worker daemon
 #' @keywords internal
-.dsjobs_worker_stop <- function() {
-  home <- .dsjobs_home()
+.dshpc_worker_stop <- function() {
+  home <- .dshpc_home()
   pid_file <- file.path(home, "worker.pid")
 
   snapshot <- .worker_runtime_snapshot(home)
@@ -102,7 +102,7 @@
   if (file.exists(pid_file)) {
     unlink(pid_file)
   }
-  message("dsJobs worker stopped.")
+  message("dsHPC worker stopped.")
 }
 
 #' Check whether a scheduler leader still has a live process
@@ -132,7 +132,7 @@
 
 #' Runtime snapshot of known worker processes
 #' @keywords internal
-.worker_runtime_snapshot <- function(home = .dsjobs_home()) {
+.worker_runtime_snapshot <- function(home = .dshpc_home()) {
   pids <- integer(0)
   worker_ids <- character(0)
 
@@ -142,7 +142,7 @@
     leader <- .scheduler_worker_leader(db)
     if (!is.null(leader)) worker_ids <- c(worker_ids, leader$holder)
 
-    ttl <- .scheduler_worker_ttl_secs(.dsjobs_settings())
+    ttl <- .scheduler_worker_ttl_secs(.dshpc_settings())
     stale_cutoff <- format(Sys.time() - ttl * 2, "%Y-%m-%dT%H:%M:%OS3Z",
                            tz = "UTC")
     workers <- DBI::dbGetQuery(db,
@@ -254,16 +254,16 @@
 #' Write worker health file (for monitoring)
 #' @keywords internal
 .worker_write_health <- function() {
-  home <- .dsjobs_home()
+  home <- .dshpc_home()
   health <- list(
     pid = Sys.getpid(),
-    worker_id = .dsjobs_env$.worker_id %||% NA_character_,
-    cell_id = .dsjobs_env$.cell_id %||% NA_character_,
-    leader = isTRUE(.dsjobs_env$.worker_is_leader),
+    worker_id = .dshpc_env$.worker_id %||% NA_character_,
+    cell_id = .dshpc_env$.cell_id %||% NA_character_,
+    leader = isTRUE(.dshpc_env$.worker_is_leader),
     alive = TRUE,
     last_heartbeat = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"),
     uptime_secs = as.numeric(difftime(Sys.time(),
-      .dsjobs_env$.worker_started_at %||% Sys.time(), units = "secs"))
+      .dshpc_env$.worker_started_at %||% Sys.time(), units = "secs"))
   )
   health_path <- file.path(home, "worker.health")
   writeLines(jsonlite::toJSON(health, auto_unbox = TRUE, pretty = TRUE), health_path)
@@ -271,9 +271,9 @@
 
 #' Check worker health status
 #' @keywords internal
-.dsjobs_worker_health <- function() {
-  home <- .dsjobs_home(must_exist = FALSE)
-  if (is.null(home)) return(list(alive = FALSE, reason = "no DSJOBS_HOME"))
+.dshpc_worker_health <- function() {
+  home <- .dshpc_home(must_exist = FALSE)
+  if (is.null(home)) return(list(alive = FALSE, reason = "no DSHPC_HOME"))
   db_health <- tryCatch({
     db <- .db_connect()
     on.exit(.db_close(db), add = TRUE)
@@ -308,8 +308,8 @@
 #' Main worker loop (runs inside the worker process)
 #' @keywords internal
 .worker_main <- function() {
-  # Ensure DSJOBS_HOME directories exist with correct permissions
-  home <- .dsjobs_home()
+  # Ensure DSHPC_HOME directories exist with correct permissions
+  home <- .dshpc_home()
   for (subdir in c("artifacts", "publish", "staging", "runners")) {
     d <- file.path(home, subdir)
     dir.create(d, recursive = TRUE, showWarnings = FALSE)
@@ -320,30 +320,30 @@
            error = function(e) NULL)
 
   db <- .db_connect()
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   gc_counter <- 0L
   resources <- .scheduler_node_budget(settings)
-  .dsjobs_env$.cell_id <- .scheduler_cell_id(settings)
-  .dsjobs_env$.worker_id <- .scheduler_worker_id(settings)
-  .dsjobs_env$.worker_started_at <- Sys.time()
+  .dshpc_env$.cell_id <- .scheduler_cell_id(settings)
+  .dshpc_env$.worker_id <- .scheduler_worker_id(settings)
+  .dshpc_env$.worker_started_at <- Sys.time()
   on.exit({
     current <- tryCatch(readLines(pid_file, n = 1, warn = FALSE),
                         error = function(e) character(0))
     if (length(current) > 0 && identical(current[1], as.character(Sys.getpid()))) {
       tryCatch(unlink(pid_file), error = function(e) NULL)
     }
-    tryCatch(.scheduler_release_worker_leader(db, .dsjobs_env$.worker_id),
+    tryCatch(.scheduler_release_worker_leader(db, .dshpc_env$.worker_id),
              error = function(e) NULL)
     .db_close(db)
   })
   .worker_log("Worker started (PID ", Sys.getpid(), ", worker ",
-    .dsjobs_env$.worker_id, ", cell ", .dsjobs_env$.cell_id, ")")
+    .dshpc_env$.worker_id, ", cell ", .dshpc_env$.cell_id, ")")
 
   repeat {
     tryCatch({
-      is_leader <- .scheduler_renew_worker_leader(db, .dsjobs_env$.worker_id,
+      is_leader <- .scheduler_renew_worker_leader(db, .dshpc_env$.worker_id,
         resources = resources)
-      .dsjobs_env$.worker_is_leader <- is_leader
+      .dshpc_env$.worker_is_leader <- is_leader
       .worker_write_health()
 
       if (isTRUE(is_leader)) {
@@ -360,7 +360,7 @@
 
 #' @keywords internal
 .worker_dispatch <- function(db) {
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   pending <- DBI::dbGetQuery(db,
     "SELECT job_id FROM jobs WHERE state = 'PENDING'
      ORDER BY priority DESC, submitted_at LIMIT ?",
@@ -444,7 +444,7 @@
     step_state <- running$step_state[i]
     external_id <- running$external_id[i]
     external_backend <- running$external_backend[i]
-    step_dir <- file.path(.dsjobs_home(), "artifacts", jid,
+    step_dir <- file.path(.dshpc_home(), "artifacts", jid,
                            sprintf("step_%03d", sidx))
 
     if (!is.na(step_state) && identical(step_state, "done")) {
@@ -515,7 +515,7 @@
 .worker_requeue_interrupted_step <- function(db, jid, sidx, reason) {
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
-    settings <- .dsjobs_settings()
+    settings <- .dshpc_settings()
     job <- .store_get_job(db, jid)
     retries <- as.integer(job$retry_count %||% 0L)
     now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
@@ -556,7 +556,7 @@
     if (identical(as.integer(exit_code), 0L)) {
       output_ref <- file.path("artifacts", jid,
                                sprintf("step_%03d", sidx), "output")
-      out_dir <- file.path(.dsjobs_home(), output_ref)
+      out_dir <- file.path(.dshpc_home(), output_ref)
       if (dir.exists(out_dir)) {
         files <- list.files(out_dir, full.names = TRUE)
         for (f in files) {
@@ -573,7 +573,7 @@
       .db_log_event(db, jid, "step_done", list(step_index = sidx))
       advance_after_commit <- TRUE
     } else {
-      settings <- .dsjobs_settings()
+      settings <- .dshpc_settings()
       job <- .store_get_job(db, jid)
       retries <- as.integer(job$retry_count %||% 0L)
       .scheduler_record_runner_failure(db, runner_name, exit_code,
@@ -619,7 +619,7 @@
     if (!is.na(code)) return(code)
   }
 
-  # 2. Compatibility for legacy jobs launched before dsJobs wrote durable
+  # 2. Compatibility for legacy jobs launched before dsHPC wrote durable
   # exit_code files. New wrappers must write exit_code; output files alone are
   # not enough to prove success after a crash.
   output_dir <- file.path(step_dir, "output")
@@ -648,7 +648,7 @@
 
 #' @keywords internal
 .worker_gc <- function(db) {
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   cutoff <- format(Sys.time() - settings$job_expiry_hours * 3600,
                     "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   expired <- DBI::dbGetQuery(db,
@@ -661,7 +661,7 @@
     DBI::dbExecute(db, "DELETE FROM events WHERE job_id = ?", params = list(jid))
     DBI::dbExecute(db, "DELETE FROM steps WHERE job_id = ?", params = list(jid))
     DBI::dbExecute(db, "DELETE FROM jobs WHERE job_id = ?", params = list(jid))
-    ad <- file.path(.dsjobs_home(), "artifacts", jid)
+    ad <- file.path(.dshpc_home(), "artifacts", jid)
     if (dir.exists(ad)) unlink(ad, recursive = TRUE)
   }
   if (nrow(expired) > 0) .worker_log("GC removed ", nrow(expired), " jobs")
