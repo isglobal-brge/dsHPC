@@ -107,9 +107,9 @@ Guardrails:
 - Worker start records the real daemon PID after heartbeat, not the transient
   launcher PID.
 - Worker stop/cancel uses OS signals and clears stale scheduler locks.
-- Admin-only cancellation is protected by `dsjobs.admin_key`; package-level
-  helpers such as `cancel_jobs_by_tag()` use the same gate as
-  `jobAdminCancelDS()`.
+- Admin-only cancellation is protected by `dsjobs.admin_key` or the container
+  environment variable `DSJOBS_ADMIN_KEY`; package-level helpers such as
+  `cancel_jobs_by_tag()` use the same gate as `jobAdminCancelDS()`.
 - Embedded artifact steps write `child.pid` and an atomic `exit_code`; missing
   `exit_code` is treated as interrupted and requeued, not as success.
 - Successful step completion is committed before advancing the next step; if a
@@ -354,7 +354,8 @@ dsJobsClient::ds.jobs.load_output(conns, job_id, "features", symbol = "rad")
 dsJobsClient::ds.jobs.capabilities(conns)
 dsJobsClient::ds.jobs.scheduler_status(conns)
 
-# Admin-only, enabled by setting dsjobs.admin_key on the server.
+# Admin-only, enabled by setting dsjobs.admin_key on the server or
+# DSJOBS_ADMIN_KEY in the Rock/HPC environment.
 dsJobsClient::ds.jobs.admin.list(conns, admin_key, label = "dsImaging")
 dsJobsClient::ds.jobs.admin.cancel(conns, job_id, admin_key)
 ```

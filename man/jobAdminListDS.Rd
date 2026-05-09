@@ -14,4 +14,5 @@ jobAdminListDS(admin_key = NULL, label = NULL)
 \description{
 Disabled by default. Enable by setting dsjobs.admin_key on the server:
   dsadmin.set_option(con, "dsjobs.admin_key", "your_secret_key")
+or by setting DSJOBS_ADMIN_KEY in the Rock/HPC environment.
 }
