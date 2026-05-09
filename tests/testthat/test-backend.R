@@ -107,6 +107,16 @@ test_that("external command backend can submit and reap an artifact step", {
     params = list("job_external"))
   expect_equal(step$external_backend, "external")
   expect_equal(step$external_id, "ext-123")
+  marker <- dsJobs:::.backend_read_external_marker(file.path(
+    home, "artifacts", "job_external", "step_001"))
+  expect_equal(marker$backend, "external")
+  expect_equal(marker$external_id, "ext-123")
+
+  # Simulate a worker crash after backend submission but before the DB row is
+  # fully durable. The recovery marker lets the next worker resume status sync.
+  dsJobs:::.store_update_step(db, "job_external", 1L,
+    external_backend = NA_character_,
+    external_id = NA_character_)
 
   dsJobs:::.worker_reap(db)
   job <- dsJobs:::.store_get_job(db, "job_external")
@@ -115,6 +125,47 @@ test_that("external command backend can submit and reap an artifact step", {
     "SELECT name FROM outputs WHERE job_id = ?",
     params = list("job_external"))
   expect_true("ok.txt" %in% outputs$name)
+})
+
+test_that("external status command failures do not create duplicate retries", {
+  home <- setup_test_home()
+  withr::local_options(list(dsjobs.home = home))
+  on.exit(cleanup_test_home(home))
+
+  status <- file.path(home, "status")
+  writeLines(c("#!/bin/sh", "echo temporary scheduler outage >&2", "exit 2"),
+    status)
+  Sys.chmod(status, "0755")
+
+  withr::local_options(list(
+    dsjobs.executor_backend = "external",
+    dsjobs.external_status_cmd = status
+  ))
+
+  state <- dsJobs:::.backend_status_external("ext-unknown",
+    file.path(home, "artifacts", "job_x", "step_001"))
+  expect_equal(state$state, "running")
+  expect_equal(state$external_state, "STATUS_UNKNOWN")
+  expect_true(is.na(state$exit_code))
+})
+
+test_that("backend step scripts write exit_code atomically", {
+  home <- setup_test_home()
+  withr::local_options(list(dsjobs.home = home))
+  on.exit(cleanup_test_home(home))
+
+  script <- file.path(home, "artifacts", "run_step.sh")
+  prepared <- list(
+    env_vars = c(DSJOBS_OUTPUT_DIR = file.path(home, "out")),
+    command = "/bin/sh",
+    args = c("-c", "true"),
+    step_dir = dirname(script),
+    output_dir = file.path(home, "out"),
+    runner_config = list())
+  dsJobs:::.backend_write_step_script(script, prepared)
+  lines <- readLines(script, warn = FALSE)
+  expect_true(any(grepl("exit_code.tmp", lines, fixed = TRUE)))
+  expect_true(any(grepl("mv exit_code.tmp exit_code", lines, fixed = TRUE)))
 })
 
 test_that("backend path mappings support alternate host/container views", {

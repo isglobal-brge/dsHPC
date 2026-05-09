@@ -176,7 +176,16 @@
   # /proc not available or PID not there -- process is dead
   if (dir.exists("/proc")) return(FALSE)
 
-  # Non-Linux fallback: use kill signal 0
-  tryCatch({ tools::pskill(pid, signal = 0L); TRUE },
-           error = function(e) FALSE)
+  # Non-Linux fallback: use kill -0 when available. tools::pskill() returns
+  # FALSE without raising on some platforms, so do not treat a clean return as
+  # proof that the process exists.
+  kill <- Sys.which("kill")
+  if (nzchar(kill)) {
+    status <- tryCatch(
+      system2(kill, c("-0", as.character(pid)), stdout = FALSE, stderr = FALSE),
+      error = function(e) 1L)
+    return(identical(as.integer(status), 0L))
+  }
+
+  isTRUE(tryCatch(tools::pskill(pid, signal = 0L), error = function(e) FALSE))
 }
