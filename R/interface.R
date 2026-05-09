@@ -452,7 +452,8 @@ jobSchedulerStatusDS <- function() {
 }
 
 # =============================================================================
-# Admin methods (disabled by default, enabled by dsjobs.admin_key option)
+# Admin methods (disabled by default, enabled by dsjobs.admin_key option or
+# DSJOBS_ADMIN_KEY environment variable)
 # =============================================================================
 
 #' Verify admin key. Disabled if no key configured.
@@ -488,6 +489,7 @@ jobSchedulerStatusDS <- function() {
 #'
 #' Disabled by default. Enable by setting dsjobs.admin_key on the server:
 #'   dsadmin.set_option(con, "dsjobs.admin_key", "your_secret_key")
+#' or by setting DSJOBS_ADMIN_KEY in the Rock/HPC environment.
 #'
 #' @param admin_key Character; the admin key.
 #' @param label Character or NULL; filter by label.
@@ -508,7 +510,7 @@ jobAdminListDS <- function(admin_key = NULL, label = NULL) {
 
 #' Cancel Any Job (admin only)
 #'
-#' Disabled by default. Enable by setting dsjobs.admin_key.
+#' Disabled by default. Enable by setting dsjobs.admin_key or DSJOBS_ADMIN_KEY.
 #'
 #' @param job_id Character; job ID.
 #' @param admin_key Character; the admin key.

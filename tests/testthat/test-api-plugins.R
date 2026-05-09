@@ -34,3 +34,30 @@ test_that("cancel_jobs_by_tag requires admin key and cancels matching active job
   expect_equal(dsJobs:::.store_get_job(db, "job_gen_a_done")$state,
     "FINISHED")
 })
+
+test_that("admin key can be supplied by environment", {
+  home <- setup_test_home()
+  withr::local_options(list(dsjobs.home = home, dsjobs.admin_key = NULL,
+    default.dsjobs.admin_key = NULL))
+  withr::local_envvar(c(DSJOBS_ADMIN_KEY = "env-secret"))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+
+  spec <- c(make_test_spec(), list(tags = c("per_image", "gen_env")))
+  dsJobs:::.store_create_job(db, "job_gen_env", "user_a", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_gen_env", state = "RUNNING")
+
+  expect_true(dsJobs:::.admin_is_configured())
+  expect_error(
+    cancel_jobs_by_tag("%gen_env%", admin_key = list(.admin_key = "wrong")),
+    "invalid admin_key"
+  )
+
+  cancelled <- cancel_jobs_by_tag("%gen_env%",
+    admin_key = list(.admin_key = "env-secret"))
+
+  expect_equal(cancelled$job_id, "job_gen_env")
+  expect_equal(dsJobs:::.store_get_job(db, "job_gen_env")$state, "CANCELLED")
+})

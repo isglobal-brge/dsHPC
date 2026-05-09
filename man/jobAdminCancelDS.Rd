@@ -12,5 +12,5 @@ jobAdminCancelDS(job_id, admin_key = NULL)
 \item{admin_key}{Character; the admin key.}
 }
 \description{
-Disabled by default. Enable by setting dsjobs.admin_key.
+Disabled by default. Enable by setting dsjobs.admin_key or DSJOBS_ADMIN_KEY.
 }
