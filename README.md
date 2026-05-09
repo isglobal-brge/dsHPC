@@ -6,7 +6,7 @@ throttle resource-heavy jobs, collect outputs, and publish derived artifacts
 without exposing raw data to the client.
 
 The package is intended to be installed on each Rock/DataSHIELD server. Domain
-packages such as `dsRadiomics` register their runners and publishers; dsJobs
+packages such as `dsImaging` register their runners and publishers; dsJobs
 owns scheduling, retries, worker state, logs, result metadata, and optional
 delegation to HPC backends.
 
@@ -22,6 +22,15 @@ Jobs are persisted in SQLite under `dsjobs.home` and survive session restarts.
 The default scheduler is adaptive: it reads cgroup/host CPU and memory, detects
 local GPU visibility where available, leases resources while jobs run, and puts
 heavy runners into cooldown after OOM-like exits.
+
+The same control plane supports three deployment modes:
+
+- **Local cell:** each Rock owns its own `dsjobs.home` and embedded worker.
+- **Shared cell:** several Rocks/sessions point at the same writable
+  `dsjobs.home`; SQLite locks and worker heartbeats elect one scheduler leader
+  for the shared queue.
+- **HPC unit:** the Rock keeps the durable DataSHIELD control plane, while
+  artifact steps are delegated to Slurm or an admin-provided external wrapper.
 
 ## Installation
 
@@ -67,6 +76,48 @@ options(
 Multiple Rock R sessions sharing the same `dsjobs.home` participate in the same
 cell. Leader election and SQLite state keep queue ownership singleton-like for
 that shared cell, while allowing more than one Rock/session to see status.
+
+For an explicit shared-cell identity, set:
+
+```r
+options(
+  dsjobs.home = "/shared/dsjobs",
+  dsjobs.cell_id = "site-imaging-cell",
+  dsjobs.node_id = "rock-a"
+)
+```
+
+If `cell_id = "auto"`, dsJobs derives the cell id from `dsjobs.home`. That is
+enough when the path is truly shared. For independent Rocks that happen to use
+the same container path, set distinct `cell_id` values if you want observability
+to make the separation explicit.
+
+## Recovery guarantees
+
+dsJobs treats the database and artifact directory as the source of truth. A
+worker can die, an R session can disconnect, or an HPC status command can be
+temporarily unavailable without losing submitted jobs.
+
+Guardrails:
+
+- Job specs, job state, steps, resource leases, outputs, logs, worker nodes, and
+  cooldowns are persisted under `dsjobs.home`.
+- Worker start records the real daemon PID after heartbeat, not the transient
+  launcher PID.
+- Worker stop/cancel uses OS signals and clears stale scheduler locks.
+- Embedded artifact steps write `child.pid` and an atomic `exit_code`; missing
+  `exit_code` is treated as interrupted and requeued, not as success.
+- Successful step completion is committed before advancing the next step; if a
+  crash happens between those phases, the next worker resumes the advance.
+- Slurm/external submissions write `external_backend.json` before updating the
+  DB so a new worker can recover the backend job id and continue polling.
+- Transient external status failures return `STATUS_UNKNOWN` and keep the job
+  running instead of creating duplicate retries.
+- OOM-like exits (`-9`, `137`) put the runner/concurrency group into cooldown
+  before retrying.
+
+These guarantees apply to local cell, shared cell, Slurm, and external-HPC
+execution. The client API is unchanged across modes.
 
 ## Backends
 
@@ -278,6 +329,30 @@ Assign method:
 
 - `jobSubmitDS(spec_encoded)`
 
+## Client commands
+
+Researchers and domain packages use `dsJobsClient` against the same control
+plane regardless of whether execution is embedded, cell-shared, Slurm-backed, or
+delegated to an external HPC wrapper:
+
+```r
+dsJobsClient::ds.jobs.list(conns, label = "dsImaging")
+dsJobsClient::ds.jobs.summary(conns, label = "dsImaging")
+dsJobsClient::ds.jobs.status(conns, job_id)
+dsJobsClient::ds.jobs.wait(conns, job_id, timeout = 3600, poll_interval = 10)
+dsJobsClient::ds.jobs.logs(conns, job_id, last_n = 100)
+dsJobsClient::ds.jobs.outputs(conns, job_id)
+dsJobsClient::ds.jobs.result(conns, job_id)
+dsJobsClient::ds.jobs.load_output(conns, job_id, "features", symbol = "rad")
+dsJobsClient::ds.jobs.capabilities(conns)
+dsJobsClient::ds.jobs.scheduler_status(conns)
+```
+
+Domain clients can wrap these for domain-specific labels or generation state.
+For example, `dsImagingClient::ds.imaging.jobs(conns)` lists imaging jobs, while
+`dsImagingClient::ds.imaging.radiomics.collection_status(conns, generation_id)`
+reports collection-level progress for a fire-and-forget imaging generation.
+
 Server-side package API:
 
 - `register_dsjobs_publisher(kind, fn)`
@@ -287,24 +362,24 @@ Server-side package API:
 - `count_active_jobs(tag_pattern)`
 - `get_owner_id()`
 
-## dsRadiomics integration
+## dsImaging integration
 
-`dsRadiomics` registers runners into `DSJOBS_HOME/runners` on load. It can keep
+`dsImaging` registers runners into `DSJOBS_HOME/runners` on load. It can keep
 using embedded local Python environments, or it can declare container images
 through options such as:
 
 ```r
 options(
-  dsradiomics.container_images = list(
+  dsimaging.container_images = list(
     pyradiomics_extract = "ghcr.io/isglobal-brge/dsradiomics-runner@sha256:...",
     lungmask_infer = "ghcr.io/isglobal-brge/dsradiomics-lungmask@sha256:..."
   ),
-  dsradiomics.container_runtime = "auto",
-  dsradiomics.container_pull = "missing"
+  dsimaging.container_runtime = "auto",
+  dsimaging.container_pull = "missing"
 )
 ```
 
-dsRadiomics does not need to know whether the job runs embedded, through Slurm,
+dsImaging does not need to know whether the job runs embedded, through Slurm,
 or through an external HPC gateway. It declares the runner contract and resource
 needs; dsJobs handles orchestration.
 

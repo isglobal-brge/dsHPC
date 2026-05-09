@@ -1,5 +1,5 @@
 # Module: Artifact-Plane Runners
-# Async processx subprocesses. Worker reaps on next poll.
+# Async artifact subprocesses. Worker reaps on next poll.
 
 # Global registry of processx handles so the worker can use proc$get_exit_status()
 # instead of PID-based checking (which fails on Rosetta/cross-arch emulation).
@@ -15,20 +15,83 @@
     return(invisible(TRUE))
   }
 
-  proc <- processx::process$new(
-    command = prepared$command, args = prepared$args,
-    stdout = file.path(step_dir, "stdout.log"),
-    stderr = file.path(step_dir, "stderr.log"),
-    env = prepared$env_vars, cleanup = TRUE, cleanup_tree = TRUE)
-
-  # Store handle in registry for reliable exit status checking
-  key <- paste0(job_id, "_", step_index)
-  .proc_registry[[key]] <- proc
-
-  .store_update_job(db, job_id, worker_pid = proc$get_pid())
+  pid <- .launch_artifact_process(prepared, step_dir)
+  .store_update_job(db, job_id, worker_pid = pid)
   .db_log_event(db, job_id, "artifact_started",
-    list(step_index = step_index, runner = step$runner, pid = proc$get_pid(),
+    list(step_index = step_index, runner = step$runner, pid = pid,
          backend = "embedded"))
+}
+
+#' Launch an embedded artifact process with explicit PID and exit-code files
+#' @keywords internal
+.launch_artifact_process <- function(prepared, step_dir) {
+  if (!identical(.Platform$OS.type, "unix")) {
+    proc <- processx::process$new(
+      command = prepared$command, args = prepared$args,
+      stdout = file.path(step_dir, "stdout.log"),
+      stderr = file.path(step_dir, "stderr.log"),
+      env = prepared$env_vars, cleanup = TRUE, cleanup_tree = TRUE)
+    return(proc$get_pid())
+  }
+
+  script <- file.path(step_dir, "run.sh")
+  command <- paste(c(shQuote(prepared$command),
+                     shQuote(prepared$args)), collapse = " ")
+  exit_file <- shQuote(file.path(step_dir, "exit_code"))
+  exit_tmp <- shQuote(file.path(step_dir, "exit_code.tmp"))
+  child_pid_file <- shQuote(file.path(step_dir, "child.pid"))
+  stdout_file <- shQuote(file.path(step_dir, "stdout.log"))
+  stderr_file <- shQuote(file.path(step_dir, "stderr.log"))
+  env_vars <- prepared$env_vars
+  env_lines <- character(0)
+  if (length(env_vars) > 0) {
+    env_lines <- vapply(names(env_vars), function(nm) {
+      if (!nzchar(nm) || identical(env_vars[[nm]], "current")) return("")
+      paste0("export ", nm, "=", shQuote(as.character(env_vars[[nm]])))
+    }, character(1))
+    env_lines <- env_lines[nzchar(env_lines)]
+  }
+
+  lines <- c(
+    "#!/bin/sh",
+    "set +e",
+    env_lines,
+    sprintf("cd %s || exit 1", shQuote(step_dir)),
+    sprintf("mkdir -p %s", shQuote(prepared$output_dir)),
+    "child=\"\"",
+    "write_exit_code() {",
+    paste0("  printf '%s\\n' \"$1\" > ", exit_tmp),
+    paste0("  mv ", exit_tmp, " ", exit_file),
+    "}",
+    "term_child() {",
+    "  if [ -n \"$child\" ] && kill -0 \"$child\" 2>/dev/null; then",
+    "    kill -TERM \"$child\" 2>/dev/null || true",
+    "    sleep 2",
+    "    kill -KILL \"$child\" 2>/dev/null || true",
+    "  fi",
+    "  write_exit_code 143",
+    "  exit 143",
+    "}",
+    "trap term_child TERM INT",
+    paste0(command, " > ", stdout_file, " 2> ", stderr_file, " &"),
+    "child=$!",
+    paste0("printf '%s\\n' \"$child\" > ", child_pid_file),
+    "wait \"$child\"",
+    "code=$?",
+    "write_exit_code \"$code\"",
+    "exit \"$code\""
+  )
+  writeLines(lines, script)
+  Sys.chmod(script, "0755")
+
+  launch <- sprintf("cd %s && nohup /bin/sh %s >/dev/null 2>&1 & echo $!",
+                    shQuote(step_dir), shQuote(script))
+  pid <- tryCatch(
+    as.integer(system2("/bin/sh", c("-c", launch), stdout = TRUE,
+                       stderr = FALSE)[1]),
+    error = function(e) NA_integer_)
+  if (is.na(pid)) stop("Failed to launch artifact runner.", call. = FALSE)
+  pid
 }
 
 #' Prepare an allowlisted artifact runner command for an executor backend.
@@ -132,7 +195,15 @@
   key <- paste0(job_id, "_", step_index)
   proc <- .proc_registry[[key]]
   if (is.null(proc)) return(FALSE)  # No handle = assume dead
-  proc$is_alive()
+  alive <- tryCatch(proc$is_alive(), error = function(e) FALSE)
+  if (!isTRUE(alive)) return(FALSE)
+
+  # Under cross-arch emulation (Rosetta/qemu), processx can occasionally keep a
+  # stale live handle after the child has exited. The PID check is authoritative
+  # in Linux containers and prevents jobs from staying RUNNING forever.
+  pid <- tryCatch(proc$get_pid(), error = function(e) NA_integer_)
+  if (!.pid_is_alive(pid)) return(FALSE)
+  TRUE
 }
 
 #' Get exit status from processx handle, clean up registry

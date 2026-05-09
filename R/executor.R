@@ -69,10 +69,15 @@
   }
   if (!is.null(job) && !is.na(job$worker_pid)) {
     pid <- as.integer(job$worker_pid)
-    if (.pid_is_alive(pid)) {
-      tools::pskill(pid, signal = 15L)
-      Sys.sleep(2)
-      if (.pid_is_alive(pid)) tools::pskill(pid, signal = 9L)
+    .terminate_pid(pid)
+    step_dir <- file.path(.dsjobs_home(), "artifacts", job_id,
+                          sprintf("step_%03d",
+                                  as.integer(job$step_index %||% 0L)))
+    child_pid <- file.path(step_dir, "child.pid")
+    if (file.exists(child_pid)) {
+      child <- tryCatch(as.integer(readLines(child_pid, n = 1, warn = FALSE)),
+                        error = function(e) NA_integer_)
+      .terminate_pid(child)
     }
     .scheduler_release_leases(db, job_id)
     .store_update_job(db, job_id, worker_pid = NA_integer_)

@@ -147,3 +147,37 @@ test_that("worker leader election creates one active scheduler per cell", {
   status <- dsJobs:::.scheduler_status(db)
   expect_equal(status$cell$leader$holder, "worker_b")
 })
+
+test_that("dead worker leaders can be marked stale for shared-cell takeover", {
+  home <- setup_test_home()
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.worker_leader_ttl_secs = 30
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  expires <- format(Sys.time() + 3600, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+
+  DBI::dbExecute(db,
+    "INSERT OR REPLACE INTO worker_nodes
+      (worker_id, cell_id, node_id, hostname, pid, state, started_at,
+       last_heartbeat, resources_json, details_json)
+     VALUES ('dead_worker', 'cell_shared', 'node_a', 'host_a', 999999,
+       'running', ?, ?, '{}', '{}')",
+    params = list(now, now))
+  DBI::dbExecute(db,
+    "INSERT OR REPLACE INTO scheduler_locks
+      (name, holder, acquired_at, heartbeat_at, expires_at)
+     VALUES ('worker_leader', 'dead_worker', ?, ?, ?)",
+    params = list(now, now, expires))
+
+  leader <- dsJobs:::.scheduler_worker_leader(db)
+  expect_equal(leader$holder, "dead_worker")
+  expect_false(dsJobs:::.leader_process_alive(db, leader))
+
+  dsJobs:::.mark_workers_stopped(worker_ids = "dead_worker")
+  expect_null(dsJobs:::.scheduler_worker_leader(db))
+})

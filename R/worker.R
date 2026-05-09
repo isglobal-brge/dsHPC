@@ -11,7 +11,12 @@
   active <- tryCatch({
     db <- .db_connect()
     on.exit(.db_close(db), add = TRUE)
-    .scheduler_worker_leader(db)
+    leader <- .scheduler_worker_leader(db)
+    if (!is.null(leader) && !.leader_process_alive(db, leader)) {
+      .mark_workers_stopped(worker_ids = leader$holder)
+      leader <- NULL
+    }
+    leader
   }, error = function(e) NULL)
   if (!is.null(active)) {
     message("dsJobs worker already running for cell (", active$holder, ")")
@@ -61,7 +66,18 @@
     cleanup = FALSE, cleanup_tree = FALSE)
   writeLines(as.character(proc$get_pid()), pid_file)
   .dsjobs_env$.worker <- proc
-  message("dsJobs worker started (PID ", proc$get_pid(), ")")
+
+  # When launched through `setsid -f`, processx sees the short-lived launcher
+  # PID, while the actual R worker gets a different PID. Wait briefly for the
+  # worker heartbeat and rewrite worker.pid with the real daemon PID.
+  actual_pid <- .wait_for_worker_pid(home, timeout_secs = 5)
+  if (!is.na(actual_pid)) {
+    writeLines(as.character(actual_pid), pid_file)
+    message("dsJobs worker started (PID ", actual_pid, ")")
+    return(invisible(actual_pid))
+  }
+
+  message("dsJobs worker start requested (launcher PID ", proc$get_pid(), ")")
   invisible(proc$get_pid())
 }
 
@@ -70,16 +86,169 @@
 .dsjobs_worker_stop <- function() {
   home <- .dsjobs_home()
   pid_file <- file.path(home, "worker.pid")
+
+  snapshot <- .worker_runtime_snapshot(home)
+  pids <- unique(stats::na.omit(as.integer(snapshot$pids)))
+
+  if (length(pids) == 0 && file.exists(pid_file)) {
+    pids <- tryCatch(
+      as.integer(readLines(pid_file, n = 1, warn = FALSE)),
+      error = function(e) integer(0))
+  }
+
+  for (pid in pids) .terminate_pid(pid)
+  .mark_workers_stopped(pids = pids, worker_ids = snapshot$worker_ids)
+
   if (file.exists(pid_file)) {
-    pid <- tryCatch(as.integer(readLines(pid_file, n = 1, warn = FALSE)),
-                     error = function(e) NA_integer_)
-    if (.pid_is_alive(pid)) {
-      tools::pskill(pid, signal = 15L); Sys.sleep(2)
-      if (.pid_is_alive(pid)) tools::pskill(pid, signal = 9L)
-    }
     unlink(pid_file)
   }
   message("dsJobs worker stopped.")
+}
+
+#' Check whether a scheduler leader still has a live process
+#' @keywords internal
+.leader_process_alive <- function(db, leader) {
+  if (is.null(leader$holder)) return(FALSE)
+  worker <- tryCatch(DBI::dbGetQuery(db,
+    "SELECT pid FROM worker_nodes WHERE worker_id = ?",
+    params = list(leader$holder)), error = function(e) data.frame())
+  nrow(worker) > 0 && .pid_is_alive(as.integer(worker$pid[1]))
+}
+
+#' Wait for a detached worker to publish its actual PID
+#' @keywords internal
+.wait_for_worker_pid <- function(home, timeout_secs = 5) {
+  deadline <- Sys.time() + timeout_secs
+  repeat {
+    snapshot <- .worker_runtime_snapshot(home)
+    pids <- unique(stats::na.omit(as.integer(snapshot$pids)))
+    alive <- pids[vapply(pids, .pid_is_alive, logical(1))]
+    if (length(alive) > 0) return(alive[1])
+    if (Sys.time() >= deadline) break
+    Sys.sleep(0.2)
+  }
+  NA_integer_
+}
+
+#' Runtime snapshot of known worker processes
+#' @keywords internal
+.worker_runtime_snapshot <- function(home = .dsjobs_home()) {
+  pids <- integer(0)
+  worker_ids <- character(0)
+
+  tryCatch({
+    db <- .db_connect()
+    on.exit(.db_close(db), add = TRUE)
+    leader <- .scheduler_worker_leader(db)
+    if (!is.null(leader)) worker_ids <- c(worker_ids, leader$holder)
+
+    ttl <- .scheduler_worker_ttl_secs(.dsjobs_settings())
+    stale_cutoff <- format(Sys.time() - ttl * 2, "%Y-%m-%dT%H:%M:%OS3Z",
+                           tz = "UTC")
+    workers <- DBI::dbGetQuery(db,
+      "SELECT worker_id, pid FROM worker_nodes
+       WHERE state = 'running' AND last_heartbeat > ?",
+      params = list(stale_cutoff))
+    if (nrow(workers) > 0) {
+      worker_ids <- c(worker_ids, workers$worker_id)
+      pids <- c(pids, as.integer(workers$pid))
+    }
+  }, error = function(e) NULL)
+
+  health_path <- file.path(home, "worker.health")
+  if (file.exists(health_path)) {
+    h <- tryCatch(jsonlite::fromJSON(readLines(health_path, warn = FALSE)),
+                  error = function(e) NULL)
+    if (!is.null(h)) {
+      pids <- c(pids, suppressWarnings(as.integer(h$pid)))
+      worker_ids <- c(worker_ids, h$worker_id %||% character(0))
+    }
+  }
+
+  pid_file <- file.path(home, "worker.pid")
+  if (file.exists(pid_file)) {
+    pids <- c(pids, tryCatch(
+      as.integer(readLines(pid_file, n = 1, warn = FALSE)),
+      error = function(e) NA_integer_))
+  }
+
+  list(
+    pids = unique(stats::na.omit(as.integer(pids))),
+    worker_ids = unique(stats::na.omit(as.character(worker_ids)))
+  )
+}
+
+#' Mark stopped workers in the scheduler catalog
+#' @keywords internal
+.mark_workers_stopped <- function(pids = integer(0), worker_ids = character(0)) {
+  tryCatch({
+    db <- .db_connect()
+    on.exit(.db_close(db), add = TRUE)
+    now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+
+    for (pid in unique(stats::na.omit(as.integer(pids)))) {
+      ids <- DBI::dbGetQuery(db,
+        "SELECT worker_id FROM worker_nodes WHERE pid = ?",
+        params = list(pid))$worker_id
+      worker_ids <- c(worker_ids, ids)
+      DBI::dbExecute(db,
+        "UPDATE worker_nodes SET state = 'stopped', last_heartbeat = ?
+         WHERE pid = ?",
+        params = list(now, pid))
+    }
+
+    for (worker_id in unique(stats::na.omit(as.character(worker_ids)))) {
+      DBI::dbExecute(db,
+        "UPDATE worker_nodes SET state = 'stopped', last_heartbeat = ?
+         WHERE worker_id = ?",
+        params = list(now, worker_id))
+      DBI::dbExecute(db,
+        "DELETE FROM scheduler_locks
+         WHERE name = 'worker_leader' AND holder = ?",
+        params = list(worker_id))
+    }
+  }, error = function(e) NULL)
+  invisible(TRUE)
+}
+
+#' Terminate a process reliably across native and emulated containers
+#' @keywords internal
+.terminate_pid <- function(pid, grace_secs = 2) {
+  pid <- suppressWarnings(as.integer(pid))
+  if (is.na(pid) || !.pid_is_alive(pid)) return(invisible(TRUE))
+
+  .signal_pid(pid, signal = 15L)
+  deadline <- Sys.time() + grace_secs
+  while (.pid_is_alive(pid) && Sys.time() < deadline) Sys.sleep(0.1)
+
+  if (.pid_is_alive(pid)) {
+    .signal_pid(pid, signal = 9L)
+    deadline <- Sys.time() + 1
+    while (.pid_is_alive(pid) && Sys.time() < deadline) Sys.sleep(0.1)
+  }
+
+  invisible(!.pid_is_alive(pid))
+}
+
+#' Send a signal to a process
+#' @keywords internal
+.signal_pid <- function(pid, signal = 15L) {
+  pid <- suppressWarnings(as.integer(pid))
+  if (is.na(pid)) return(invisible(FALSE))
+
+  kill <- Sys.which("kill")
+  if (nzchar(kill)) {
+    status <- tryCatch(
+      system2(kill, c(paste0("-", as.integer(signal)), as.character(pid)),
+              stdout = FALSE, stderr = FALSE),
+      error = function(e) 1L)
+    if (identical(as.integer(status), 0L)) return(invisible(TRUE))
+  }
+
+  tryCatch({
+    tools::pskill(pid, signal = as.integer(signal))
+    TRUE
+  }, error = function(e) FALSE)
 }
 
 #' Write worker health file (for monitoring)
@@ -146,6 +315,9 @@
     dir.create(d, recursive = TRUE, showWarnings = FALSE)
     tryCatch(Sys.chmod(d, "0777"), error = function(e) NULL)
   }
+  pid_file <- file.path(home, "worker.pid")
+  tryCatch(writeLines(as.character(Sys.getpid()), pid_file),
+           error = function(e) NULL)
 
   db <- .db_connect()
   settings <- .dsjobs_settings()
@@ -155,6 +327,11 @@
   .dsjobs_env$.worker_id <- .scheduler_worker_id(settings)
   .dsjobs_env$.worker_started_at <- Sys.time()
   on.exit({
+    current <- tryCatch(readLines(pid_file, n = 1, warn = FALSE),
+                        error = function(e) character(0))
+    if (length(current) > 0 && identical(current[1], as.character(Sys.getpid()))) {
+      tryCatch(unlink(pid_file), error = function(e) NULL)
+    }
     tryCatch(.scheduler_release_worker_leader(db, .dsjobs_env$.worker_id),
              error = function(e) NULL)
     .db_close(db)
@@ -184,47 +361,76 @@
 #' @keywords internal
 .worker_dispatch <- function(db) {
   settings <- .dsjobs_settings()
-  DBI::dbExecute(db, "BEGIN IMMEDIATE")
-  tryCatch({
-    pending <- DBI::dbGetQuery(db,
-      "SELECT job_id FROM jobs WHERE state = 'PENDING' ORDER BY priority DESC, submitted_at LIMIT ?",
-      params = list(settings$scheduler_scan_limit))
-    for (jid in pending$job_id) {
-      tryCatch({
+  pending <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM jobs WHERE state = 'PENDING'
+     ORDER BY priority DESC, submitted_at LIMIT ?",
+    params = list(settings$scheduler_scan_limit))
+  if (nrow(pending) == 0) return(invisible(FALSE))
+
+  for (jid in pending$job_id) {
+    spec <- NULL
+    decision <- NULL
+    claimed <- FALSE
+
+    DBI::dbExecute(db, "BEGIN IMMEDIATE")
+    tx_error <- tryCatch({
+      job <- .store_get_job(db, jid)
+      if (!is.null(job) && identical(job$state, "PENDING")) {
         spec <- .store_get_spec(db, jid)
-        if (is.null(spec)) next
-        decision <- .scheduler_can_start_job(db, jid, spec, settings)
-        if (!isTRUE(decision$ok)) next
-        .scheduler_acquire_leases(db, jid, decision)
-        .store_update_job(db, jid, state = "RUNNING", step_index = 1L,
-          started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
-        .db_log_event(db, jid, "started",
-          list(scheduler = settings$scheduler,
-               memory_mb = decision$plan$memory_mb %||% 0L,
-               cpu_slots = decision$plan$cpu_slots %||% 0L,
-               gpus = decision$plan$gpus %||% 0L,
-               optional_gpus = decision$plan$optional_gpus %||% 0L,
-               assigned_gpu_devices = decision$gpu_devices %||% character(0),
-               gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
-        .executor_run_step(db, jid, 1L, spec)
-      }, error = function(e) {
-        .store_update_job(db, jid, state = "FAILED",
-          error_message = paste("Dispatch failed:", conditionMessage(e)),
-          finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
-      })
+        if (!is.null(spec)) {
+          decision <- .scheduler_can_start_job(db, jid, spec, settings)
+          if (isTRUE(decision$ok)) {
+            .scheduler_acquire_leases(db, jid, decision)
+            .store_update_job(db, jid, state = "RUNNING", step_index = 1L,
+              started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
+                                   tz = "UTC"))
+            .db_log_event(db, jid, "started",
+              list(scheduler = settings$scheduler,
+                   memory_mb = decision$plan$memory_mb %||% 0L,
+                   cpu_slots = decision$plan$cpu_slots %||% 0L,
+                   gpus = decision$plan$gpus %||% 0L,
+                   optional_gpus = decision$plan$optional_gpus %||% 0L,
+                   assigned_gpu_devices = decision$gpu_devices %||% character(0),
+                   gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
+            claimed <- TRUE
+          }
+        }
+      }
+      NULL
+    }, error = function(e) e)
+
+    if (inherits(tx_error, "error")) {
+      tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+      .worker_log("Dispatch claim error for ", jid, ": ",
+                  conditionMessage(tx_error))
+      next
     }
     DBI::dbExecute(db, "COMMIT")
-  }, error = function(e) {
-    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
-    .worker_log("Dispatch error: ", conditionMessage(e))
-  })
+
+    if (!isTRUE(claimed)) next
+
+    # Run outside the scheduler transaction. Artifact processes must not inherit
+    # an open SQLite write transaction; otherwise a long Python/R job can stall
+    # the worker heartbeat and block other scheduler activity.
+    tryCatch({
+      .executor_run_step(db, jid, 1L, spec)
+    }, error = function(e) {
+      tryCatch(.scheduler_release_leases(db, jid), error = function(e2) NULL)
+      .store_update_job(db, jid, state = "FAILED",
+        error_message = paste("Dispatch failed:", conditionMessage(e)),
+        worker_pid = NA_integer_,
+        finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+    })
+  }
+  invisible(TRUE)
 }
 
 #' @keywords internal
 .worker_reap <- function(db) {
   running <- DBI::dbGetQuery(db,
     "SELECT j.job_id, j.worker_pid, j.step_index,
-            s.runner, s.external_backend, s.external_id
+            s.runner, s.state AS step_state,
+            s.external_backend, s.external_id
      FROM jobs j
      LEFT JOIN steps s
        ON s.job_id = j.job_id AND s.step_index = j.step_index
@@ -235,10 +441,34 @@
     jid <- running$job_id[i]
     sidx <- as.integer(running$step_index[i])
     runner_name <- running$runner[i]
+    step_state <- running$step_state[i]
     external_id <- running$external_id[i]
     external_backend <- running$external_backend[i]
     step_dir <- file.path(.dsjobs_home(), "artifacts", jid,
                            sprintf("step_%03d", sidx))
+
+    if (!is.na(step_state) && identical(step_state, "done")) {
+      tryCatch(.executor_advance(db, jid),
+        error = function(e) .worker_log("Advance recovery error for ", jid,
+          ": ", conditionMessage(e)))
+      next
+    }
+
+    if ((is.na(external_id) || !nzchar(external_id)) &&
+        (is.na(external_backend) || !nzchar(external_backend))) {
+      marker <- .backend_read_external_marker(step_dir)
+      if (!is.null(marker)) {
+        external_backend <- marker$backend
+        external_id <- marker$external_id
+        .store_update_step(db, jid, sidx,
+          external_backend = external_backend,
+          external_id = external_id,
+          external_status = marker$status %||% "submitted")
+        .db_log_event(db, jid, "external_marker_recovered",
+          list(step_index = sidx, backend = external_backend,
+               external_id = external_id))
+      }
+    }
 
     if (!is.na(external_id) && nzchar(external_id)) {
       status <- .backend_step_status(external_backend, external_id, step_dir)
@@ -255,7 +485,11 @@
       next
     }
 
-    if (is.na(running$worker_pid[i])) next
+    if (is.na(running$worker_pid[i])) {
+      .worker_requeue_interrupted_step(db, jid, sidx,
+        "Running job has no live worker or external backend id")
+      next
+    }
     pid <- as.integer(running$worker_pid[i])
 
     # Use processx handle if available (reliable), fall back to PID check
@@ -266,15 +500,57 @@
       # Use processx exit status if available
       proc_exit <- .proc_get_exit(jid, sidx)
       exit_code <- if (!is.na(proc_exit)) proc_exit else .read_exit_code(step_dir)
-      .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code)
+      if (is.na(exit_code)) {
+        .worker_requeue_interrupted_step(db, jid, sidx,
+          "Artifact process disappeared without exit_code")
+      } else {
+        .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code)
+      }
     }
   }
+}
+
+#' Requeue or fail a running step whose process disappeared
+#' @keywords internal
+.worker_requeue_interrupted_step <- function(db, jid, sidx, reason) {
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    settings <- .dsjobs_settings()
+    job <- .store_get_job(db, jid)
+    retries <- as.integer(job$retry_count %||% 0L)
+    now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+
+    .store_update_step(db, jid, sidx, state = "failed",
+      error_message = reason, finished_at = now)
+    .scheduler_release_leases(db, jid)
+
+    if (retries < settings$max_retries) {
+      .store_update_job(db, jid, state = "PENDING",
+        retry_count = retries + 1L, worker_pid = NA_integer_)
+      .db_log_event(db, jid, "requeued",
+        list(step_index = sidx, reason = reason,
+             retry_count = retries + 1L))
+    } else {
+      .store_update_job(db, jid, state = "FAILED",
+        error_message = reason, worker_pid = NA_integer_,
+        finished_at = now)
+      .db_log_event(db, jid, "failed",
+        list(step_index = sidx, reason = reason))
+    }
+    DBI::dbExecute(db, "COMMIT")
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    .worker_log("Recovery error for ", jid, " step ", sidx, ": ",
+      conditionMessage(e))
+  })
 }
 
 #' @keywords internal
 .worker_finalize_artifact_step <- function(db, jid, sidx, runner_name,
                                            exit_code,
                                            external_status = NULL) {
+  advance_after_commit <- FALSE
+  committed <- FALSE
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
     if (identical(as.integer(exit_code), 0L)) {
@@ -295,7 +571,7 @@
       do.call(.store_update_step, c(list(db, jid, sidx), updates))
       .store_update_job(db, jid, worker_pid = NA_integer_)
       .db_log_event(db, jid, "step_done", list(step_index = sidx))
-      .executor_advance(db, jid)
+      advance_after_commit <- TRUE
     } else {
       settings <- .dsjobs_settings()
       job <- .store_get_job(db, jid)
@@ -320,11 +596,17 @@
       }
     }
     DBI::dbExecute(db, "COMMIT")
+    committed <- TRUE
   }, error = function(e) {
     tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
     .worker_log("Reap error for ", jid, " step ", sidx, ": ",
       conditionMessage(e))
   })
+  if (isTRUE(committed) && isTRUE(advance_after_commit)) {
+    tryCatch(.executor_advance(db, jid),
+      error = function(e) .worker_log("Advance error for ", jid, ": ",
+        conditionMessage(e)))
+  }
 }
 
 #' @keywords internal
@@ -337,10 +619,19 @@
     if (!is.na(code)) return(code)
   }
 
-  # 2. Check if output directory has files (success indicator)
+  # 2. Compatibility for legacy jobs launched before dsJobs wrote durable
+  # exit_code files. New wrappers must write exit_code; output files alone are
+  # not enough to prove success after a crash.
   output_dir <- file.path(step_dir, "output")
-  if (dir.exists(output_dir) && length(list.files(output_dir)) > 0)
-    return(0L)  # Has output files = success
+  run_script <- file.path(step_dir, "run.sh")
+  legacy_launcher <- !file.exists(run_script)
+  if (!legacy_launcher) {
+    lines <- tryCatch(readLines(run_script, warn = FALSE),
+                      error = function(e) character(0))
+    legacy_launcher <- !any(grepl("exit_code", lines, fixed = TRUE))
+  }
+  if (legacy_launcher && dir.exists(output_dir) &&
+      length(list.files(output_dir)) > 0) return(0L)
 
   # 3. Check stderr for real errors (not just warnings)
   stderr_path <- file.path(step_dir, "stderr.log")
@@ -352,7 +643,7 @@
     if (has_error) return(1L)
   }
 
-  0L  # No evidence of failure
+  NA_integer_
 }
 
 #' @keywords internal

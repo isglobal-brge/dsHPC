@@ -505,6 +505,7 @@
          call. = FALSE)
   }
 
+  .backend_write_external_marker(step_dir, backend, external_id)
   .store_update_step(db, job_id, step_index,
     external_backend = backend,
     external_id = external_id,
@@ -514,6 +515,37 @@
     list(step_index = step_index, runner = step$runner %||% NA_character_,
          backend = backend, external_id = external_id))
   external_id
+}
+
+#' Persist external backend identity before the DB update commits
+#' @keywords internal
+.backend_write_external_marker <- function(step_dir, backend, external_id,
+                                           status = "submitted") {
+  if (is.na(external_id) || !nzchar(external_id)) return(invisible(FALSE))
+  marker <- list(
+    backend = as.character(backend %||% ""),
+    external_id = as.character(external_id),
+    status = as.character(status %||% "submitted"),
+    written_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+  path <- file.path(step_dir, "external_backend.json")
+  tmp <- paste0(path, ".tmp")
+  writeLines(jsonlite::toJSON(marker, auto_unbox = TRUE, pretty = TRUE), tmp)
+  file.rename(tmp, path)
+  invisible(TRUE)
+}
+
+#' Read an external backend recovery marker
+#' @keywords internal
+.backend_read_external_marker <- function(step_dir) {
+  path <- file.path(step_dir, "external_backend.json")
+  if (!file.exists(path)) return(NULL)
+  marker <- tryCatch(jsonlite::fromJSON(readLines(path, warn = FALSE),
+    simplifyVector = FALSE), error = function(e) NULL)
+  if (!is.list(marker)) return(NULL)
+  backend <- as.character(marker$backend %||% "")[1]
+  external_id <- as.character(marker$external_id %||% "")[1]
+  if (!nzchar(backend) || !nzchar(external_id)) return(NULL)
+  marker
 }
 
 #' @keywords internal
@@ -685,9 +717,15 @@
   env <- c(DSJOBS_EXTERNAL_ID = external_id,
     DSJOBS_STEP_DIR = backend_step_dir,
     DSJOBS_LOCAL_STEP_DIR = step_dir)
-  out <- tryCatch(system2(status$command, c(status$args, external_id),
-    stdout = TRUE, stderr = TRUE, env = .backend_env(env)), error = function(e)
-      return(paste("FAILED", conditionMessage(e))))
+  out <- tryCatch(suppressWarnings(system2(status$command,
+    c(status$args, external_id), stdout = TRUE, stderr = TRUE,
+    env = .backend_env(env))), error = function(e)
+      structure(paste("STATUS_ERROR", conditionMessage(e)), status = 127L))
+  code <- attr(out, "status") %||% 0L
+  if (!identical(as.integer(code), 0L)) {
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = paste(out, collapse = "\n")))
+  }
   first <- trimws(out[1] %||% "")
   .backend_parse_external_status(first)
 }
@@ -754,9 +792,13 @@
     paste0("cd ", shQuote(prepared$step_dir %||% dirname(path))),
     paste0("mkdir -p ", shQuote(prepared$output_dir)),
     exports,
+    "write_exit_code() {",
+    "  printf '%s\\n' \"$1\" > exit_code.tmp",
+    "  mv exit_code.tmp exit_code",
+    "}",
     command,
     "status=$?",
-    "printf '%s\\n' \"$status\" > exit_code",
+    "write_exit_code \"$status\"",
     "exit \"$status\"")
   writeLines(lines, path)
   tryCatch(Sys.chmod(path, "0755"), error = function(e) NULL)

@@ -3,7 +3,7 @@
 #' Create a temporary DSJOBS_HOME for testing
 #' @return Character; path to temp home
 setup_test_home <- function() {
-  home <- file.path(tempdir(), paste0("dsjobs_test_", Sys.getpid()))
+  home <- tempfile("dsjobs_test_")
   dir.create(home, recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(home, "runners"), showWarnings = FALSE)
   dir.create(file.path(home, "artifacts"), showWarnings = FALSE)
