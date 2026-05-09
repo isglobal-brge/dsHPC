@@ -45,6 +45,8 @@
     cpu_slots = .dsj_option("cpu_slots", "auto"),
     gpu_count = .dsj_option("gpu_count", "auto"),
     gpu_memory_reserve_mb = as.integer(.dsj_option("gpu_memory_reserve_mb", 512L)),
+    oom_throttle_hours = as.numeric(.dsj_option("oom_throttle_hours", 24)),
+    oom_throttle_max_concurrent = as.integer(.dsj_option("oom_throttle_max_concurrent", 1L)),
     scheduler_scan_limit = as.integer(.dsj_option("scheduler_scan_limit", 100L)),
     default_runner_memory_mb = as.integer(.dsj_option("default_runner_memory_mb", 1024L)),
     default_runner_cpu_slots = as.integer(.dsj_option("default_runner_cpu_slots", 1L)),

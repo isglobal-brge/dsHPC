@@ -68,6 +68,8 @@ options(
   dsjobs.memory_reserve_mb = 2048,
   dsjobs.cpu_slots = "auto",
   dsjobs.gpu_count = "auto",
+  dsjobs.oom_throttle_hours = 24,
+  dsjobs.oom_throttle_max_concurrent = 1,
   dsjobs.max_jobs_global = 1000000,
   dsjobs.max_jobs_per_user = Inf
 )
@@ -114,7 +116,9 @@ Guardrails:
 - Transient external status failures return `STATUS_UNKNOWN` and keep the job
   running instead of creating duplicate retries.
 - OOM-like exits (`-9`, `137`) put the runner/concurrency group into cooldown
-  before retrying.
+  before retrying. After cooldown, recent OOMs also throttle that runner to
+  `dsjobs.oom_throttle_max_concurrent` for `dsjobs.oom_throttle_hours`, so the
+  scheduler does not repeat the same unsafe concurrency pattern.
 
 These guarantees apply to local cell, shared cell, Slurm, and external-HPC
 execution. The client API is unchanged across modes.

@@ -29,6 +29,10 @@ also supported for backend commands where noted below.
 - `dsjobs.gpu_count`: local GPU count, or `"auto"` for `nvidia-smi`,
   `NVIDIA_VISIBLE_DEVICES`, or `CUDA_VISIBLE_DEVICES` detection.
 - `dsjobs.gpu_memory_reserve_mb`: GPU memory reserve.
+- `dsjobs.oom_throttle_hours`: hours to keep a runner at reduced
+  concurrency after an OOM-like exit.
+- `dsjobs.oom_throttle_max_concurrent`: effective runner concurrency while
+  OOM throttling is active. Defaults to 1.
 - `dsjobs.runner_overrides`: named list of per-runner resource overrides.
 }
 
