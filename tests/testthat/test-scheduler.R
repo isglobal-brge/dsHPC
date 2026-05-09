@@ -96,6 +96,54 @@ test_that("scheduler records OOM cooldowns for runners", {
   expect_equal(cd$reason, "oom")
 })
 
+test_that("recent OOM failures throttle runner concurrency after cooldown", {
+  home <- setup_test_home()
+  writeLines(c(
+    "name: oom_runner",
+    "plane: artifact",
+    "resources:",
+    "  memory_mb: 1024",
+    "  cpu_slots: 1",
+    "  max_concurrent: 2",
+    "  concurrency_group: oom_group",
+    "  oom_cooldown_secs: 60"
+  ), file.path(home, "runners", "oom_runner.yml"))
+  withr::local_options(list(
+    dsjobs.home = home,
+    dsjobs.node_memory_mb = 8192,
+    dsjobs.memory_reserve_mb = 1024,
+    dsjobs.cpu_slots = 4,
+    dsjobs.oom_throttle_hours = 24,
+    dsjobs.oom_throttle_max_concurrent = 1
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsJobs:::.db_connect()
+  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  expect_true(dsJobs:::.scheduler_record_runner_failure(db, "oom_runner", 137L))
+  DBI::dbExecute(db,
+    "UPDATE runner_cooldowns SET until = ? WHERE runner = ?",
+    params = list(format(Sys.time() - 60, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"),
+                  "oom_runner"))
+
+  throttle <- dsJobs:::.scheduler_runner_throttle(db, "oom_runner")
+  expect_equal(throttle$max_concurrent, 1L)
+
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "oom_runner", config = list())))
+  dsJobs:::.store_create_job(db, "job_oom_a", "user", spec, 1L)
+  dsJobs:::.store_update_job(db, "job_oom_a", state = "RUNNING")
+  dsJobs:::.store_create_job(db, "job_oom_b", "user", spec, 1L)
+
+  decision <- dsJobs:::.scheduler_can_start_job(db, "job_oom_b", spec)
+  expect_false(decision$ok)
+  expect_equal(decision$reason, "runner_concurrency:oom_runner")
+
+  status <- dsJobs:::.scheduler_status(db)
+  expect_equal(status$throttles$runner[1], "oom_runner")
+  expect_equal(status$throttles$max_concurrent[1], 1L)
+})
+
 test_that("optional GPU runners receive devices only when available", {
   home <- setup_test_home()
   writeLines(c(

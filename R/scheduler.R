@@ -369,17 +369,24 @@
 
   if (enforce_runner_concurrency) {
     for (profile in plan$profiles) {
+      max_concurrent <- profile$max_concurrent
+      throttle <- .scheduler_runner_throttle(db, profile$runner, settings)
+      if (!is.null(throttle)) {
+        max_concurrent <- min(max_concurrent, throttle$max_concurrent)
+      }
       runner_count <- .scheduler_named_count(usage$runners, profile$runner)
-      if (is.finite(profile$max_concurrent) &&
-          runner_count >= profile$max_concurrent) {
+      if (is.finite(max_concurrent) &&
+          runner_count >= max_concurrent) {
         return(list(ok = FALSE, reason = paste0("runner_concurrency:", profile$runner),
-                    plan = plan, usage = usage, budget = budget))
+                    plan = plan, usage = usage, budget = budget,
+                    throttle = throttle))
       }
       group_count <- .scheduler_named_count(usage$groups, profile$concurrency_group)
-      if (is.finite(profile$max_concurrent) &&
-          group_count >= profile$max_concurrent) {
+      if (is.finite(max_concurrent) &&
+          group_count >= max_concurrent) {
         return(list(ok = FALSE, reason = paste0("group_concurrency:", profile$concurrency_group),
-                    plan = plan, usage = usage, budget = budget))
+                    plan = plan, usage = usage, budget = budget,
+                    throttle = throttle))
       }
     }
   }
@@ -470,6 +477,45 @@
 }
 
 #' @keywords internal
+.scheduler_runner_throttle <- function(db, runner_name, settings = .dsjobs_settings()) {
+  hours <- suppressWarnings(as.numeric(settings$oom_throttle_hours %||% 0))
+  if (!is.finite(hours) || hours <= 0) return(NULL)
+  runner_name <- as.character(runner_name %||% "")[1]
+  if (!nzchar(runner_name)) return(NULL)
+  cutoff <- format(Sys.time() - hours * 3600,
+                   "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  rows <- DBI::dbGetQuery(db,
+    "SELECT runner, concurrency_group, reason, until, last_exit_code,
+            failure_count, updated_at
+     FROM runner_cooldowns
+     WHERE runner = ? AND updated_at > ? AND last_exit_code IN (-9, 137)
+     ORDER BY updated_at DESC LIMIT 1",
+    params = list(runner_name, cutoff))
+  if (nrow(rows) == 0) return(NULL)
+  max_concurrent <- max(1L, as.integer(settings$oom_throttle_max_concurrent %||% 1L))
+  c(as.list(rows[1, ]), list(max_concurrent = max_concurrent))
+}
+
+#' @keywords internal
+.scheduler_active_throttles <- function(db, settings = .dsjobs_settings()) {
+  hours <- suppressWarnings(as.numeric(settings$oom_throttle_hours %||% 0))
+  if (!is.finite(hours) || hours <= 0) return(data.frame())
+  cutoff <- format(Sys.time() - hours * 3600,
+                   "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  rows <- DBI::dbGetQuery(db,
+    "SELECT runner, concurrency_group, reason, until, last_exit_code,
+            failure_count, updated_at
+     FROM runner_cooldowns
+     WHERE updated_at > ? AND last_exit_code IN (-9, 137)
+     ORDER BY updated_at DESC",
+    params = list(cutoff))
+  if (nrow(rows) == 0) return(rows)
+  rows$max_concurrent <- max(1L,
+    as.integer(settings$oom_throttle_max_concurrent %||% 1L))
+  rows
+}
+
+#' @keywords internal
 .scheduler_record_runner_failure <- function(db, runner_name, exit_code, reason = NULL) {
   if (is.null(runner_name) || is.na(runner_name) || !nzchar(runner_name))
     return(invisible(FALSE))
@@ -514,6 +560,7 @@
     cell = .scheduler_cell_status(db, settings),
     node = .scheduler_node_budget(settings),
     usage = .scheduler_running_usage(db, settings),
+    throttles = .scheduler_active_throttles(db, settings),
     cooldowns = DBI::dbGetQuery(db,
       "SELECT runner, concurrency_group, reason, until, last_exit_code, failure_count
        FROM runner_cooldowns
