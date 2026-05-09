@@ -48,6 +48,60 @@ query_failed_jobs <- function(tag_pattern) {
   return(rows[, c("job_id", "tags", "error_message"), drop = FALSE])
 }
 
+#' Cancel jobs by tag
+#'
+#' Cancels PENDING/RUNNING jobs matching a tag pattern. This is server-side API
+#' for domain packages that own a higher-level workflow, such as a dsImaging
+#' generation. It is intentionally not registered as a DataSHIELD method.
+#'
+#' @param tag_pattern Character; pattern to match against job tags (SQL LIKE).
+#' @param admin_key Character/list/B64 payload accepted by `jobAdminCancelDS`.
+#' @param reason Character; cancellation reason stored on each job.
+#' @param states Character vector; job states eligible for cancellation.
+#' @return data.frame with `job_id`, previous `state`, and new `state`.
+#' @export
+cancel_jobs_by_tag <- function(tag_pattern, admin_key,
+                               reason = "Cancelled by admin",
+                               states = c("PENDING", "RUNNING")) {
+  .verify_admin_key(admin_key)
+
+  rows <- query_jobs_by_tag(tag_pattern, states = states)
+  if (nrow(rows) == 0) {
+    return(data.frame(job_id = character(0), previous_state = character(0),
+      state = character(0), stringsAsFactors = FALSE))
+  }
+
+  db <- .db_connect()
+  on.exit(.db_close(db))
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
+  out <- vector("list", nrow(rows))
+
+  for (i in seq_len(nrow(rows))) {
+    job_id <- rows$job_id[i]
+    job <- .store_get_job(db, job_id)
+    if (is.null(job) || job$state %in% c("FINISHED", "PUBLISHED",
+                                         "FAILED", "CANCELLED")) {
+      out[[i]] <- data.frame(job_id = job_id,
+        previous_state = if (is.null(job)) NA_character_ else job$state,
+        state = if (is.null(job)) NA_character_ else job$state,
+        stringsAsFactors = FALSE)
+      next
+    }
+
+    .executor_kill(db, job_id)
+    .scheduler_release_leases(db, job_id)
+    .store_update_job(db, job_id, state = "CANCELLED",
+      worker_pid = NA_integer_, error_message = reason %||% "Cancelled",
+      finished_at = now)
+    .db_log_event(db, job_id, "cancelled_by_tag",
+      list(reason = reason %||% "Cancelled", tag_pattern = tag_pattern))
+    out[[i]] <- data.frame(job_id = job_id, previous_state = job$state,
+      state = "CANCELLED", stringsAsFactors = FALSE)
+  }
+
+  do.call(rbind, out)
+}
+
 #' Return a server-side output reference for a job
 #'
 #' This helper returns the output path without loading the data. It is for
