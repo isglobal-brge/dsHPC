@@ -16,6 +16,6 @@ data.frame with safe operational columns.
 }
 \description{
 Returns jobs matching a tag pattern. This is server-side API for domain
-packages that need to reconcile their own state with dsJobs state; it is
+packages that need to reconcile their own state with dsHPC state; it is
 intentionally not registered as a DataSHIELD method.
 }

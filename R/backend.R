@@ -7,7 +7,7 @@
 # admin options only.
 
 #' @keywords internal
-.executor_backend_name <- function(settings = .dsjobs_settings()) {
+.executor_backend_name <- function(settings = .dshpc_settings()) {
   value <- tolower(as.character(settings$executor_backend %||% "embedded")[1])
   if (!nzchar(value)) value <- "embedded"
   if (value %in% c("local", "processx")) return("embedded")
@@ -16,19 +16,19 @@
 }
 
 #' @keywords internal
-.executor_delegates_resources <- function(settings = .dsjobs_settings()) {
+.executor_delegates_resources <- function(settings = .dshpc_settings()) {
   !isTRUE(settings$external_enforce_local_resources) &&
     .executor_backend_name(settings) %in% c("slurm", "kubernetes", "external")
 }
 
 #' @keywords internal
-.executor_enforces_runner_concurrency <- function(settings = .dsjobs_settings()) {
+.executor_enforces_runner_concurrency <- function(settings = .dshpc_settings()) {
   if (identical(.executor_backend_name(settings), "embedded")) return(TRUE)
   isTRUE(settings$external_enforce_runner_concurrency)
 }
 
 #' @keywords internal
-.executor_backend_status <- function(settings = .dsjobs_settings()) {
+.executor_backend_status <- function(settings = .dshpc_settings()) {
   backend <- .executor_backend_name(settings)
   out <- list(
     backend = backend,
@@ -66,8 +66,8 @@
   }
 
   if (identical(backend, "kubernetes")) {
-    kubectl <- .backend_resolve_cmd(.dsj_option("kubernetes_kubectl",
-      Sys.getenv("DSJOBS_KUBERNETES_KUBECTL", unset = "")), "kubectl")
+    kubectl <- .backend_resolve_cmd(.dshpc_option("kubernetes_kubectl",
+      Sys.getenv("DSHPC_KUBERNETES_KUBECTL", unset = "")), "kubectl")
     out$commands <- list(kubectl = kubectl)
     out$available <- nzchar(kubectl)
     out$reason <- if (out$available) "kubectl_available_contract_pending" else "kubectl_not_found"
@@ -104,7 +104,7 @@
 }
 
 #' @keywords internal
-.backend_container_status <- function(settings = .dsjobs_settings()) {
+.backend_container_status <- function(settings = .dshpc_settings()) {
   runtime <- .backend_resolve_container_runtime(settings$container_runtime)
   list(runtime = runtime$name, command = runtime$command,
        available = nzchar(runtime$command),
@@ -126,7 +126,7 @@
 }
 
 #' @keywords internal
-.backend_runner_container <- function(runner_config, settings = .dsjobs_settings()) {
+.backend_runner_container <- function(runner_config, settings = .dshpc_settings()) {
   container <- runner_config$container %||% list()
   image <- container$image %||% runner_config$image %||%
     runner_config$container_image %||% ""
@@ -146,7 +146,7 @@
 }
 
 #' @keywords internal
-.backend_gpu_request <- function(profile, settings = .dsjobs_settings()) {
+.backend_gpu_request <- function(profile, settings = .dshpc_settings()) {
   required <- as.integer(profile$gpus %||% 0L)
   optional <- as.integer(profile$optional_gpus %||% 0L)
   policy <- tolower(as.character(settings$backend_request_optional_gpus %||% "auto")[1])
@@ -171,7 +171,7 @@
 }
 
 #' @keywords internal
-.backend_gpu_capacity <- function(settings = .dsjobs_settings()) {
+.backend_gpu_capacity <- function(settings = .dshpc_settings()) {
   configured <- settings$backend_gpu_count %||% "auto"
   if (is.numeric(configured) && length(configured) == 1 && is.finite(configured)) {
     return(list(count = max(0L, as.integer(configured)),
@@ -199,7 +199,7 @@
 }
 
 #' @keywords internal
-.backend_capabilities <- function(settings = .dsjobs_settings(), force = FALSE) {
+.backend_capabilities <- function(settings = .dshpc_settings(), force = FALSE) {
   backend <- .executor_backend_name(settings)
   key <- paste(backend,
                paste(as.character(settings$backend_capabilities_cmd %||% ""), collapse = "\001"),
@@ -208,7 +208,7 @@
                sep = "\002")
   ttl <- suppressWarnings(as.numeric(settings$backend_capabilities_ttl_secs %||% 30))
   if (!is.finite(ttl) || ttl < 0) ttl <- 30
-  cache <- .dsjobs_env$.backend_capabilities_cache
+  cache <- .dshpc_env$.backend_capabilities_cache
   now <- Sys.time()
   if (!force && is.list(cache) && identical(cache$key, key) &&
       isTRUE(difftime(now, cache$time, units = "secs") < ttl)) {
@@ -221,20 +221,20 @@
     embedded = .backend_local_capabilities(settings),
     list(source = "unsupported", available = FALSE, gpus = NA_integer_,
          gpu_memory_mb = NA_integer_))
-  .dsjobs_env$.backend_capabilities_cache <- list(key = key, time = now,
+  .dshpc_env$.backend_capabilities_cache <- list(key = key, time = now,
                                                   value = value)
   value
 }
 
 #' @keywords internal
-.backend_local_capabilities <- function(settings = .dsjobs_settings()) {
+.backend_local_capabilities <- function(settings = .dshpc_settings()) {
   gpu <- .scheduler_gpu_inventory(settings)
   list(source = gpu$backend, available = TRUE, gpus = gpu$count,
        gpu_memory_mb = gpu$total_memory_mb)
 }
 
 #' @keywords internal
-.backend_external_capabilities <- function(settings = .dsjobs_settings()) {
+.backend_external_capabilities <- function(settings = .dshpc_settings()) {
   cmd <- .backend_command_parts(settings$backend_capabilities_cmd)
   if (!nzchar(cmd$command)) {
     return(list(source = "external_capabilities_not_configured",
@@ -254,7 +254,7 @@
 }
 
 #' @keywords internal
-.backend_slurm_capabilities <- function(settings = .dsjobs_settings()) {
+.backend_slurm_capabilities <- function(settings = .dshpc_settings()) {
   sinfo <- .backend_resolve_cmd(settings$slurm_sinfo, "sinfo")
   if (!nzchar(sinfo)) {
     return(list(source = "slurm_sinfo_not_found", available = FALSE,
@@ -302,7 +302,7 @@
     }
   }
   gpus <- pairs$gpus %||% pairs$gpu_count %||%
-    pairs$backend_gpu_count %||% pairs$dsjobs_backend_gpu_count
+    pairs$backend_gpu_count %||% pairs$dshpc_backend_gpu_count
   gpu_mem <- pairs$gpu_memory_mb %||% pairs$backend_gpu_memory_mb
   list(source = source, available = TRUE,
        gpus = .backend_first_integer(gpus),
@@ -341,7 +341,7 @@
 }
 
 #' @keywords internal
-.backend_path_mappings <- function(settings = .dsjobs_settings()) {
+.backend_path_mappings <- function(settings = .dshpc_settings()) {
   value <- settings$backend_path_mappings %||% list()
   if (is.character(value) && length(value) > 0 && !is.null(names(value)) &&
       any(nzchar(names(value)))) {
@@ -397,7 +397,7 @@
 
 #' @keywords internal
 .backend_map_path <- function(path, direction = c("local_to_backend", "backend_to_local"),
-                              settings = .dsjobs_settings()) {
+                              settings = .dshpc_settings()) {
   direction <- match.arg(direction)
   if (is.null(path) || length(path) == 0) return(path)
   maps <- .backend_path_mappings(settings)
@@ -417,7 +417,7 @@
 
 #' @keywords internal
 .backend_map_text <- function(x, direction = c("local_to_backend", "backend_to_local"),
-                              settings = .dsjobs_settings()) {
+                              settings = .dshpc_settings()) {
   direction <- match.arg(direction)
   if (is.null(x) || length(x) == 0) return(x)
   maps <- .backend_path_mappings(settings)
@@ -433,7 +433,7 @@
 }
 
 #' @keywords internal
-.backend_map_prepared <- function(prepared, settings = .dsjobs_settings()) {
+.backend_map_prepared <- function(prepared, settings = .dshpc_settings()) {
   mapped <- prepared
   container <- .backend_runner_container(prepared$runner_config, settings)
   if (!is.null(container)) {
@@ -458,19 +458,19 @@
   profile <- .scheduler_runner_profile(prepared$step$runner, settings)
   gpu_request <- .backend_gpu_request(profile, settings)
   mapped$env_vars <- c(mapped$env_vars,
-    DSJOBS_BACKEND_STEP_DIR = mapped$step_dir,
-    DSJOBS_BACKEND_OUTPUT_DIR = mapped$output_dir,
-    DSJOBS_BACKEND_STEP_SCRIPT = mapped$script_path,
-    DSJOBS_LOCAL_STEP_DIR = prepared$step_dir,
-    DSJOBS_LOCAL_OUTPUT_DIR = prepared$output_dir,
-    DSJOBS_LOCAL_STEP_SCRIPT = prepared$script_path,
-    DSJOBS_GPUS = as.character(gpu_request$requested %||% 0L),
-    DSJOBS_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
-    DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
-    DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
-    DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
-    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
-    DSJOBS_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
+    DSHPC_BACKEND_STEP_DIR = mapped$step_dir,
+    DSHPC_BACKEND_OUTPUT_DIR = mapped$output_dir,
+    DSHPC_BACKEND_STEP_SCRIPT = mapped$script_path,
+    DSHPC_LOCAL_STEP_DIR = prepared$step_dir,
+    DSHPC_LOCAL_OUTPUT_DIR = prepared$output_dir,
+    DSHPC_LOCAL_STEP_SCRIPT = prepared$script_path,
+    DSHPC_GPUS = as.character(gpu_request$requested %||% 0L),
+    DSHPC_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
+    DSHPC_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
+    DSHPC_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
+    DSHPC_GPU_POLICY = gpu_request$policy %||% "auto",
+    DSHPC_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
+    DSHPC_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
   mapped
 }
 
@@ -478,7 +478,7 @@
 .backend_submit_artifact_step <- function(db, job_id, step_index, step,
                                           step_dir, input_dir,
                                           prepared = NULL) {
-  settings <- .dsjobs_settings()
+  settings <- .dshpc_settings()
   backend <- .executor_backend_name(settings)
   if (identical(backend, "embedded"))
     stop("Internal error: embedded backend should use processx.", call. = FALSE)
@@ -550,7 +550,7 @@
 
 #' @keywords internal
 .backend_submit_slurm <- function(job_id, step_index, step, step_dir,
-                                  prepared, settings = .dsjobs_settings()) {
+                                  prepared, settings = .dshpc_settings()) {
   sbatch <- .backend_resolve_cmd(settings$slurm_sbatch, "sbatch")
   if (!nzchar(sbatch)) stop("sbatch not found.", call. = FALSE)
 
@@ -558,7 +558,7 @@
   .backend_write_step_script(script, prepared)
 
   profile <- .scheduler_runner_profile(step$runner, settings)
-  job_name <- paste0("dsjobs_", substr(gsub("[^A-Za-z0-9]", "", job_id), 1, 16),
+  job_name <- paste0("dshpc_", substr(gsub("[^A-Za-z0-9]", "", job_id), 1, 16),
     "_", step_index)
   args <- c("--parsable",
     paste0("--job-name=", job_name),
@@ -598,7 +598,7 @@
 
 #' @keywords internal
 .backend_submit_external <- function(job_id, step_index, step, step_dir,
-                                     prepared, settings = .dsjobs_settings()) {
+                                     prepared, settings = .dshpc_settings()) {
   submit <- .backend_command_parts(settings$external_submit_cmd)
   if (!nzchar(submit$command))
     stop("External submit command is not configured.", call. = FALSE)
@@ -608,27 +608,27 @@
   profile <- .scheduler_runner_profile(step$runner, settings)
   gpu_request <- .backend_gpu_request(profile, settings)
   env <- c(
-    DSJOBS_JOB_ID = job_id,
-    DSJOBS_STEP_INDEX = as.character(step_index),
-    DSJOBS_RUNNER = step$runner %||% "",
-    DSJOBS_STEP_DIR = prepared$step_dir,
-    DSJOBS_OUTPUT_DIR = prepared$output_dir,
-    DSJOBS_STEP_SCRIPT = prepared$script_path,
-    DSJOBS_BACKEND_STEP_DIR = prepared$step_dir,
-    DSJOBS_BACKEND_OUTPUT_DIR = prepared$output_dir,
-    DSJOBS_BACKEND_STEP_SCRIPT = prepared$script_path,
-    DSJOBS_LOCAL_STEP_DIR = prepared$local_step_dir %||% step_dir,
-    DSJOBS_LOCAL_OUTPUT_DIR = prepared$local_output_dir %||% file.path(step_dir, "output"),
-    DSJOBS_LOCAL_STEP_SCRIPT = prepared$local_script_path %||% script,
-    DSJOBS_MEMORY_MB = as.character(profile$memory_mb %||% 0L),
-    DSJOBS_CPU_SLOTS = as.character(profile$cpu_slots %||% 0L),
-    DSJOBS_GPUS = as.character(gpu_request$requested %||% 0L),
-    DSJOBS_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
-    DSJOBS_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
-    DSJOBS_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
-    DSJOBS_GPU_POLICY = gpu_request$policy %||% "auto",
-    DSJOBS_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
-    DSJOBS_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
+    DSHPC_JOB_ID = job_id,
+    DSHPC_STEP_INDEX = as.character(step_index),
+    DSHPC_RUNNER = step$runner %||% "",
+    DSHPC_STEP_DIR = prepared$step_dir,
+    DSHPC_OUTPUT_DIR = prepared$output_dir,
+    DSHPC_STEP_SCRIPT = prepared$script_path,
+    DSHPC_BACKEND_STEP_DIR = prepared$step_dir,
+    DSHPC_BACKEND_OUTPUT_DIR = prepared$output_dir,
+    DSHPC_BACKEND_STEP_SCRIPT = prepared$script_path,
+    DSHPC_LOCAL_STEP_DIR = prepared$local_step_dir %||% step_dir,
+    DSHPC_LOCAL_OUTPUT_DIR = prepared$local_output_dir %||% file.path(step_dir, "output"),
+    DSHPC_LOCAL_STEP_SCRIPT = prepared$local_script_path %||% script,
+    DSHPC_MEMORY_MB = as.character(profile$memory_mb %||% 0L),
+    DSHPC_CPU_SLOTS = as.character(profile$cpu_slots %||% 0L),
+    DSHPC_GPUS = as.character(gpu_request$requested %||% 0L),
+    DSHPC_GPUS_REQUIRED = as.character(gpu_request$required %||% 0L),
+    DSHPC_GPUS_OPTIONAL = as.character(gpu_request$optional %||% 0L),
+    DSHPC_GPUS_REQUESTED = as.character(gpu_request$requested %||% 0L),
+    DSHPC_GPU_POLICY = gpu_request$policy %||% "auto",
+    DSHPC_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
+    DSHPC_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
   out <- tryCatch(system2(submit$command, submit$args, stdout = TRUE,
     stderr = TRUE, env = .backend_env(env)), error = function(e)
       stop("External submit failed: ", conditionMessage(e), call. = FALSE))
@@ -642,7 +642,7 @@
 
 #' @keywords internal
 .backend_step_status <- function(backend, external_id, step_dir,
-                                 settings = .dsjobs_settings()) {
+                                 settings = .dshpc_settings()) {
   backend <- tolower(as.character(backend %||% "")[1])
   if (identical(backend, "slurm"))
     return(.backend_status_slurm(external_id, step_dir, settings))
@@ -654,7 +654,7 @@
 
 #' @keywords internal
 .backend_status_slurm <- function(external_id, step_dir,
-                                  settings = .dsjobs_settings()) {
+                                  settings = .dshpc_settings()) {
   squeue <- .backend_resolve_cmd(settings$slurm_squeue, "squeue")
   if (nzchar(squeue)) {
     out <- tryCatch(system2(squeue, c("-h", "-j", external_id, "-o", "%T"),
@@ -708,15 +708,15 @@
 
 #' @keywords internal
 .backend_status_external <- function(external_id, step_dir,
-                                     settings = .dsjobs_settings()) {
+                                     settings = .dshpc_settings()) {
   status <- .backend_command_parts(settings$external_status_cmd)
   if (!nzchar(status$command))
     return(list(state = "failed", exit_code = 1L,
                 reason = "external_status_not_configured"))
   backend_step_dir <- .backend_map_path(step_dir, "local_to_backend", settings)
-  env <- c(DSJOBS_EXTERNAL_ID = external_id,
-    DSJOBS_STEP_DIR = backend_step_dir,
-    DSJOBS_LOCAL_STEP_DIR = step_dir)
+  env <- c(DSHPC_EXTERNAL_ID = external_id,
+    DSHPC_STEP_DIR = backend_step_dir,
+    DSHPC_LOCAL_STEP_DIR = step_dir)
   out <- tryCatch(suppressWarnings(system2(status$command,
     c(status$args, external_id), stdout = TRUE, stderr = TRUE,
     env = .backend_env(env))), error = function(e)
@@ -746,7 +746,7 @@
 }
 
 #' @keywords internal
-.backend_cancel_step <- function(backend, external_id, settings = .dsjobs_settings()) {
+.backend_cancel_step <- function(backend, external_id, settings = .dshpc_settings()) {
   backend <- tolower(as.character(backend %||% "")[1])
   if (identical(backend, "slurm")) {
     scancel <- .backend_resolve_cmd(settings$slurm_scancel, "scancel")
@@ -761,7 +761,7 @@
     if (nzchar(cancel$command)) {
       tryCatch(system2(cancel$command, c(cancel$args, external_id),
         stdout = FALSE, stderr = FALSE,
-        env = .backend_env(c(DSJOBS_EXTERNAL_ID = external_id))), error = function(e) NULL)
+        env = .backend_env(c(DSHPC_EXTERNAL_ID = external_id))), error = function(e) NULL)
     }
   }
   invisible(TRUE)
@@ -775,7 +775,7 @@
 }
 
 #' @keywords internal
-.backend_write_step_script <- function(path, prepared, settings = .dsjobs_settings()) {
+.backend_write_step_script <- function(path, prepared, settings = .dshpc_settings()) {
   env <- prepared$env_vars
   env_names <- names(env)
   keep <- !is.na(env_names) & nzchar(env_names)
@@ -806,7 +806,7 @@
 }
 
 #' @keywords internal
-.backend_step_command <- function(prepared, settings = .dsjobs_settings()) {
+.backend_step_command <- function(prepared, settings = .dshpc_settings()) {
   container <- .backend_runner_container(prepared$runner_config, settings)
   if (is.null(container))
     return(paste(c(shQuote(prepared$command), shQuote(prepared$args)),
@@ -828,8 +828,8 @@
 }
 
 #' @keywords internal
-.backend_container_mount <- function(settings = .dsjobs_settings()) {
-  local_home <- .dsjobs_home(must_exist = FALSE)
+.backend_container_mount <- function(settings = .dshpc_settings()) {
+  local_home <- .dshpc_home(must_exist = FALSE)
   backend_home <- .backend_map_path(local_home, "local_to_backend", settings)
   list(source = backend_home, target = backend_home)
 }
@@ -849,18 +849,18 @@
   if (identical(runtime_name, "docker")) {
     return(c(
       "gpu_args=\"\"",
-      "if [ \"${DSJOBS_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
-      "  gpu_args=\"--gpus ${DSJOBS_GPUS_REQUIRED}\"",
-      "elif [ \"${DSJOBS_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSJOBS_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
-      "  gpu_args=\"--gpus ${DSJOBS_GPUS_REQUESTED}\"",
+      "if [ \"${DSHPC_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
+      "  gpu_args=\"--gpus ${DSHPC_GPUS_REQUIRED}\"",
+      "elif [ \"${DSHPC_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSHPC_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
+      "  gpu_args=\"--gpus ${DSHPC_GPUS_REQUESTED}\"",
       "fi"))
   }
   if (runtime_name %in% c("apptainer", "singularity")) {
     return(c(
       "gpu_args=\"\"",
-      "if [ \"${DSJOBS_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
+      "if [ \"${DSHPC_GPUS_REQUIRED:-0}\" -gt 0 ]; then",
       "  gpu_args=\"--nv\"",
-      "elif [ \"${DSJOBS_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSJOBS_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
+      "elif [ \"${DSHPC_GPUS_REQUESTED:-0}\" -gt 0 ] && { command -v nvidia-smi >/dev/null 2>&1 || [ \"${DSHPC_FORCE_CONTAINER_GPU:-0}\" = \"1\" ]; }; then",
       "  gpu_args=\"--nv\"",
       "fi"))
   }
@@ -869,7 +869,7 @@
 
 #' @keywords internal
 .backend_docker_like_command <- function(runtime, container, prepared,
-                                         settings = .dsjobs_settings()) {
+                                         settings = .dshpc_settings()) {
   mount <- .backend_container_mount(settings)
   workdir <- container$workdir %||% prepared$step_dir
   network <- as.character(settings$container_network %||% "none")[1]
@@ -916,7 +916,7 @@
 
 #' @keywords internal
 .backend_apptainer_command <- function(runtime, container, prepared,
-                                       settings = .dsjobs_settings()) {
+                                       settings = .dshpc_settings()) {
   mount <- .backend_container_mount(settings)
   workdir <- container$workdir %||% prepared$step_dir
   extra <- as.character(container$extra_args %||% character(0))

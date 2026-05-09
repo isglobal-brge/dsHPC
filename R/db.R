@@ -3,8 +3,8 @@
 
 #' @keywords internal
 .db_connect <- function() {
-  home <- .dsjobs_home()
-  db_path <- file.path(home, "dsjobs.sqlite")
+  home <- .dshpc_home()
+  db_path <- file.path(home, "dshpc.sqlite")
   first_time <- !file.exists(db_path)
   db <- DBI::dbConnect(RSQLite::SQLite(), db_path)
   DBI::dbExecute(db, "PRAGMA journal_mode=WAL")

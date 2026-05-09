@@ -1,10 +1,10 @@
 test_that("SQLite database is created with correct schema", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   # Tables exist
   tables <- DBI::dbListTables(db)
@@ -28,11 +28,11 @@ test_that("SQLite database is created with correct schema", {
 
 test_that("WAL mode is enabled", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   mode <- DBI::dbGetQuery(db, "PRAGMA journal_mode")
   expect_equal(tolower(mode[[1]]), "wal")
@@ -40,17 +40,17 @@ test_that("WAL mode is enabled", {
 
 test_that("event logging works", {
   home <- setup_test_home()
-  withr::local_options(list(dsjobs.home = home))
+  withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  db <- dsJobs:::.db_connect()
-  on.exit(dsJobs:::.db_close(db), add = TRUE)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   # Need a job first for FK
   spec <- make_test_spec()
-  dsJobs:::.store_create_job(db, "job_test_001", "testuser", spec, 1L)
+  dsHPC:::.store_create_job(db, "job_test_001", "testuser", spec, 1L)
 
-  dsJobs:::.db_log_event(db, "job_test_001", "test_event",
+  dsHPC:::.db_log_event(db, "job_test_001", "test_event",
                           list(detail = "hello"))
 
   events <- DBI::dbGetQuery(db, "SELECT * FROM events WHERE job_id = 'job_test_001'")

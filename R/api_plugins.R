@@ -1,12 +1,12 @@
 # Module: Public API for Plugin Packages
 #
 # Functions that domain packages (dsRadiomics, etc.) need to interact
-# with dsJobs without accessing internal functions via :::.
+# with dsHPC without accessing internal functions via :::.
 
 #' Query jobs by tag
 #'
 #' Returns jobs matching a tag pattern. This is server-side API for domain
-#' packages that need to reconcile their own state with dsJobs state; it is
+#' packages that need to reconcile their own state with dsHPC state; it is
 #' intentionally not registered as a DataSHIELD method.
 #'
 #' @param tag_pattern Character; pattern to match against job tags (SQL LIKE).
@@ -55,7 +55,7 @@ query_failed_jobs <- function(tag_pattern) {
 #' generation. It is intentionally not registered as a DataSHIELD method.
 #'
 #' @param tag_pattern Character; pattern to match against job tags (SQL LIKE).
-#' @param admin_key Character/list/B64 payload accepted by `jobAdminCancelDS`.
+#' @param admin_key Character/list/B64 payload accepted by `hpcAdminCancelDS`.
 #' @param reason Character; cancellation reason stored on each job.
 #' @param states Character vector; job states eligible for cancellation.
 #' @return data.frame with `job_id`, previous `state`, and new `state`.

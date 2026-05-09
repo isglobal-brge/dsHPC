@@ -1,15 +1,15 @@
 #!/usr/bin/env Rscript
-# dsJobs Worker Daemon
-# Launched by .dsjobs_worker_start() as a background R process.
-# Usage: Rscript main.R /srv/dsjobs
+# dsHPC Worker Daemon
+# Launched by .dshpc_worker_start() as a background R process.
+# Usage: Rscript main.R /srv/dshpc
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1) {
-  stop("Usage: Rscript main.R <DSJOBS_HOME>")
+  stop("Usage: Rscript main.R <DSHPC_HOME>")
 }
 
-dsjobs_home <- args[1]
-options(dsjobs.home = dsjobs_home)
+dshpc_home <- args[1]
+options(dshpc.home = dshpc_home)
 
-library(dsJobs)
-dsJobs:::.worker_main()
+library(dsHPC)
+dsHPC:::.worker_main()

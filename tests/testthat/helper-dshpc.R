@@ -1,9 +1,9 @@
-# Test helpers for dsJobs
+# Test helpers for dsHPC
 
-#' Create a temporary DSJOBS_HOME for testing
+#' Create a temporary DSHPC_HOME for testing
 #' @return Character; path to temp home
 setup_test_home <- function() {
-  home <- tempfile("dsjobs_test_")
+  home <- tempfile("dshpc_test_")
   dir.create(home, recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(home, "runners"), showWarnings = FALSE)
   dir.create(file.path(home, "artifacts"), showWarnings = FALSE)

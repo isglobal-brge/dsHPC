@@ -1,29 +1,29 @@
 #!/bin/sh
-# dsJobs post-install configuration script
+# dsHPC post-install configuration script
 # Runs automatically during R CMD INSTALL on Unix systems.
 #
-# Creates the DSJOBS_HOME directory structure needed for:
+# Creates the DSHPC_HOME directory structure needed for:
 #   - SQLite database (created at runtime by R code on first use)
 #   - Artifact storage (step outputs, model weights)
 #   - Runner configs (YAML files registered by other packages)
 #   - Published assets (disclosure-safe results)
 #
-# All paths are created under DSJOBS_HOME (default /srv/dsjobs).
+# All paths are created under DSHPC_HOME (default /srv/dshpc).
 # Ownership is set to the 'rock' user if it exists (Rock/DataSHIELD).
 # If the directory cannot be created (no permissions), the script
 # exits gracefully and the R .onLoad() fallback handles it.
 
-DSJOBS_HOME="${DSJOBS_HOME:-/srv/dsjobs}"
-LOG_PREFIX="[dsJobs configure]"
+DSHPC_HOME="${DSHPC_HOME:-/srv/dshpc}"
+LOG_PREFIX="[dsHPC configure]"
 
 log_info() { echo "${LOG_PREFIX} $*"; }
 log_warn() { echo "${LOG_PREFIX} WARNING: $*" >&2; }
 
-log_info "Setting up DSJOBS_HOME: ${DSJOBS_HOME}"
+log_info "Setting up DSHPC_HOME: ${DSHPC_HOME}"
 
 # Create home and subdirectories
 for dir in "" "/artifacts" "/runners" "/publish" "/staging"; do
-  target="${DSJOBS_HOME}${dir}"
+  target="${DSHPC_HOME}${dir}"
   if [ ! -d "${target}" ]; then
     if mkdir -p "${target}" 2>/dev/null; then
       chmod 0777 "${target}" 2>/dev/null || true
@@ -37,7 +37,7 @@ done
 
 # Set ownership to rock user if it exists
 if id rock >/dev/null 2>&1; then
-  chown -R rock:rock "${DSJOBS_HOME}" 2>/dev/null || true
+  chown -R rock:rock "${DSHPC_HOME}" 2>/dev/null || true
   log_info "Ownership set to rock:rock"
 fi
 
@@ -57,9 +57,9 @@ if [ -d "${ROCK_LIB}" ]; then
 fi
 
 # Verify
-if [ -d "${DSJOBS_HOME}" ]; then
-  log_info "Setup complete: ${DSJOBS_HOME}"
-  ls -la "${DSJOBS_HOME}/" 2>/dev/null | while read line; do log_info "  ${line}"; done
+if [ -d "${DSHPC_HOME}" ]; then
+  log_info "Setup complete: ${DSHPC_HOME}"
+  ls -la "${DSHPC_HOME}/" 2>/dev/null | while read line; do log_info "  ${line}"; done
 else
   log_warn "Setup incomplete. The R .onLoad() fallback will create directories at runtime."
 fi

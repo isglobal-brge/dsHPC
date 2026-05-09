@@ -130,23 +130,23 @@
   env_vars <- c(
     "current",
     LD_LIBRARY_PATH = "",
-    DSJOBS_STEP_DIR = step_dir,
-    DSJOBS_OUTPUT_DIR = output_dir,
-    DSJOBS_JOB_ID = job_id,
-    DSJOBS_STEP_INDEX = as.character(step_index),
+    DSHPC_STEP_DIR = step_dir,
+    DSHPC_OUTPUT_DIR = output_dir,
+    DSHPC_JOB_ID = job_id,
+    DSHPC_STEP_INDEX = as.character(step_index),
     # MKL workaround for amd64-on-arm64 Rosetta emulation. Harmless on other
     # platforms. (Without these, Intel oneMKL refuses to load libtorch_cpu.so.)
     MKL_SERVICE_FORCE_INTEL = "0",
     MKL_THREADING_LAYER = "GNU")
   if (!is.null(input_dir))
-    env_vars <- c(env_vars, DSJOBS_INPUT_DIR = input_dir)
+    env_vars <- c(env_vars, DSHPC_INPUT_DIR = input_dir)
   gpu_devices <- .scheduler_job_gpu_devices(db, job_id)
   if (length(gpu_devices) > 0) {
     gpu_csv <- paste(gpu_devices, collapse = ",")
     env_vars <- c(env_vars,
       CUDA_VISIBLE_DEVICES = gpu_csv,
       NVIDIA_VISIBLE_DEVICES = gpu_csv,
-      DSJOBS_GPU_DEVICES = gpu_csv)
+      DSHPC_GPU_DEVICES = gpu_csv)
   }
   if (!is.null(step$config)) {
     for (nm in names(step$config)) {
@@ -158,7 +158,7 @@
       val_str <- if (length(val) > 1) paste(val, collapse = ",")
                  else as.character(val)
       new_var <- val_str
-      names(new_var) <- paste0("DSJOBS_CFG_", upper)
+      names(new_var) <- paste0("DSHPC_CFG_", upper)
       env_vars <- c(env_vars, new_var)
     }
   }

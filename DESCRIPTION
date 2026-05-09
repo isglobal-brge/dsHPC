@@ -1,4 +1,4 @@
-Package: dsJobs
+Package: dsHPC
 Type: Package
 Title: DataSHIELD Durable Federated Job Runtime
 Version: 0.1.0
@@ -36,17 +36,17 @@ Suggests:
     withr,
     DSLite
 AggregateMethods:
-    jobStatusDS,
-    jobResultDS,
-    jobListDS,
-    jobOutputsDS,
-    jobCapabilitiesDS,
-    jobSchedulerStatusDS,
-    jobAdminListDS,
-    jobAdminCancelDS,
+    hpcStatusDS,
+    hpcResultDS,
+    hpcListDS,
+    hpcOutputsDS,
+    hpcCapabilitiesDS,
+    hpcSchedulerStatusDS,
+    hpcAdminListDS,
+    hpcAdminCancelDS,
     c=base::c,
     list=base::list
 AssignMethods:
-    jobSubmitDS
+    hpcSubmitDS
 Config/testthat/edition: 3
 RoxygenNote: 7.3.3
