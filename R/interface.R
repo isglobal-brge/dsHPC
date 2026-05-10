@@ -442,6 +442,11 @@ hpcCapabilitiesDS <- function() {
        executor = .executor_backend_status(settings),
        scheduler = .scheduler_status(),
        worker = worker_health,
+       runner_registry = list(
+         paths = settings$runner_registry_paths,
+         autosync = settings$runner_registry_autosync,
+         installed = .dshpc_env$.runner_registry_installed %||% character(0)
+       ),
        admin_enabled = .admin_is_configured())
 }
 

@@ -82,5 +82,9 @@
     external_cancel_cmd = .dshpc_option("external_cancel_cmd", Sys.getenv("DSHPC_EXTERNAL_CANCEL_CMD", unset = "")),
     backend_path_mappings = .dshpc_option("backend_path_mappings",
       .dshpc_option("path_mappings", Sys.getenv("DSHPC_BACKEND_PATH_MAPPINGS", unset = ""))),
+    runner_registry_paths = .dshpc_option("runner_registry_paths",
+      Sys.getenv("DSHPC_RUNNER_REGISTRY_PATHS", unset = "")),
+    runner_registry_autosync = .dshpc_option("runner_registry_autosync", TRUE),
+    runner_registry_sync_secs = as.numeric(.dshpc_option("runner_registry_sync_secs", 30)),
     runner_overrides = .dshpc_option("runner_overrides", list()))
 }

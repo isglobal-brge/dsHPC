@@ -44,6 +44,12 @@
 #' - `dshpc.oom_throttle_max_concurrent`: effective runner concurrency while
 #'   OOM throttling is active. Defaults to 1.
 #' - `dshpc.runner_overrides`: named list of per-runner resource overrides.
+#' - `dshpc.runner_registry_paths`: path-separated YAML files/directories with
+#'   admin-controlled runner definitions to sync into `DSHPC_HOME/runners`.
+#' - `dshpc.runner_registry_autosync`: enable registry sync on package load and
+#'   runner lookup. Defaults to `TRUE`.
+#' - `dshpc.runner_registry_sync_secs`: minimum seconds between automatic
+#'   registry sync attempts. Defaults to 30.
 #'
 #' @section Executor backends:
 #' - `dshpc.executor_backend`: one of `"embedded"`, `"slurm"`, `"external"`,

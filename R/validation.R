@@ -4,6 +4,7 @@
 #' @keywords internal
 .validate_job_spec <- function(spec) {
   if (!is.list(spec)) stop("Job spec must be a list.", call. = FALSE)
+  spec <- .normalize_job_graph(spec)
   steps <- spec$steps
   if (is.null(steps) || length(steps) == 0)
     stop("Job spec must contain at least one step.", call. = FALSE)
@@ -56,6 +57,7 @@
 #' @keywords internal
 .load_runner_config <- function(runner_name) {
   if (!grepl("^[a-zA-Z0-9_]+$", runner_name)) return(NULL)
+  tryCatch(.dshpc_sync_runner_registries(quiet = TRUE), error = function(e) NULL)
   home <- .dshpc_home(must_exist = FALSE)
   if (!is.null(home)) {
     p <- file.path(home, "runners", paste0(runner_name, ".yml"))
@@ -81,6 +83,7 @@
 
 #' @keywords internal
 .list_runners <- function() {
+  tryCatch(.dshpc_sync_runner_registries(quiet = TRUE), error = function(e) NULL)
   runners <- character(0)
   bd <- system.file("runners", package = "dsHPC")
   if (nzchar(bd) && dir.exists(bd))
