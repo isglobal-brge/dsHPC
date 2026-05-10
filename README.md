@@ -23,6 +23,12 @@ The default scheduler is adaptive: it reads cgroup/host CPU and memory, detects
 local GPU visibility where available, leases resources while jobs run, and puts
 heavy runners into cooldown after OOM-like exits.
 
+Jobs may be submitted as classic ordered steps or as a declarative DAG pipeline.
+The DAG form uses named nodes and explicit input dependencies; dsHPC validates
+the graph, rejects cycles, topologically compiles it to the durable step model,
+and stages multiple upstream artifact inputs under a per-step input manifest
+without returning those artifacts to the client.
+
 The same control plane supports three deployment modes:
 
 - **Local cell:** each Rock owns its own `dshpc.home` and embedded worker.
@@ -46,6 +52,7 @@ On load, dsHPC creates the default state tree if needed:
 ```text
 /srv/dshpc/
   artifacts/
+  locks/
   publish/
   runners/
   staging/
@@ -74,6 +81,19 @@ options(
   dshpc.max_jobs_per_user = Inf
 )
 ```
+
+Hospital/site-specific runners can be registered without editing dsHPC by
+pointing `dshpc.runner_registry_paths` at YAML files or directories:
+
+```r
+options(
+  dshpc.runner_registry_paths = "/etc/dshpc/runners",
+  dshpc.runner_registry_autosync = TRUE
+)
+```
+
+Each YAML runner remains allowlisted, resource-declared, and validated before it
+can run.
 
 Multiple Rock R sessions sharing the same `dshpc.home` participate in the same
 cell. Leader election and SQLite state keep queue ownership singleton-like for
@@ -220,19 +240,19 @@ plane: artifact
 resource_class: cpu_heavy
 command: python
 args_template:
-  - /srv/dsradiomics/python/dsradiomics_extract.py
+  - /srv/dsimaging/python/dsimaging_extract.py
   - --input
   - "{input_dir}"
   - --output
   - "{output_dir}"
 container:
-  image: ghcr.io/isglobal-brge/dsradiomics-runner@sha256:...
+  image: ghcr.io/isglobal-brge/dsimaging-runner@sha256:...
   runtime: auto
   pull: missing
   command: python
   args_template:
     - -m
-    - dsradiomics_extract
+    - dsimaging_extract
     - --input
     - "{input_dir}"
     - --output
@@ -368,6 +388,7 @@ reports collection-level progress for a fire-and-forget imaging generation.
 Server-side package API:
 
 - `register_dshpc_publisher(kind, fn)`
+- `register_dshpc_runner(config, name = NULL, overwrite = TRUE)`
 - `query_jobs_by_tag(tag_pattern, states = NULL)`
 - `query_failed_jobs(tag_pattern)`
 - `get_job_output_ref(job_id_or_symbol, output_name, required_label = NULL)`
@@ -383,8 +404,8 @@ through options such as:
 ```r
 options(
   dsimaging.container_images = list(
-    pyradiomics_extract = "ghcr.io/isglobal-brge/dsradiomics-runner@sha256:...",
-    lungmask_infer = "ghcr.io/isglobal-brge/dsradiomics-lungmask@sha256:..."
+    pyradiomics_extract = "ghcr.io/isglobal-brge/dsimaging-runner@sha256:...",
+    lungmask_infer = "ghcr.io/isglobal-brge/dsimaging-lungmask@sha256:..."
   ),
   dsimaging.container_runtime = "auto",
   dsimaging.container_pull = "missing"
