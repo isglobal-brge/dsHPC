@@ -1,10 +1,10 @@
 # Module: Plugin Registry
 # Generic extension points for publishers, dataset adapters, runners.
-# Domain packages (dsImaging, dsRadiomics) register their hooks here.
+# Domain packages such as dsImaging register their hooks here.
 
 #' Register a publisher plugin
 #'
-#' Called by domain packages (dsImaging, dsRadiomics) to register
+#' Called by domain packages such as dsImaging to register
 #' publish logic. dsHPC calls the registered function when a
 #' publish_asset or publish_dataset step completes.
 #'

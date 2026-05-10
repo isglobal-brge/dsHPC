@@ -139,7 +139,7 @@ hpcSubmitDS <- function(spec_encoded) {
 #' Load a job output (server-side only)
 #'
 #' NOT a DataSHIELD method -- not directly callable by users.
-#' Domain packages (dsRadiomics, dsFlower) should use this internally
+#' Domain packages should use this internally
 #' after verifying ownership and applying their own disclosure controls.
 #'
 #' @param job_id_or_symbol Job ID or symbol.
