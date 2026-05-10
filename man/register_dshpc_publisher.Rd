@@ -12,7 +12,7 @@ register_dshpc_publisher(kind, fn)
 \item{fn}{Function; publisher function(job_id, step, output_dir, db) -> list.}
 }
 \description{
-Called by domain packages (dsImaging, dsRadiomics) to register
+Called by domain packages such as dsImaging to register
 publish logic. dsHPC calls the registered function when a
 publish_asset or publish_dataset step completes.
 }

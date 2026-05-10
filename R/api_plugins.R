@@ -1,6 +1,6 @@
 # Module: Public API for Plugin Packages
 #
-# Functions that domain packages (dsRadiomics, etc.) need to interact
+# Functions that domain packages need to interact
 # with dsHPC without accessing internal functions via :::.
 
 #' Query jobs by tag
