@@ -140,6 +140,9 @@
     MKL_THREADING_LAYER = "GNU")
   if (!is.null(input_dir))
     env_vars <- c(env_vars, DSHPC_INPUT_DIR = input_dir)
+  inputs_json <- if (!is.null(input_dir)) file.path(input_dir, "inputs.json") else ""
+  if (nzchar(inputs_json) && file.exists(inputs_json))
+    env_vars <- c(env_vars, DSHPC_INPUTS_JSON = inputs_json)
   gpu_devices <- .scheduler_job_gpu_devices(db, job_id)
   if (length(gpu_devices) > 0) {
     gpu_csv <- paste(gpu_devices, collapse = ",")

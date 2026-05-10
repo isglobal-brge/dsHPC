@@ -16,7 +16,7 @@
   # but Opal/Rock API installs may skip configure scripts entirely.
   # This fallback creates the structure at package load time.
   home <- .dshpc_option("home", "/srv/dshpc")
-  subdirs <- c("artifacts", "runners", "publish", "staging")
+  subdirs <- c("artifacts", "runners", "publish", "staging", "locks")
   for (d in c(home, file.path(home, subdirs))) {
     if (!dir.exists(d)) {
       tryCatch(
@@ -30,6 +30,7 @@
     db <- .db_connect()
     .db_close(db)
   }, error = function(e) NULL)
+  tryCatch(.dshpc_sync_runner_registries(force = TRUE), error = function(e) NULL)
   if (.dshpc_should_autostart_worker()) {
     tryCatch(.dshpc_worker_start(), error = function(e) NULL)
   }

@@ -15,7 +15,7 @@
 .executor_run_step <- function(db, job_id, step_index, spec) {
   step <- spec$steps[[step_index]]
   step_dir <- .ensure_step_dir(job_id, step_index)
-  input_dir <- .resolve_step_input(db, job_id, step_index, step)
+  input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir)
 
   .store_update_step(db, job_id, step_index, state = "running",
     started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
@@ -156,26 +156,114 @@
 }
 
 #' @keywords internal
-.resolve_step_input <- function(db, job_id, step_index, step_spec) {
+.resolve_step_input <- function(db, job_id, step_index, step_spec, step_dir = NULL) {
   if (!is.null(step_spec$inputs)) {
-    refs <- step_spec$inputs
-    if (is.list(refs) && length(refs) > 0) {
-      ref <- refs[[1]]
-      if (is.numeric(ref)) {
-        row <- DBI::dbGetQuery(db,
-          "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
-          params = list(job_id, as.integer(ref)))
-        if (nrow(row) > 0 && !is.na(row$output_ref[1]))
-          return(file.path(.dshpc_home(), row$output_ref[1]))
-      }
+    refs <- .normalize_step_input_refs(step_spec$inputs)
+    refs <- refs[!is.na(vapply(refs, `[[`, integer(1), "step"))]
+    if (length(refs) == 1L) {
+      path <- .step_output_path(db, job_id, refs[[1]]$step)
+      if (!is.null(path)) return(path)
+    }
+    if (length(refs) > 1L && !is.null(step_dir)) {
+      return(.stage_step_inputs(db, job_id, refs, step_dir))
     }
   }
   if (step_index > 1L) {
-    row <- DBI::dbGetQuery(db,
-      "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
-      params = list(job_id, step_index - 1L))
-    if (nrow(row) > 0 && !is.na(row$output_ref[1]))
-      return(file.path(.dshpc_home(), row$output_ref[1]))
+    path <- .step_output_path(db, job_id, step_index - 1L)
+    if (!is.null(path)) return(path)
   }
   NULL
+}
+
+#' @keywords internal
+.normalize_step_input_refs <- function(inputs) {
+  if (is.null(inputs)) return(list())
+  if (is.numeric(inputs)) {
+    return(lapply(as.integer(inputs), function(i) list(step = i, name = paste0("step_", i))))
+  }
+  if (!is.list(inputs)) return(list())
+  nm <- names(inputs) %||% rep("", length(inputs))
+  out <- list()
+  for (i in seq_along(inputs)) {
+    item <- inputs[[i]]
+    name <- nm[[i]]
+    if (is.numeric(item) && length(item) == 1) {
+      step <- as.integer(item)
+      out[[length(out) + 1L]] <- list(
+        step = step,
+        name = if (nzchar(name)) name else paste0("step_", step))
+    } else if (is.list(item)) {
+      step <- item$step %||% item$step_index
+      if (!is.null(step)) {
+        out[[length(out) + 1L]] <- list(
+          step = as.integer(step),
+          name = item$name %||% if (nzchar(name)) name else paste0("step_", step),
+          output = item$output %||% item$output_name %||% NULL,
+          ref = item$ref %||% item$node %||% item$id %||% NULL)
+      }
+    }
+  }
+  out
+}
+
+#' @keywords internal
+.step_output_path <- function(db, job_id, step_index) {
+  row <- DBI::dbGetQuery(db,
+    "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
+    params = list(job_id, as.integer(step_index)))
+  if (nrow(row) == 0 || is.na(row$output_ref[1])) return(NULL)
+  file.path(.dshpc_home(), row$output_ref[1])
+}
+
+#' @keywords internal
+.stage_step_inputs <- function(db, job_id, refs, step_dir) {
+  input_root <- file.path(step_dir, "input")
+  if (dir.exists(input_root)) unlink(input_root, recursive = TRUE, force = TRUE)
+  dir.create(input_root, recursive = TRUE, showWarnings = FALSE, mode = "0755")
+
+  manifest <- list()
+  used_names <- character(0)
+  for (i in seq_along(refs)) {
+    ref <- refs[[i]]
+    source <- .step_output_path(db, job_id, ref$step)
+    if (is.null(source)) next
+    name <- .sanitize_input_name(ref$name %||% paste0("input_", i))
+    if (name %in% used_names) name <- paste0(name, "_", i)
+    used_names <- c(used_names, name)
+    target <- file.path(input_root, name)
+    ok <- tryCatch(file.symlink(source, target), error = function(e) FALSE)
+    if (!isTRUE(ok)) .copy_input_tree(source, target)
+    manifest[[name]] <- list(
+      step = as.integer(ref$step),
+      ref = ref$ref %||% NA_character_,
+      source = source,
+      path = target
+    )
+  }
+  jsonlite::write_json(manifest, file.path(input_root, "inputs.json"),
+    auto_unbox = TRUE, pretty = TRUE)
+  input_root
+}
+
+#' @keywords internal
+.copy_input_tree <- function(source, target) {
+  if (dir.exists(source)) {
+    dir.create(target, recursive = TRUE, showWarnings = FALSE, mode = "0755")
+    files <- list.files(source, all.files = TRUE, no.. = TRUE, full.names = TRUE)
+    for (f in files) {
+      file.copy(f, target, recursive = TRUE, copy.date = TRUE,
+        overwrite = TRUE)
+    }
+  } else if (file.exists(source)) {
+    dir.create(dirname(target), recursive = TRUE, showWarnings = FALSE)
+    file.copy(source, target, overwrite = TRUE, copy.date = TRUE)
+  }
+}
+
+#' @keywords internal
+.sanitize_input_name <- function(x) {
+  x <- as.character(x %||% "input")[1]
+  x <- gsub("[^A-Za-z0-9_.-]+", "_", x)
+  x <- sub("^[._-]+", "", x)
+  if (!nzchar(x)) "input" else x
 }
