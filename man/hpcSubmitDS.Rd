@@ -11,7 +11,8 @@ hpcSubmitDS(spec_encoded)
 encoded JSON string.}
 }
 \value{
-Named list containing `job_id`, `state`, and `submitted_at`.
+Named list containing `job_id`, resolved `name`, `state`, and
+  `submitted_at`.
 }
 \description{
 DataSHIELD assign method used by clients and domain packages to enqueue a

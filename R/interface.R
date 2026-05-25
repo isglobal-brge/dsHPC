@@ -32,7 +32,8 @@
 #'
 #' @param spec_encoded Job specification as a list, JSON string, or `B64:`
 #'   encoded JSON string.
-#' @return Named list containing `job_id`, `state`, and `submitted_at`.
+#' @return Named list containing `job_id`, resolved `name`, `state`, and
+#'   `submitted_at`.
 #' @export
 hpcSubmitDS <- function(spec_encoded) {
   spec <- .ds_arg(spec_encoded)
@@ -48,6 +49,7 @@ hpcSubmitDS <- function(spec_encoded) {
   existing <- .store_get_job(db, job_id)
   if (!is.null(existing)) {
     return(list(job_id = job_id, state = existing$state,
+                name = existing$name,
                 submitted_at = existing$submitted_at))
   }
 
@@ -90,6 +92,7 @@ hpcSubmitDS <- function(spec_encoded) {
 
     job <- .store_get_job(db, job_id)
     return(list(job_id = job_id, state = job$state,
+                 name = job$name,
                  deduplicated = TRUE,
                  submitted_at = job$submitted_at))
   }
@@ -123,6 +126,7 @@ hpcSubmitDS <- function(spec_encoded) {
   job <- .store_get_job(db, job_id)
   list(job_id = job_id,
        state = job$state %||% "PENDING",
+       name = job$name,
        submitted_at = job$submitted_at %||% format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"))
 }
 
