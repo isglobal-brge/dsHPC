@@ -4,11 +4,15 @@
 \alias{hpcListDS}
 \title{List Jobs}
 \usage{
-hpcListDS(label = NULL)
+hpcListDS(label = NULL, scope = NULL, mode = "mine+global")
 }
 \arguments{
 \item{label}{Character or NULL; filter by label.}
+
+\item{scope}{Optional B64/list payload with `.owner`.}
+
+\item{mode}{Character; `"mine"`, `"mine+global"`, or `"global"`.}
 }
 \description{
-Returns all jobs, optionally filtered by label.
+Returns disclosure-safe job rows, optionally filtered by label and scope.
 }

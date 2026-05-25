@@ -54,7 +54,7 @@ hpcSubmitDS <- function(spec_encoded) {
   .check_quotas(db, owner_id)
 
   # Deduplication by spec_hash
-  spec_for_hash <- spec[setdiff(names(spec), c("job_id", ".owner"))]
+  spec_for_hash <- spec[setdiff(names(spec), c("job_id", ".owner", "name"))]
   spec_hash <- digest::digest(jsonlite::toJSON(spec_for_hash, auto_unbox = TRUE),
                                algo = "sha256", serialize = FALSE)
   existing_dup <- DBI::dbGetQuery(db,
@@ -354,22 +354,30 @@ hpcLogsDS <- function(job_id_or_symbol, last_n = 50L) {
 
 #' List Jobs
 #'
-#' Returns all jobs, optionally filtered by label.
+#' Returns disclosure-safe job rows, optionally filtered by label and scope.
 #'
 #' @param label Character or NULL; filter by label.
+#' @param scope Optional B64/list payload with `.owner`.
+#' @param mode Character; `"mine"`, `"mine+global"`, or `"global"`.
 #' @export
-hpcListDS <- function(label = NULL) {
+hpcListDS <- function(label = NULL, scope = NULL, mode = "mine+global") {
+  mode <- match.arg(mode, c("mine", "mine+global", "global"))
+  scope <- .ds_arg(scope)
+  owner <- if (is.list(scope)) scope$.owner else scope
+  owner_id <- .get_owner_id(owner)
+
   db <- .db_connect()
   on.exit(.db_close(db))
 
-  jobs <- .store_list_jobs(db, label = label)
+  jobs <- .store_list_jobs(db, label = label, owner_id = owner_id, scope = mode)
   if (nrow(jobs) == 0)
     return(data.frame(job_id = character(0), state = character(0),
-      label = character(0), submitted_at = character(0),
+      name = character(0), label = character(0), submitted_at = character(0),
       progress = character(0), stringsAsFactors = FALSE))
   jobs$progress <- paste0(jobs$step_index, "/", jobs$total_steps)
   # Safe fields only -- no tags, owner_id, visibility (could be disclosive)
-  jobs[, c("job_id", "state", "label", "submitted_at", "progress"), drop = FALSE]
+  jobs[, c("job_id", "state", "name", "label", "submitted_at", "progress"),
+    drop = FALSE]
 }
 
 #' List Available Outputs for a Job
@@ -506,11 +514,12 @@ hpcAdminListDS <- function(admin_key = NULL, label = NULL) {
   jobs <- .store_list_jobs(db, label = label)
   if (nrow(jobs) == 0)
     return(data.frame(job_id = character(0), state = character(0),
-      label = character(0), submitted_at = character(0),
+      name = character(0), label = character(0), submitted_at = character(0),
       progress = character(0), stringsAsFactors = FALSE))
   jobs$progress <- paste0(jobs$step_index, "/", jobs$total_steps)
   # Safe fields only -- no tags, owner_id, visibility (could be disclosive)
-  jobs[, c("job_id", "state", "label", "submitted_at", "progress"), drop = FALSE]
+  jobs[, c("job_id", "state", "name", "label", "submitted_at", "progress"),
+    drop = FALSE]
 }
 
 #' Cancel Any Job (admin only)
