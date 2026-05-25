@@ -23,5 +23,5 @@ make_test_spec <- function(n_steps = 1) {
     list(type = "emit", plane = "session",
          output_name = paste0("out_", i), value = i)
   })
-  list(steps = steps, resource_class = "default")
+  list(steps = steps, label = "dsHPC_test", resource_class = "default")
 }

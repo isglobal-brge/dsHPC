@@ -18,7 +18,8 @@ hpcLoadOutputDS(
 
 \item{as_descriptor}{If TRUE, return FlowerDatasetDescriptor for Parquet.}
 
-\item{required_label}{If non-NULL, verify the job has this label (ownership check).}
+\item{required_label}{Required label substring identifying the caller domain
+and used as the package ownership check.}
 }
 \value{
 The loaded object.

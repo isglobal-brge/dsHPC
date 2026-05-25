@@ -11,7 +11,7 @@ get_job_output_ref(job_id_or_symbol, output_name, required_label = NULL)
 
 \item{output_name}{Output name.}
 
-\item{required_label}{Optional label substring used as package ownership check.}
+\item{required_label}{Required label substring used as package ownership check.}
 }
 \value{
 Named list with job_id, name, kind, path, exists, and size_bytes.

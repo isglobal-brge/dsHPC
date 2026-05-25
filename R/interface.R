@@ -35,7 +35,9 @@
 #'
 #' DataSHIELD assign method used by clients and domain packages to enqueue a
 #' validated job specification. The specification may be a decoded list, JSON,
-#' or a `B64:`-prefixed JSON payload.
+#' or a `B64:`-prefixed JSON payload. The decoded specification must contain a
+#' non-empty character `label` field identifying the submitting server-side
+#' domain package.
 #'
 #' @param spec_encoded Job specification as a list, JSON string, or `B64:`
 #'   encoded JSON string.
@@ -45,12 +47,8 @@
 hpcSubmitDS <- function(spec_encoded) {
   spec <- .ds_arg(spec_encoded)
   spec <- .validate_job_spec(spec)
-  if (isTRUE(.dshpc_require_domain_label()) &&
-      (is.null(spec$label) || !nzchar(as.character(spec$label)[1]))) {
-    warning("dsHPC job submitted without a domain label. Production ",
-      "deployments should label all jobs and mediate submission through ",
-      "domain packages.", call. = FALSE)
-  }
+  .dshpc_require_label_value(spec$label,
+    "dsHPC submission requires a domain label (spec$label). Every job must declare the server-side package that submitted it. This is a hard requirement; there is no opt-out.")
   owner_id <- .get_owner_id(spec$.owner)
   job_id <- if (!is.null(spec$job_id) && grepl("^job_", spec$job_id))
     spec$job_id else .generate_job_id()
@@ -163,18 +161,14 @@ hpcSubmitDS <- function(spec_encoded) {
 #' @param job_id_or_symbol Job ID or symbol.
 #' @param output_name Output name.
 #' @param as_descriptor If TRUE, return FlowerDatasetDescriptor for Parquet.
-#' @param required_label If non-NULL, verify the job has this label (ownership check).
+#' @param required_label Required label substring identifying the caller domain
+#'   and used as the package ownership check.
 #' @return The loaded object.
 #' @export
 hpcLoadOutputDS <- function(job_id_or_symbol, output_name,
                              as_descriptor = FALSE, required_label = NULL) {
-  if (isTRUE(.dshpc_require_domain_label()) &&
-      (is.null(required_label) || !nzchar(as.character(required_label)[1]))) {
-    stop("dsHPC load operation requires a domain label by default. ",
-      "This call appears to come from outside a registered domain package. ",
-      "Configure dshpc.require_domain_label = FALSE on the server to allow ",
-      "unscoped loads (only recommended for development).", call. = FALSE)
-  }
+  required_label <- .dshpc_require_label_value(required_label,
+    "dsHPC load operation requires a domain label (required_label). The caller must identify the domain it belongs to (typically the calling server-side package's name). This is a hard requirement; there is no opt-out.")
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -184,13 +178,11 @@ hpcLoadOutputDS <- function(job_id_or_symbol, output_name,
   if (!job$state %in% c("FINISHED", "PUBLISHED"))
     stop("Job not finished (state: ", job$state, ").", call. = FALSE)
 
-  # Ownership check: if required_label is set, verify the job belongs to that package
-  if (!is.null(required_label)) {
-    job_label <- job$label %||% ""
-    if (!grepl(required_label, job_label, fixed = TRUE))
-      stop("Job '", job_id, "' does not belong to '", required_label,
-           "'. Access denied.", call. = FALSE)
-  }
+  # Ownership check: verify the job belongs to the caller domain.
+  job_label <- job$label %||% ""
+  if (!grepl(required_label, job_label, fixed = TRUE))
+    stop("Job '", job_id, "' does not belong to '", required_label,
+         "'. Access denied.", call. = FALSE)
 
   out <- DBI::dbGetQuery(db,
     "SELECT path_or_ref, kind FROM outputs WHERE job_id = ? AND name = ?
