@@ -45,7 +45,7 @@ also supported for backend commands where noted below.
 \section{Executor backends}{
 
 - `dshpc.executor_backend`: one of `"embedded"`, `"slurm"`, `"external"`,
-  or `"kubernetes"` (preflight only).
+  or `"kubernetes"`.
 - `dshpc.external_enforce_local_resources`: when `TRUE`, keep local
   CPU/RAM/GPU budget checks even for delegated backends.
 - `dshpc.external_enforce_runner_concurrency`: when `TRUE`, keep local
@@ -61,6 +61,26 @@ also supported for backend commands where noted below.
   Environment fallbacks use `DSHPC_SLURM_*`.
 - `dshpc.slurm_partition`, `dshpc.slurm_account`, `dshpc.slurm_qos`,
   `dshpc.slurm_time`, `dshpc.slurm_extra_args`: optional submit settings.
+}
+
+\section{Kubernetes backend}{
+
+- `dshpc.kubernetes_kubectl`: `kubectl` path/name. Environment fallback:
+  `DSHPC_KUBERNETES_KUBECTL`.
+- `dshpc.kubernetes_context`, `dshpc.kubernetes_namespace`: optional
+  kubectl target. Namespace defaults to `"default"`.
+- `dshpc.kubernetes_pvc`: shared PersistentVolumeClaim mounted into runner
+  pods. Required for Kubernetes dispatch.
+- `dshpc.kubernetes_mount_path`: mount path for that PVC in pods. Defaults
+  to the backend-visible `dshpc.home`; use `dshpc.backend_path_mappings`
+  when the Rock-local dsHPC path differs from the pod mount path.
+- `dshpc.kubernetes_image`: default runner image when the runner YAML does
+  not declare a container image.
+- `dshpc.kubernetes_service_account`,
+  `dshpc.kubernetes_image_pull_policy`, `dshpc.kubernetes_backoff_limit`,
+  and `dshpc.kubernetes_ttl_seconds_after_finished`: optional Job settings.
+  The backend submits `batch/v1` Jobs, polls them with
+  `kubectl get job -o json`, and cancels with `kubectl delete job`.
 }
 
 \section{External backend}{
