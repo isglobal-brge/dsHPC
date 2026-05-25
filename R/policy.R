@@ -13,17 +13,14 @@
   )
 }
 
-#' Whether low-level output loads require a domain label
-#'
-#' Defaults to TRUE so production profiles that accidentally allowlist
-#' hpcLoadOutputDS still reject unscoped payload loads. Development and
-#' single-user deployments can opt out with dshpc.require_domain_label = FALSE.
+#' Validate a mandatory domain label
 #' @noRd
-.dshpc_require_domain_label <- function() {
-  value <- .dshpc_option("require_domain_label", TRUE)
-  if (is.logical(value)) return(isTRUE(value))
-  value <- tolower(as.character(value)[1])
-  !value %in% c("false", "0", "no", "off")
+.dshpc_require_label_value <- function(value, message) {
+  if (!is.character(value) || length(value) != 1L || is.na(value) ||
+      !nzchar(value)) {
+    stop(message, call. = FALSE)
+  }
+  value
 }
 
 #' @noRd

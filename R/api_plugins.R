@@ -109,11 +109,13 @@ cancel_jobs_by_tag <- function(tag_pattern, admin_key,
 #'
 #' @param job_id_or_symbol Job ID or symbol.
 #' @param output_name Output name.
-#' @param required_label Optional label substring used as package ownership check.
+#' @param required_label Required label substring used as package ownership check.
 #' @return Named list with job_id, name, kind, path, exists, and size_bytes.
 #' @export
 get_job_output_ref <- function(job_id_or_symbol, output_name,
                                required_label = NULL) {
+  required_label <- .dshpc_require_label_value(required_label,
+    "dsHPC load operation requires a domain label (required_label). The caller must identify the domain it belongs to (typically the calling server-side package's name). This is a hard requirement; there is no opt-out.")
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -121,12 +123,10 @@ get_job_output_ref <- function(job_id_or_symbol, output_name,
   if (is.null(job)) stop("Job not found.", call. = FALSE)
   if (!job$state %in% c("FINISHED", "PUBLISHED"))
     stop("Job not finished (state: ", job$state, ").", call. = FALSE)
-  if (!is.null(required_label)) {
-    job_label <- job$label %||% ""
-    if (!grepl(required_label, job_label, fixed = TRUE))
-      stop("Job '", job_id, "' does not belong to '", required_label,
-           "'. Access denied.", call. = FALSE)
-  }
+  job_label <- job$label %||% ""
+  if (!grepl(required_label, job_label, fixed = TRUE))
+    stop("Job '", job_id, "' does not belong to '", required_label,
+         "'. Access denied.", call. = FALSE)
 
   out <- DBI::dbGetQuery(db,
     "SELECT name, kind, path_or_ref, size_bytes FROM outputs

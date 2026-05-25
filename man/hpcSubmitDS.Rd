@@ -17,5 +17,7 @@ Named list containing `job_id`, resolved `name`, `state`, and
 \description{
 DataSHIELD assign method used by clients and domain packages to enqueue a
 validated job specification. The specification may be a decoded list, JSON,
-or a `B64:`-prefixed JSON payload.
+or a `B64:`-prefixed JSON payload. The decoded specification must contain a
+non-empty character `label` field identifying the submitting server-side
+domain package.
 }

@@ -44,7 +44,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.2.1.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -354,7 +354,8 @@ Aggregate methods:
 
 Assign method:
 
-- `hpcSubmitDS(spec_encoded)`
+- `hpcSubmitDS(spec_encoded)`; the decoded spec must include a non-empty
+  `label` identifying the server-side domain package that submitted the job.
 
 ## Client commands
 
@@ -370,7 +371,6 @@ dsHPCClient::ds.hpc.wait(conns, job_id, timeout = 3600, poll_interval = 10)
 dsHPCClient::ds.hpc.logs(conns, job_id, last_n = 100)
 dsHPCClient::ds.hpc.outputs(conns, job_id)
 dsHPCClient::ds.hpc.result(conns, job_id)
-dsHPCClient::ds.hpc.load_output(conns, job_id, "features", symbol = "rad")
 dsHPCClient::ds.hpc.capabilities(conns)
 dsHPCClient::ds.hpc.scheduler_status(conns)
 
@@ -391,9 +391,14 @@ Server-side package API:
 - `register_dshpc_runner(config, name = NULL, overwrite = TRUE)`
 - `query_jobs_by_tag(tag_pattern, states = NULL)`
 - `query_failed_jobs(tag_pattern)`
-- `get_job_output_ref(job_id_or_symbol, output_name, required_label = NULL)`
+- `get_job_output_ref(job_id_or_symbol, output_name, required_label)`
 - `count_active_jobs(tag_pattern)`
 - `get_owner_id()`
+
+Domain packages may compose specs as raw lists, or use the internal builder
+helpers `dsHPC:::ds_job()`, `dsHPC:::ds_pipeline()`,
+`dsHPC:::ds_pipeline_node()`, and `dsHPC:::ds_step_*()` from server-side R code.
+All submitted jobs must carry a non-empty domain `label`.
 
 ## dsImaging integration
 
