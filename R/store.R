@@ -4,13 +4,18 @@
 #' @keywords internal
 .store_create_job <- function(db, job_id, owner_id, spec, total_steps,
                                spec_hash = NULL) {
-  spec_json <- as.character(jsonlite::toJSON(spec, auto_unbox = TRUE, null = "null"))
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
 
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
-    name <- spec$name %||% NA_character_
     label <- spec$label %||% NA_character_
+    filter_label <- if (is.na(label)) NULL else label
+    raw_name <- spec$name %||% NA_character_
+    name <- .job_name_resolve_template(db, raw_name,
+      owner_id = owner_id, label = filter_label)
+    if (!is.null(spec$name)) spec$name <- name
+    spec_json <- as.character(jsonlite::toJSON(spec, auto_unbox = TRUE,
+      null = "null"))
     tags <- if (!is.null(spec$tags))
       paste(spec$tags, collapse = ",") else NA_character_
     visibility <- spec$visibility %||% "global"
