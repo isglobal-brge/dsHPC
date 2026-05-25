@@ -1,5 +1,12 @@
 # Module: DataSHIELD Methods
-# DS methods are READ-ONLY helpers for the shared SQLite.
+#
+# Intended use:
+# - hpcSubmitDS and hpcLoadOutputDS are low-level infrastructure methods.
+#   Domain server-side packages should normally call them R-internally after
+#   composing and validating their own workflows.
+# - If a deployment allowlists these methods for direct DSI use, callers should
+#   provide domain labels. Analyst-facing production profiles should prefer
+#   domain methods plus dsHPC observation methods, not unscoped submit/load.
 
 #' @keywords internal
 .resolve_job_id <- function(x) {
@@ -38,6 +45,12 @@
 hpcSubmitDS <- function(spec_encoded) {
   spec <- .ds_arg(spec_encoded)
   spec <- .validate_job_spec(spec)
+  if (isTRUE(.dshpc_require_domain_label()) &&
+      (is.null(spec$label) || !nzchar(as.character(spec$label)[1]))) {
+    warning("dsHPC job submitted without a domain label. Production ",
+      "deployments should label all jobs and mediate submission through ",
+      "domain packages.", call. = FALSE)
+  }
   owner_id <- .get_owner_id(spec$.owner)
   job_id <- if (!is.null(spec$job_id) && grepl("^job_", spec$job_id))
     spec$job_id else .generate_job_id()
@@ -155,6 +168,13 @@ hpcSubmitDS <- function(spec_encoded) {
 #' @export
 hpcLoadOutputDS <- function(job_id_or_symbol, output_name,
                              as_descriptor = FALSE, required_label = NULL) {
+  if (isTRUE(.dshpc_require_domain_label()) &&
+      (is.null(required_label) || !nzchar(as.character(required_label)[1]))) {
+    stop("dsHPC load operation requires a domain label by default. ",
+      "This call appears to come from outside a registered domain package. ",
+      "Configure dshpc.require_domain_label = FALSE on the server to allow ",
+      "unscoped loads (only recommended for development).", call. = FALSE)
+  }
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
