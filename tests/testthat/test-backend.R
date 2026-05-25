@@ -12,6 +12,14 @@ test_that("executor backend status reports embedded and missing slurm", {
   expect_equal(slurm$backend, "slurm")
   expect_false(slurm$available)
   expect_equal(slurm$reason, "sbatch_not_found")
+
+  withr::local_options(list(
+    dshpc.executor_backend = "kubernetes",
+    dshpc.kubernetes_kubectl = "/definitely/not/kubectl"))
+  k8s <- dsHPC:::.executor_backend_status()
+  expect_equal(k8s$backend, "kubernetes")
+  expect_false(k8s$available)
+  expect_equal(k8s$reason, "kubectl_not_found")
 })
 
 test_that("external backends delegate local resources unless configured otherwise", {
@@ -125,6 +133,150 @@ test_that("external command backend can submit and reap an artifact step", {
     "SELECT name FROM outputs WHERE job_id = ?",
     params = list("job_external"))
   expect_true("ok.txt" %in% outputs$name)
+})
+
+test_that("kubernetes backend submits job manifest and reaps completion", {
+  home <- setup_test_home()
+  backend_home <- file.path(tempdir(), paste0("dshpc_k8s_backend_view_",
+    Sys.getpid()))
+  if (!file.symlink(home, backend_home))
+    skip("filesystem does not support symlinks for Kubernetes path mapping test")
+  on.exit(unlink(backend_home, recursive = TRUE), add = TRUE)
+
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  kubectl <- file.path(bin, "kubectl")
+  args_file <- file.path(home, "kubectl_args.txt")
+  manifest_file <- file.path(home, "kubernetes_manifest.json")
+  status_file <- file.path(home, "kubernetes_status.json")
+  delete_file <- file.path(home, "kubectl_delete_args.txt")
+  withr::local_envvar(c(
+    DSHPC_FAKE_KUBECTL_ARGS = args_file,
+    DSHPC_FAKE_KUBECTL_MANIFEST = manifest_file,
+    DSHPC_FAKE_KUBECTL_STATUS = status_file,
+    DSHPC_FAKE_KUBECTL_DELETE = delete_file))
+  writeLines(c(
+    "#!/bin/sh",
+    "printf '%s\\n' \"$@\" >> \"$DSHPC_FAKE_KUBECTL_ARGS\"",
+    "action=''",
+    "for arg in \"$@\"; do",
+    "  case \"$arg\" in",
+    "    apply|get|delete) action=\"$arg\"; break ;;",
+    "  esac",
+    "done",
+    "case \"$action\" in",
+    "  apply)",
+    "    cat > \"$DSHPC_FAKE_KUBECTL_MANIFEST\"",
+    "    name=$(grep -m 1 '\"name\"[[:space:]]*:' \"$DSHPC_FAKE_KUBECTL_MANIFEST\" | sed 's/.*\"name\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/')",
+    "    [ -n \"$name\" ] || name=dshpc-fake",
+    "    printf 'job.batch/%s created\\n' \"$name\"",
+    "    ;;",
+    "  get)",
+    "    cat \"$DSHPC_FAKE_KUBECTL_STATUS\"",
+    "    ;;",
+    "  delete)",
+    "    printf '%s\\n' \"$@\" > \"$DSHPC_FAKE_KUBECTL_DELETE\"",
+    "    ;;",
+    "  *)",
+    "    echo unsupported fake kubectl action >&2",
+    "    exit 2",
+    "    ;;",
+    "esac"
+  ), kubectl)
+  Sys.chmod(kubectl, "0755")
+  writeLines('{"status":{"active":1}}', status_file)
+
+  writeLines(c(
+    "name: shell_k8s",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'false']",
+    "container:",
+    "  image: rocker/r-base:4.4",
+    "  command: /bin/sh",
+    "  args_template:",
+    "    - -c",
+    "    - mkdir -p {output_dir}; echo ok > {output_dir}/ok.txt",
+    "resources:",
+    "  memory_mb: 128",
+    "  cpu_slots: 2"
+  ), file.path(home, "runners", "shell_k8s.yml"))
+
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.executor_backend = "kubernetes",
+    dshpc.kubernetes_kubectl = kubectl,
+    dshpc.kubernetes_context = "kind-dshpc",
+    dshpc.kubernetes_namespace = "dshpc",
+    dshpc.kubernetes_pvc = "dshpc-pvc",
+    dshpc.kubernetes_mount_path = backend_home,
+    dshpc.backend_path_mappings = c(stats::setNames(backend_home, home)),
+    dshpc.max_retries = 0
+  ))
+  on.exit(cleanup_test_home(home), add = TRUE)
+
+  status <- dsHPC:::.executor_backend_status()
+  expect_true(status$available)
+  expect_equal(status$reason, "ok")
+  expect_equal(status$kubernetes$pvc, "dshpc-pvc")
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "shell_k8s", config = list())))
+  dsHPC:::.store_create_job(db, "job_k8s", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_k8s", state = "RUNNING", step_index = 1L)
+  dsHPC:::.executor_run_step(db, "job_k8s", 1L, spec)
+
+  step <- DBI::dbGetQuery(db,
+    "SELECT external_backend, external_id FROM steps WHERE job_id = ?",
+    params = list("job_k8s"))
+  expect_equal(step$external_backend, "kubernetes")
+  expect_match(step$external_id, "^dshpc-job-k8s-s001-")
+
+  manifest <- jsonlite::fromJSON(readLines(manifest_file, warn = FALSE),
+    simplifyVector = FALSE)
+  expect_equal(manifest$kind, "Job")
+  expect_equal(manifest$metadata$name, step$external_id)
+  pod <- manifest$spec$template$spec
+  container <- pod$containers[[1]]
+  expect_equal(container$image, "rocker/r-base:4.4")
+  expect_equal(container$workingDir, file.path(backend_home, "artifacts",
+    "job_k8s", "step_001"))
+  expect_equal(pod$volumes[[1]]$persistentVolumeClaim$claimName, "dshpc-pvc")
+  expect_equal(container$volumeMounts[[1]]$mountPath, backend_home)
+  expect_equal(container$resources$requests$cpu, "2")
+  expect_equal(container$resources$requests$memory, "128Mi")
+  expect_true(any(vapply(container$env, function(x) {
+    identical(x$name, "DSHPC_JOB_ID") && identical(x$value, "job_k8s")
+  }, logical(1))))
+  kubectl_args <- readLines(args_file, warn = FALSE)
+  expect_true("--context" %in% kubectl_args)
+  expect_true("kind-dshpc" %in% kubectl_args)
+  expect_true("--namespace" %in% kubectl_args)
+  expect_true("dshpc" %in% kubectl_args)
+
+  local_step <- file.path(home, "artifacts", "job_k8s", "step_001")
+  dir.create(file.path(local_step, "output"), recursive = TRUE,
+    showWarnings = FALSE)
+  writeLines("ok", file.path(local_step, "output", "ok.txt"))
+  writeLines("0", file.path(local_step, "exit_code"))
+  writeLines('{"status":{"conditions":[{"type":"Complete","status":"True"}],"succeeded":1}}',
+    status_file)
+
+  dsHPC:::.worker_reap(db)
+  job <- dsHPC:::.store_get_job(db, "job_k8s")
+  expect_equal(job$state, "FINISHED")
+  outputs <- DBI::dbGetQuery(db,
+    "SELECT name FROM outputs WHERE job_id = ?",
+    params = list("job_k8s"))
+  expect_true("ok.txt" %in% outputs$name)
+
+  dsHPC:::.backend_cancel_step("kubernetes", step$external_id)
+  delete_args <- readLines(delete_file, warn = FALSE)
+  expect_true("delete" %in% delete_args)
+  expect_true("job" %in% delete_args)
+  expect_true(step$external_id %in% delete_args)
 })
 
 test_that("external status command failures do not create duplicate retries", {
@@ -601,8 +753,20 @@ options(
   dshpc.slurm_squeue = NULL,
   dshpc.slurm_sacct = NULL,
   dshpc.slurm_sinfo = NULL,
+  dshpc.slurm_scancel = NULL,
   dshpc.external_submit_cmd = NULL,
   dshpc.external_status_cmd = NULL,
+  dshpc.external_cancel_cmd = NULL,
+  dshpc.kubernetes_kubectl = NULL,
+  dshpc.kubernetes_context = NULL,
+  dshpc.kubernetes_namespace = NULL,
+  dshpc.kubernetes_service_account = NULL,
+  dshpc.kubernetes_image = NULL,
+  dshpc.kubernetes_image_pull_policy = NULL,
+  dshpc.kubernetes_pvc = NULL,
+  dshpc.kubernetes_mount_path = NULL,
+  dshpc.kubernetes_backoff_limit = NULL,
+  dshpc.kubernetes_ttl_seconds_after_finished = NULL,
   dshpc.backend_capabilities_cmd = NULL,
   dshpc.backend_capabilities_ttl_secs = NULL,
   dshpc.external_enforce_runner_concurrency = NULL)

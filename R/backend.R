@@ -66,11 +66,17 @@
   }
 
   if (identical(backend, "kubernetes")) {
-    kubectl <- .backend_resolve_cmd(.dshpc_option("kubernetes_kubectl",
-      Sys.getenv("DSHPC_KUBERNETES_KUBECTL", unset = "")), "kubectl")
-    out$commands <- list(kubectl = kubectl)
-    out$available <- nzchar(kubectl)
-    out$reason <- if (out$available) "kubectl_available_contract_pending" else "kubectl_not_found"
+    contract <- .backend_kubernetes_contract(settings)
+    out$commands <- list(kubectl = contract$kubectl)
+    out$kubernetes <- contract
+    out$available <- nzchar(contract$kubectl) && nzchar(contract$pvc)
+    out$reason <- if (!nzchar(contract$kubectl)) {
+      "kubectl_not_found"
+    } else if (!nzchar(contract$pvc)) {
+      "kubernetes_pvc_not_configured"
+    } else {
+      "ok"
+    }
     return(out)
   }
 
@@ -218,6 +224,7 @@
   value <- switch(backend,
     slurm = .backend_slurm_capabilities(settings),
     external = .backend_external_capabilities(settings),
+    kubernetes = .backend_external_capabilities(settings),
     embedded = .backend_local_capabilities(settings),
     list(source = "unsupported", available = FALSE, gpus = NA_integer_,
          gpu_memory_mb = NA_integer_))
@@ -497,6 +504,9 @@
   if (identical(backend, "slurm")) {
     external_id <- .backend_submit_slurm(job_id, step_index, step, step_dir,
       backend_prepared, settings)
+  } else if (identical(backend, "kubernetes")) {
+    external_id <- .backend_submit_kubernetes(job_id, step_index, step,
+      step_dir, backend_prepared, settings)
   } else if (identical(backend, "external")) {
     external_id <- .backend_submit_external(job_id, step_index, step, step_dir,
       backend_prepared, settings)
@@ -640,12 +650,263 @@
   id
 }
 
+#' Kubernetes backend contract resolved from server options
+#' @keywords internal
+.backend_kubernetes_contract <- function(settings = .dshpc_settings()) {
+  local_home <- .dshpc_home(must_exist = FALSE)
+  backend_home <- .backend_map_path(local_home, "local_to_backend", settings)
+  mount_path <- as.character(settings$kubernetes_mount_path %||% "")[1]
+  if (!nzchar(mount_path)) mount_path <- backend_home
+
+  backoff <- suppressWarnings(as.integer(settings$kubernetes_backoff_limit %||% 0L))
+  if (!is.finite(backoff) || backoff < 0L) backoff <- 0L
+  ttl <- suppressWarnings(as.integer(
+    settings$kubernetes_ttl_seconds_after_finished %||% NA_integer_))
+  if (!is.finite(ttl) || ttl < 0L) ttl <- NA_integer_
+
+  namespace <- as.character(settings$kubernetes_namespace %||% "default")[1]
+  if (!nzchar(namespace)) namespace <- "default"
+
+  list(
+    kubectl = .backend_resolve_cmd(settings$kubernetes_kubectl, "kubectl"),
+    context = as.character(settings$kubernetes_context %||% "")[1],
+    namespace = namespace,
+    service_account = as.character(settings$kubernetes_service_account %||% "")[1],
+    image = as.character(settings$kubernetes_image %||% "")[1],
+    image_pull_policy = as.character(
+      settings$kubernetes_image_pull_policy %||% "IfNotPresent")[1],
+    pvc = as.character(settings$kubernetes_pvc %||% "")[1],
+    mount_path = mount_path,
+    backoff_limit = backoff,
+    ttl_seconds_after_finished = ttl)
+}
+
+#' @keywords internal
+.backend_kubectl_args <- function(settings, args) {
+  contract <- .backend_kubernetes_contract(settings)
+  prefix <- character(0)
+  if (nzchar(contract$context)) prefix <- c(prefix, "--context", contract$context)
+  if (nzchar(contract$namespace)) prefix <- c(prefix, "--namespace", contract$namespace)
+  c(prefix, args)
+}
+
+#' @keywords internal
+.backend_submit_kubernetes <- function(job_id, step_index, step, step_dir,
+                                       prepared, settings = .dshpc_settings()) {
+  contract <- .backend_kubernetes_contract(settings)
+  if (!nzchar(contract$kubectl)) stop("kubectl not found.", call. = FALSE)
+  if (!nzchar(contract$pvc)) {
+    stop("Kubernetes backend requires dshpc.kubernetes_pvc.", call. = FALSE)
+  }
+
+  image <- .backend_kubernetes_image(prepared, settings)
+  if (!nzchar(image)) {
+    stop("Kubernetes backend requires a runner container image or ",
+         "dshpc.kubernetes_image.", call. = FALSE)
+  }
+
+  script <- file.path(step_dir, "run_step.sh")
+  .backend_write_step_script(script,
+    .backend_kubernetes_script_prepared(prepared), settings)
+
+  job_name <- .backend_kubernetes_job_name(job_id, step_index)
+  manifest <- .backend_kubernetes_job_manifest(job_name, job_id, step_index,
+    step, prepared, image, contract, settings)
+  manifest_json <- jsonlite::toJSON(manifest, auto_unbox = TRUE,
+    null = "null", pretty = TRUE)
+
+  out <- tryCatch(system2(contract$kubectl,
+    .backend_kubectl_args(settings, c("apply", "-f", "-", "-o", "name")),
+    input = manifest_json, stdout = TRUE, stderr = TRUE),
+    error = function(e) stop("kubectl apply failed: ",
+      conditionMessage(e), call. = FALSE))
+  status <- attr(out, "status")
+  if (!is.null(status) && !identical(as.integer(status), 0L)) {
+    stop("kubectl apply failed: ", paste(out, collapse = "\n"), call. = FALSE)
+  }
+  .backend_parse_kubernetes_apply(out, job_name)
+}
+
+#' @keywords internal
+.backend_kubernetes_image <- function(prepared, settings = .dshpc_settings()) {
+  cfg <- prepared$runner_config %||% list()
+  container <- cfg$container %||% list()
+  image <- container$image %||% cfg$image %||% cfg$container_image %||%
+    settings$kubernetes_image %||% ""
+  as.character(image %||% "")[1]
+}
+
+#' @keywords internal
+.backend_kubernetes_script_prepared <- function(prepared) {
+  out <- prepared
+  cfg <- out$runner_config %||% list()
+  cfg$container <- NULL
+  cfg$image <- NULL
+  cfg$container_image <- NULL
+  cfg$container_command <- NULL
+  cfg$container_args_template <- NULL
+  out$runner_config <- cfg
+  out
+}
+
+#' @keywords internal
+.backend_kubernetes_job_manifest <- function(job_name, job_id, step_index,
+                                             step, prepared, image, contract,
+                                             settings = .dshpc_settings()) {
+  labels <- .backend_kubernetes_labels(job_id, step_index)
+  annotations <- stats::setNames(list(
+    job_id,
+    as.character(step_index),
+    as.character(step$runner %||% "")),
+    c("dshpc/job-id", "dshpc/step-index", "dshpc/runner"))
+  profile <- .scheduler_runner_profile(step$runner, settings)
+  gpu_request <- .backend_gpu_request(profile, settings)
+
+  container <- list(
+    name = "runner",
+    image = image,
+    imagePullPolicy = contract$image_pull_policy,
+    workingDir = prepared$step_dir,
+    command = as.list(c("/bin/sh", "-lc")),
+    args = list(paste(shQuote(prepared$script_path),
+      "> stdout.log 2> stderr.log")),
+    env = .backend_kubernetes_env(prepared$env_vars),
+    resources = .backend_kubernetes_resources(profile, gpu_request),
+    volumeMounts = list(list(name = "dshpc-home",
+      mountPath = contract$mount_path)))
+  if (!nzchar(container$imagePullPolicy)) container$imagePullPolicy <- NULL
+
+  pod_spec <- list(
+    restartPolicy = "Never",
+    containers = list(container),
+    volumes = list(list(name = "dshpc-home",
+      persistentVolumeClaim = list(claimName = contract$pvc))))
+  if (nzchar(contract$service_account)) {
+    pod_spec$serviceAccountName <- contract$service_account
+  }
+
+  spec <- list(
+    backoffLimit = contract$backoff_limit,
+    template = list(
+      metadata = list(labels = labels, annotations = annotations),
+      spec = pod_spec))
+  if (is.finite(contract$ttl_seconds_after_finished)) {
+    spec$ttlSecondsAfterFinished <- as.integer(
+      contract$ttl_seconds_after_finished)
+  }
+
+  .backend_drop_nulls(list(
+    apiVersion = "batch/v1",
+    kind = "Job",
+    metadata = list(name = job_name, labels = labels,
+      annotations = annotations),
+    spec = spec))
+}
+
+#' @keywords internal
+.backend_kubernetes_labels <- function(job_id, step_index) {
+  stats::setNames(list(
+    "dshpc",
+    "artifact-runner",
+    .backend_kubernetes_label_value(job_id),
+    as.character(step_index)),
+    c("app.kubernetes.io/name", "app.kubernetes.io/component",
+      "dshpc.job-id", "dshpc.step-index"))
+}
+
+#' @keywords internal
+.backend_kubernetes_env <- function(env) {
+  nms <- names(env)
+  keep <- !is.na(nms) & nzchar(nms) &
+    grepl("^[A-Za-z_][A-Za-z0-9_]*$", nms)
+  if (!any(keep)) return(list())
+  env <- env[keep]
+  env <- env[!duplicated(names(env), fromLast = TRUE)]
+  lapply(seq_along(env), function(i) {
+    value <- as.character(env[[i]])
+    if (is.na(value)) value <- ""
+    list(name = names(env)[i], value = value)
+  })
+}
+
+#' @keywords internal
+.backend_kubernetes_resources <- function(profile, gpu_request) {
+  cpu <- suppressWarnings(as.integer(profile$cpu_slots %||% 1L))
+  memory <- suppressWarnings(as.integer(profile$memory_mb %||% 1L))
+  if (!is.finite(cpu) || cpu < 1L) cpu <- 1L
+  if (!is.finite(memory) || memory < 1L) memory <- 1L
+  requests <- list(cpu = as.character(cpu), memory = paste0(memory, "Mi"))
+  limits <- list(memory = paste0(memory, "Mi"))
+
+  gpu_n <- suppressWarnings(as.integer(gpu_request$requested %||% 0L))
+  if (is.finite(gpu_n) && gpu_n > 0L) {
+    gpu <- stats::setNames(list(as.character(gpu_n)), "nvidia.com/gpu")
+    requests <- c(requests, gpu)
+    limits <- c(limits, gpu)
+  }
+  list(requests = requests, limits = limits)
+}
+
+#' @keywords internal
+.backend_kubernetes_job_name <- function(job_id, step_index) {
+  hash <- .backend_short_hash(paste(job_id, step_index, sep = ":"))
+  base <- paste0("dshpc-", .backend_dns_label(job_id),
+    "-s", sprintf("%03d", as.integer(step_index)))
+  max_base <- 63L - nchar(hash) - 1L
+  if (nchar(base) > max_base) base <- substr(base, 1L, max_base)
+  base <- sub("-+$", "", base)
+  paste(base, hash, sep = "-")
+}
+
+#' @keywords internal
+.backend_dns_label <- function(x) {
+  x <- tolower(as.character(x %||% "job")[1])
+  x <- gsub("[^a-z0-9-]+", "-", x)
+  x <- gsub("-+", "-", x)
+  x <- gsub("^-|-$", "", x)
+  if (!nzchar(x)) x <- "job"
+  x
+}
+
+#' @keywords internal
+.backend_kubernetes_label_value <- function(x) {
+  value <- .backend_dns_label(x)
+  if (nchar(value) > 63L) value <- substr(value, 1L, 63L)
+  sub("-+$", "", value)
+}
+
+#' @keywords internal
+.backend_short_hash <- function(x) {
+  bytes <- as.integer(charToRaw(paste(as.character(x), collapse = "|")))
+  h <- 5381
+  for (b in bytes) h <- (h * 33 + b) %% 16777216
+  sprintf("%06x", as.integer(h))
+}
+
+#' @keywords internal
+.backend_parse_kubernetes_apply <- function(lines, fallback) {
+  lines <- trimws(lines[nzchar(trimws(lines))])
+  if (length(lines) == 0) return(fallback)
+  token <- strsplit(lines[1], "[[:space:]]+")[[1]][1]
+  id <- sub("^.*/", "", token)
+  if (nzchar(id)) id else fallback
+}
+
+#' @keywords internal
+.backend_drop_nulls <- function(x) {
+  if (!is.list(x) || inherits(x, "data.frame")) return(x)
+  x <- lapply(x, .backend_drop_nulls)
+  x[!vapply(x, is.null, logical(1))]
+}
+
 #' @keywords internal
 .backend_step_status <- function(backend, external_id, step_dir,
                                  settings = .dshpc_settings()) {
   backend <- tolower(as.character(backend %||% "")[1])
   if (identical(backend, "slurm"))
     return(.backend_status_slurm(external_id, step_dir, settings))
+  if (identical(backend, "kubernetes"))
+    return(.backend_status_kubernetes(external_id, step_dir, settings))
   if (identical(backend, "external"))
     return(.backend_status_external(external_id, step_dir, settings))
   list(state = "failed", exit_code = 1L,
@@ -707,6 +968,92 @@
 }
 
 #' @keywords internal
+.backend_status_kubernetes <- function(external_id, step_dir,
+                                       settings = .dshpc_settings()) {
+  contract <- .backend_kubernetes_contract(settings)
+  if (!nzchar(contract$kubectl)) {
+    local <- .backend_status_from_exit_file(step_dir, "LOCAL_EXIT_FILE")
+    if (!is.null(local)) return(local)
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = "kubectl_not_found"))
+  }
+
+  out <- tryCatch(suppressWarnings(system2(contract$kubectl,
+    .backend_kubectl_args(settings, c("get", "job", external_id, "-o", "json")),
+    stdout = TRUE, stderr = TRUE)), error = function(e)
+      structure(paste("STATUS_ERROR", conditionMessage(e)), status = 127L))
+  code <- attr(out, "status") %||% 0L
+  if (!identical(as.integer(code), 0L)) {
+    local <- .backend_status_from_exit_file(step_dir, "LOCAL_EXIT_FILE")
+    if (!is.null(local)) return(local)
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = paste(out, collapse = "\n")))
+  }
+
+  parsed <- tryCatch(jsonlite::fromJSON(paste(out, collapse = "\n"),
+    simplifyVector = FALSE), error = function(e) NULL)
+  if (!is.list(parsed)) {
+    local <- .backend_status_from_exit_file(step_dir, "LOCAL_EXIT_FILE")
+    if (!is.null(local)) return(local)
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = "kubectl_json_parse_failed"))
+  }
+
+  conditions <- parsed$status$conditions %||% list()
+  for (condition in conditions) {
+    ctype <- toupper(as.character(condition$type %||% "")[1])
+    cstatus <- toupper(as.character(condition$status %||% "")[1])
+    if (!identical(cstatus, "TRUE")) next
+    if (identical(ctype, "COMPLETE")) {
+      local <- .backend_status_from_exit_file(step_dir, ctype)
+      if (!is.null(local)) return(local)
+      return(list(state = "succeeded", external_state = ctype, exit_code = 0L))
+    }
+    if (identical(ctype, "FAILED")) {
+      local <- .backend_status_from_exit_file(step_dir, ctype)
+      if (!is.null(local)) return(local)
+      return(list(state = "failed", external_state = ctype, exit_code = 1L))
+    }
+  }
+
+  local <- .backend_status_from_exit_file(step_dir, "LOCAL_EXIT_FILE")
+  if (!is.null(local)) return(local)
+
+  status <- parsed$status %||% list()
+  succeeded <- .backend_first_integer(status$succeeded %||% NA_integer_)
+  failed <- .backend_first_integer(status$failed %||% NA_integer_)
+  active <- .backend_first_integer(status$active %||% NA_integer_)
+  if (is.finite(succeeded) && succeeded > 0L) {
+    return(list(state = "succeeded", external_state = "SUCCEEDED",
+      exit_code = 0L))
+  }
+  if (is.finite(failed) && failed > 0L &&
+      (!is.finite(active) || active <= 0L)) {
+    return(list(state = "failed", external_state = "FAILED", exit_code = 1L))
+  }
+  external_state <- if (is.finite(active) && active > 0L) "ACTIVE" else "PENDING"
+  list(state = "running", external_state = external_state,
+    exit_code = NA_integer_)
+}
+
+#' @keywords internal
+.backend_status_from_exit_file <- function(step_dir,
+                                           external_state = "LOCAL_EXIT_FILE") {
+  exit_file <- file.path(step_dir, "exit_code")
+  if (!file.exists(exit_file)) return(NULL)
+  line <- tryCatch(readLines(exit_file, n = 1, warn = FALSE),
+    error = function(e) NA_character_)
+  code <- suppressWarnings(as.integer(line[1]))
+  if (is.na(code)) return(NULL)
+  if (identical(as.integer(code), 0L)) {
+    return(list(state = "succeeded", external_state = external_state,
+      exit_code = 0L))
+  }
+  list(state = "failed", external_state = external_state,
+    exit_code = as.integer(code))
+}
+
+#' @keywords internal
 .backend_status_external <- function(external_id, step_dir,
                                      settings = .dshpc_settings()) {
   status <- .backend_command_parts(settings$external_status_cmd)
@@ -762,6 +1109,16 @@
       tryCatch(system2(cancel$command, c(cancel$args, external_id),
         stdout = FALSE, stderr = FALSE,
         env = .backend_env(c(DSHPC_EXTERNAL_ID = external_id))), error = function(e) NULL)
+    }
+    return(invisible(TRUE))
+  }
+  if (identical(backend, "kubernetes")) {
+    kubectl <- .backend_kubernetes_contract(settings)$kubectl
+    if (nzchar(kubectl)) {
+      tryCatch(system2(kubectl, .backend_kubectl_args(settings,
+        c("delete", "job", external_id, "--ignore-not-found=true",
+          "--wait=false")), stdout = FALSE, stderr = FALSE),
+        error = function(e) NULL)
     }
   }
   invisible(TRUE)
