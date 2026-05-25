@@ -57,8 +57,9 @@ hpcSubmitDS <- function(spec_encoded) {
 
   # Deduplication by spec_hash
   spec_for_hash <- spec[setdiff(names(spec), c("job_id", ".owner", "name"))]
+  spec_for_hash <- .canonicalise_spec(spec_for_hash)
   spec_hash <- digest::digest(jsonlite::toJSON(spec_for_hash, auto_unbox = TRUE),
-                               algo = "sha256", serialize = FALSE)
+                              algo = "sha256", serialize = FALSE)
   existing_dup <- DBI::dbGetQuery(db,
     "SELECT job_id, state FROM jobs
      WHERE spec_hash = ?
