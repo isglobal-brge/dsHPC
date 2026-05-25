@@ -9,17 +9,19 @@
 
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
+    name <- spec$name %||% NA_character_
     label <- spec$label %||% NA_character_
     tags <- if (!is.null(spec$tags))
       paste(spec$tags, collapse = ",") else NA_character_
-    visibility <- "global"
+    visibility <- spec$visibility %||% "global"
     DBI::dbExecute(db,
       "INSERT INTO jobs (job_id, owner_id, state, step_index, total_steps,
-                         resource_class, label, tags, visibility,
+                         resource_class, name, label, tags, visibility,
                          spec_hash, submitted_at, spec_json)
-       VALUES (?, ?, 'PENDING', 0, ?, ?, ?, ?, ?, ?, ?, ?)",
+       VALUES (?, ?, 'PENDING', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       params = list(job_id, owner_id, total_steps,
                      spec$resource_class %||% "default",
+                     name,
                      label, tags, visibility,
                      spec_hash %||% NA_character_,
                      now, spec_json))
@@ -81,7 +83,8 @@
 }
 
 #' @keywords internal
-.store_list_jobs <- function(db, states = NULL, label = NULL) {
+.store_list_jobs <- function(db, states = NULL, label = NULL,
+                             owner_id = NULL, scope = NULL) {
   where_parts <- character(0)
   params <- list()
 
@@ -94,7 +97,23 @@
     where_parts <- c(where_parts, "label = ?")
     params <- c(params, list(label))
   }
-  sql <- "SELECT job_id, owner_id, state, submitted_at, step_index, total_steps, label, visibility FROM jobs"
+  if (!is.null(scope)) {
+    scope <- as.character(scope)[1]
+    if (identical(scope, "mine")) {
+      where_parts <- c(where_parts, "owner_id = ?")
+      params <- c(params, list(owner_id %||% ""))
+    } else if (identical(scope, "global")) {
+      where_parts <- c(where_parts, "visibility = 'global'")
+    } else if (identical(scope, "mine+global")) {
+      where_parts <- c(where_parts, "(owner_id = ? OR visibility = 'global')")
+      params <- c(params, list(owner_id %||% ""))
+    }
+  }
+  sql <- paste(
+    "SELECT job_id, owner_id, state, submitted_at, accepted_at, started_at,",
+    "finished_at, step_index, total_steps, resource_class, priority, name, label,",
+    "visibility, error_class, error_message, retry_count",
+    "FROM jobs")
   if (length(where_parts) > 0)
     sql <- paste(sql, "WHERE", paste(where_parts, collapse = " AND "))
   sql <- paste(sql, "ORDER BY submitted_at DESC")

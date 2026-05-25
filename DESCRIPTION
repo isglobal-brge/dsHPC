@@ -41,6 +41,7 @@ AggregateMethods:
     hpcListDS,
     hpcOutputsDS,
     hpcLogsDS,
+    hpcStudioDS,
     hpcCapabilitiesDS,
     hpcSchedulerStatusDS,
     hpcAdminListDS,

@@ -36,12 +36,16 @@
       error_message   TEXT,
       retry_count     INTEGER NOT NULL DEFAULT 0,
       worker_pid      INTEGER,
+      name            TEXT,
       label           TEXT,
       tags            TEXT,
       visibility      TEXT NOT NULL DEFAULT 'global',
       spec_json       TEXT NOT NULL,
       spec_hash       TEXT
     )")
+
+  .db_ensure_columns(db, "jobs", list(
+    name = "TEXT"))
 
   DBI::dbExecute(db, "
     CREATE TABLE IF NOT EXISTS steps (
