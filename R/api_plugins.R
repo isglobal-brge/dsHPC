@@ -28,7 +28,8 @@ query_jobs_by_tag <- function(tag_pattern, states = NULL) {
 
   DBI::dbGetQuery(db, paste(
     "SELECT job_id, state, label, tags, error_message, spec_hash,",
-    "submitted_at, started_at, finished_at",
+    "submitted_at, started_at, finished_at, step_index, total_steps,",
+    "retry_count",
     "FROM jobs WHERE", where,
     "ORDER BY submitted_at DESC"),
     params = params)

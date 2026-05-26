@@ -294,6 +294,9 @@ hpcStatusDS <- function(job_id_or_symbol) {
     label = job$label,
     submitted_at = job$submitted_at, started_at = job$started_at,
     finished_at = job$finished_at, error = safe_error,
+    retrying = identical(job$state, "PENDING") &&
+      as.integer(job$retry_count %||% 0L) > 0L &&
+      as.integer(job$step_index %||% 0L) > 0L,
     retries = as.integer(job$retry_count))
 }
 
