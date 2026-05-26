@@ -47,10 +47,17 @@
   rscript <- file.path(R.home("bin"), "Rscript")
   setsid <- Sys.which("setsid")
   if (!nzchar(setsid)) setsid <- NULL
+  r_libs <- paste(.libPaths(), collapse = .Platform$path.sep)
+  worker_env <- c(
+    DSHPC_WORKER = "1",
+    R_LIBS = r_libs,
+    MKL_SERVICE_FORCE_INTEL = "0",
+    MKL_THREADING_LAYER = "GNU"
+  )
   if (!is.null(setsid) && file.exists("/usr/bin/env")) {
     cmd <- "/usr/bin/env"
     args <- c("MKL_SERVICE_FORCE_INTEL=0", "MKL_THREADING_LAYER=GNU",
-              "DSHPC_WORKER=1",
+              "DSHPC_WORKER=1", paste0("R_LIBS=", r_libs),
               setsid, "-f", rscript, worker_script, home)
   } else {
     cmd <- rscript
@@ -59,10 +66,7 @@
   proc <- processx::process$new(
     command = cmd, args = args,
     stdout = log_file, stderr = log_file,
-    env = c("current",
-            DSHPC_WORKER = "1",
-            MKL_SERVICE_FORCE_INTEL = "0",
-            MKL_THREADING_LAYER = "GNU"),
+    env = c("current", worker_env),
     cleanup = FALSE, cleanup_tree = FALSE)
   writeLines(as.character(proc$get_pid()), pid_file)
   .dshpc_env$.worker <- proc
