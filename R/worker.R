@@ -385,7 +385,11 @@
           decision <- .scheduler_can_start_job(db, jid, spec, settings)
           if (isTRUE(decision$ok)) {
             .scheduler_acquire_leases(db, jid, decision)
-            .store_update_job(db, jid, state = "RUNNING", step_index = 1L,
+            start_idx <- as.integer(job$step_index %||% 0L)
+            if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
+              start_idx <- 1L
+            .store_update_job(db, jid, state = "RUNNING",
+              step_index = start_idx, error_message = NA_character_,
               started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
                                    tz = "UTC"))
             .db_log_event(db, jid, "started",
@@ -417,7 +421,11 @@
     # an open SQLite write transaction; otherwise a long Python/R job can stall
     # the worker heartbeat and block other scheduler activity.
     tryCatch({
-      .executor_run_step(db, jid, 1L, spec)
+      job <- .store_get_job(db, jid)
+      start_idx <- as.integer(job$step_index %||% 0L)
+      if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
+        start_idx <- 1L
+      .executor_run_step(db, jid, start_idx, spec)
     }, error = function(e) {
       tryCatch(.scheduler_release_leases(db, jid), error = function(e2) NULL)
       .store_update_job(db, jid, state = "FAILED",
@@ -530,7 +538,10 @@
 
     if (retries < settings$max_retries) {
       .store_update_job(db, jid, state = "PENDING",
-        retry_count = retries + 1L, worker_pid = NA_integer_)
+        step_index = sidx, retry_count = retries + 1L,
+        error_message = paste("Retry pending after step", sidx,
+          "was interrupted"),
+        worker_pid = NA_integer_)
       .db_log_event(db, jid, "requeued",
         list(step_index = sidx, reason = reason,
              retry_count = retries + 1L))
@@ -591,7 +602,13 @@
       .scheduler_release_leases(db, jid)
       if (retries < settings$max_retries) {
         .store_update_job(db, jid, state = "PENDING",
-          retry_count = retries + 1L, worker_pid = NA_integer_)
+          step_index = sidx, retry_count = retries + 1L,
+          error_message = paste("Retry pending after step", sidx,
+            "failed (exit", exit_code, ")"),
+          worker_pid = NA_integer_)
+        .db_log_event(db, jid, "requeued",
+          list(step_index = sidx, exit_code = as.integer(exit_code),
+               retry_count = retries + 1L))
       } else {
         .store_update_job(db, jid, state = "FAILED",
           error_message = paste("Step", sidx, "failed (exit", exit_code, ")"),
