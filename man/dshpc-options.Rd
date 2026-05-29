@@ -18,6 +18,9 @@ also supported for backend commands where noted below.
 - `dshpc.max_queued_jobs_global`: global pending/running queue quota.
 - `dshpc.max_steps_per_job`: maximum steps accepted in one job spec.
 - `dshpc.max_retries`: retry count for failed artifact steps.
+- `dshpc.step_cache`: enable content-addressed reuse of completed artifact
+  steps across jobs. Defaults to `TRUE`; set a step's `cache = FALSE` to opt
+  out for a particular runner invocation.
 }
 
 \section{Embedded resource scheduling}{

@@ -23,6 +23,13 @@ The default scheduler is adaptive: it reads cgroup/host CPU and memory, detects
 local GPU visibility where available, leases resources while jobs run, and puts
 heavy runners into cooldown after OOM-like exits.
 
+Completed artifact steps are also content-addressed. For each deterministic
+runner step, dsHPC hashes the resolved input contents, the canonical step
+definition and the registered runner definition. If another finished job already
+contains an identical step, dsHPC copies the cached step output into the current
+job and records a `step_cached` event instead of rerunning the runner. Whole-job
+deduplication by `spec_hash` remains in place for fully identical submissions.
+
 Jobs may be submitted as classic ordered steps or as a declarative DAG pipeline.
 The DAG form uses named nodes and explicit input dependencies; dsHPC validates
 the graph, rejects cycles, topologically compiles it to the durable step model,

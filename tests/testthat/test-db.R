@@ -24,6 +24,13 @@ test_that("SQLite database is created with correct schema", {
   cols <- DBI::dbListFields(db, "steps")
   expect_true("output_ref" %in% cols)
   expect_true("plane" %in% cols)
+  expect_true("step_hash" %in% cols)
+  expect_true("cache_hit" %in% cols)
+  expect_true("cache_source_job_id" %in% cols)
+  expect_true("cache_source_step_index" %in% cols)
+
+  step_indexes <- DBI::dbGetQuery(db, "PRAGMA index_list(steps)")
+  expect_true("idx_steps_step_hash" %in% step_indexes$name)
 })
 
 test_that("WAL mode is enabled", {
