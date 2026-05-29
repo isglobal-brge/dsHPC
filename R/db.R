@@ -65,6 +65,10 @@
       external_backend TEXT,
       external_id  TEXT,
       external_status TEXT,
+      step_hash    TEXT,
+      cache_hit    INTEGER NOT NULL DEFAULT 0,
+      cache_source_job_id TEXT,
+      cache_source_step_index INTEGER,
       PRIMARY KEY (job_id, step_index),
       FOREIGN KEY (job_id) REFERENCES jobs(job_id)
     )")
@@ -72,7 +76,11 @@
   .db_ensure_columns(db, "steps", list(
     external_backend = "TEXT",
     external_id = "TEXT",
-    external_status = "TEXT"))
+    external_status = "TEXT",
+    step_hash = "TEXT",
+    cache_hit = "INTEGER NOT NULL DEFAULT 0",
+    cache_source_job_id = "TEXT",
+    cache_source_step_index = "INTEGER"))
 
   DBI::dbExecute(db, "
     CREATE TABLE IF NOT EXISTS outputs (
@@ -149,6 +157,7 @@
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_outputs_job ON outputs(job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_steps_external ON steps(external_backend, external_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_steps_step_hash ON steps(step_hash)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_runner_cooldowns_until ON runner_cooldowns(until)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_resource_leases_resource ON resource_leases(resource)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_cell ON worker_nodes(cell_id)")

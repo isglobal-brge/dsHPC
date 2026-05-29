@@ -17,7 +17,19 @@
   step_dir <- .ensure_step_dir(job_id, step_index)
   input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir)
 
+  step_hash <- NA_character_
+  if (.step_cache_enabled(step)) {
+    step_hash <- .step_cache_hash(step, input_dir)
+    cached <- .step_cache_find(db, step_hash, current_job_id = job_id)
+    if (!is.null(cached) &&
+        .step_cache_apply(db, job_id, step_index, step_hash, cached, step_dir)) {
+      .executor_advance(db, job_id)
+      return(invisible(TRUE))
+    }
+  }
+
   .store_update_step(db, job_id, step_index, state = "running",
+    step_hash = step_hash,
     started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
 
   if (identical(step$plane, "session")) {
