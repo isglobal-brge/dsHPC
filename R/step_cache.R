@@ -74,12 +74,34 @@
     if (dir.exists(entries[[i]])) {
       return(paste("D", rel[[i]], sep = "\t"))
     }
-    size <- file.info(entries[[i]])$size
-    file_hash <- digest::digest(entries[[i]], algo = "sha256", file = TRUE)
+    if (identical(rel[[i]], "inputs.json")) {
+      size <- "canonical"
+      file_hash <- .step_cache_hash_inputs_manifest(entries[[i]])
+    } else {
+      size <- file.info(entries[[i]])$size
+      file_hash <- digest::digest(entries[[i]], algo = "sha256", file = TRUE)
+    }
     paste("F", rel[[i]], size %||% NA_integer_, file_hash, sep = "\t")
   }, character(1))
   digest::digest(paste(parts, collapse = "\n"), algo = "sha256",
     serialize = FALSE)
+}
+
+#' @keywords internal
+.step_cache_hash_inputs_manifest <- function(path) {
+  manifest <- tryCatch(jsonlite::read_json(path, simplifyVector = FALSE),
+    error = function(e) NULL)
+  if (is.null(manifest) || !is.list(manifest)) {
+    return(digest::digest(path, algo = "sha256", file = TRUE))
+  }
+
+  stable <- lapply(manifest, function(item) {
+    if (!is.list(item)) return(item)
+    item[intersect(c("step", "ref", "output"), names(item))]
+  })
+  stable <- .canonicalise_spec(stable)
+  digest::digest(jsonlite::toJSON(stable, auto_unbox = TRUE, null = "null"),
+    algo = "sha256", serialize = FALSE)
 }
 
 #' @keywords internal

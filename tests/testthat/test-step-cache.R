@@ -93,6 +93,45 @@ test_that("step cache detects relative names, empty dirs and symlinked input con
   }
 })
 
+test_that("step cache ignores volatile staged input paths", {
+  root_a <- tempfile("cache_staged_a_")
+  root_b <- tempfile("cache_staged_b_")
+  dir.create(file.path(root_a, "input", "left"), recursive = TRUE)
+  dir.create(file.path(root_b, "input", "left"), recursive = TRUE)
+  on.exit(unlink(c(root_a, root_b), recursive = TRUE), add = TRUE)
+
+  writeLines("same-content", file.path(root_a, "input", "left", "x.txt"))
+  writeLines("same-content", file.path(root_b, "input", "left", "x.txt"))
+  jsonlite::write_json(list(
+    left = list(step = 1L, ref = "features",
+                source = "/dshpc/artifacts/job_a/step_001/output",
+                path = "/dshpc/artifacts/job_b/step_003/input/left")
+  ), file.path(root_a, "input", "inputs.json"),
+  auto_unbox = TRUE, pretty = TRUE)
+  jsonlite::write_json(list(
+    left = list(path = "/dshpc/artifacts/job_z/step_004/input/left",
+                source = "/dshpc/artifacts/job_q/step_001/output",
+                ref = "features", step = 1L)
+  ), file.path(root_b, "input", "inputs.json"),
+  auto_unbox = TRUE, pretty = TRUE)
+
+  expect_equal(
+    dsHPC:::.step_cache_hash_path(file.path(root_a, "input")),
+    dsHPC:::.step_cache_hash_path(file.path(root_b, "input"))
+  )
+
+  jsonlite::write_json(list(
+    left = list(step = 2L, ref = "features",
+                source = "/dshpc/artifacts/job_q/step_002/output",
+                path = "/dshpc/artifacts/job_z/step_004/input/left")
+  ), file.path(root_b, "input", "inputs.json"),
+  auto_unbox = TRUE, pretty = TRUE)
+  expect_false(identical(
+    dsHPC:::.step_cache_hash_path(file.path(root_a, "input")),
+    dsHPC:::.step_cache_hash_path(file.path(root_b, "input"))
+  ))
+})
+
 test_that("step cache includes runner registry definition in the hash", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
