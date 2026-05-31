@@ -26,10 +26,21 @@
       .executor_advance(db, job_id)
       return(invisible(TRUE))
     }
+    inflight <- .step_cache_inflight_find(db, step_hash,
+      current_job_id = job_id)
+    if (!is.null(inflight)) {
+      .step_cache_wait_for_inflight(db, job_id, step_index, step_hash,
+        inflight)
+      return(invisible(TRUE))
+    }
   }
 
   .store_update_step(db, job_id, step_index, state = "running",
     step_hash = step_hash,
+    cache_hit = 0L,
+    cache_source_job_id = NA_character_,
+    cache_source_step_index = NA_integer_,
+    error_message = NA_character_,
     started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
 
   if (identical(step$plane, "session")) {

@@ -366,8 +366,21 @@
 .worker_dispatch <- function(db) {
   settings <- .dshpc_settings()
   pending <- DBI::dbGetQuery(db,
-    "SELECT job_id FROM jobs WHERE state = 'PENDING'
-     ORDER BY priority DESC, submitted_at LIMIT ?",
+    "SELECT j.job_id
+     FROM jobs j
+     LEFT JOIN steps s
+       ON s.job_id = j.job_id
+      AND s.step_index =
+        CASE
+          WHEN j.step_index IS NULL OR j.step_index < 1 THEN 1
+          ELSE j.step_index
+        END
+     WHERE j.state = 'PENDING'
+     ORDER BY
+       CASE WHEN s.state = 'waiting_cache' THEN 1 ELSE 0 END,
+       j.priority DESC,
+       j.submitted_at
+     LIMIT ?",
     params = list(settings$scheduler_scan_limit))
   if (nrow(pending) == 0) return(invisible(FALSE))
 
@@ -382,25 +395,27 @@
       if (!is.null(job) && identical(job$state, "PENDING")) {
         spec <- .store_get_spec(db, jid)
         if (!is.null(spec)) {
-          decision <- .scheduler_can_start_job(db, jid, spec, settings)
-          if (isTRUE(decision$ok)) {
-            .scheduler_acquire_leases(db, jid, decision)
-            start_idx <- as.integer(job$step_index %||% 0L)
-            if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
-              start_idx <- 1L
-            .store_update_job(db, jid, state = "RUNNING",
-              step_index = start_idx, error_message = NA_character_,
-              started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
-                                   tz = "UTC"))
-            .db_log_event(db, jid, "started",
-              list(scheduler = settings$scheduler,
-                   memory_mb = decision$plan$memory_mb %||% 0L,
-                   cpu_slots = decision$plan$cpu_slots %||% 0L,
-                   gpus = decision$plan$gpus %||% 0L,
-                   optional_gpus = decision$plan$optional_gpus %||% 0L,
-                   assigned_gpu_devices = decision$gpu_devices %||% character(0),
-                   gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
-            claimed <- TRUE
+          start_idx <- as.integer(job$step_index %||% 0L)
+          if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
+            start_idx <- 1L
+          if (!.step_cache_waiting_active(db, jid, start_idx)) {
+            decision <- .scheduler_can_start_job(db, jid, spec, settings)
+            if (isTRUE(decision$ok)) {
+              .scheduler_acquire_leases(db, jid, decision)
+              .store_update_job(db, jid, state = "RUNNING",
+                step_index = start_idx, error_message = NA_character_,
+                started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
+                                     tz = "UTC"))
+              .db_log_event(db, jid, "started",
+                list(scheduler = settings$scheduler,
+                     memory_mb = decision$plan$memory_mb %||% 0L,
+                     cpu_slots = decision$plan$cpu_slots %||% 0L,
+                     gpus = decision$plan$gpus %||% 0L,
+                     optional_gpus = decision$plan$optional_gpus %||% 0L,
+                     assigned_gpu_devices = decision$gpu_devices %||% character(0),
+                     gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
+              claimed <- TRUE
+            }
           }
         }
       }
