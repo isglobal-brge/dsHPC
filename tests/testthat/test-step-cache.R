@@ -227,7 +227,7 @@ test_that("completed artifact steps are reused across different jobs", {
   expect_true("step_cached" %in% events$event)
 })
 
-test_that("step cache does not reuse running jobs or missing cached outputs", {
+test_that("step cache does not reuse running steps or missing cached outputs", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home, dshpc.step_cache = TRUE))
   on.exit(cleanup_test_home(home))
@@ -244,7 +244,7 @@ test_that("step cache does not reuse running jobs or missing cached outputs", {
   dsHPC:::.store_create_job(db, "job_running_source", "user_a", spec, 1L)
   running_dir <- dsHPC:::.ensure_step_dir("job_running_source", 1L)
   writeLines("running-output", file.path(running_dir, "output", "result.txt"))
-  dsHPC:::.store_update_step(db, "job_running_source", 1L, state = "done",
+  dsHPC:::.store_update_step(db, "job_running_source", 1L, state = "running",
     output_ref = file.path("artifacts", "job_running_source", "step_001",
                            "output"),
     step_hash = step_hash)
@@ -263,6 +263,135 @@ test_that("step cache does not reuse running jobs or missing cached outputs", {
     finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
 
   expect_null(dsHPC:::.step_cache_find(db, step_hash))
+})
+
+test_that("step cache reuses completed steps from still-running parent jobs", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home, dshpc.step_cache = TRUE))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+
+  step <- list(type = "run", plane = "artifact", runner = "dummy",
+               config = list(alpha = 1))
+  source_spec <- list(steps = list(step, step), label = "dsHPC_test",
+                      resource_class = "default")
+  target_spec <- list(steps = list(step), label = "dsHPC_test",
+                      resource_class = "default")
+
+  dsHPC:::.store_create_job(db, "job_source_running", "user_a",
+    source_spec, 2L)
+  source_step_dir <- dsHPC:::.ensure_step_dir("job_source_running", 1L)
+  source_out <- file.path(source_step_dir, "output", "result.txt")
+  writeLines("completed-prefix-output", source_out)
+  source_ref <- file.path("artifacts", "job_source_running", "step_001",
+                          "output")
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  dsHPC:::.db_register_output(db, "job_source_running", 1L, "result.txt",
+    "artifact_file", source_out, size_bytes = file.info(source_out)$size,
+    safe_for_client = FALSE)
+  dsHPC:::.store_update_step(db, "job_source_running", 1L, state = "done",
+    output_ref = source_ref, step_hash = step_hash,
+    finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+  dsHPC:::.store_update_job(db, "job_source_running", state = "RUNNING",
+    step_index = 2L)
+
+  dsHPC:::.store_create_job(db, "job_target_from_running", "user_b",
+    target_spec, 1L)
+  dsHPC:::.store_update_job(db, "job_target_from_running", state = "RUNNING",
+    step_index = 1L)
+
+  dsHPC:::.executor_run_step(db, "job_target_from_running", 1L, target_spec)
+
+  target_job <- dsHPC:::.store_get_job(db, "job_target_from_running")
+  expect_equal(target_job$state, "FINISHED")
+
+  target_step <- DBI::dbGetQuery(db,
+    "SELECT state, cache_hit, cache_source_job_id
+     FROM steps WHERE job_id = 'job_target_from_running' AND step_index = 1")
+  expect_equal(target_step$state[1], "done")
+  expect_equal(as.integer(target_step$cache_hit[1]), 1L)
+  expect_equal(target_step$cache_source_job_id[1], "job_source_running")
+})
+
+test_that("step cache coalesces equivalent in-flight steps", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home, dshpc.step_cache = TRUE))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+
+  step <- list(type = "run", plane = "artifact", runner = "dummy",
+               config = list(alpha = 1))
+  spec <- list(steps = list(step), label = "dsHPC_test",
+               resource_class = "default")
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+
+  dsHPC:::.store_create_job(db, "job_inflight_source", "user_a", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_inflight_source", state = "RUNNING",
+    step_index = 1L)
+  dsHPC:::.store_update_step(db, "job_inflight_source", 1L,
+    state = "running", step_hash = step_hash,
+    started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+
+  dsHPC:::.store_create_job(db, "job_inflight_target", "user_b", spec, 1L)
+  dsHPC:::.scheduler_acquire_leases(db, "job_inflight_target",
+    list(plan = list(memory_mb = 1L, cpu_slots = 1L)))
+  dsHPC:::.store_update_job(db, "job_inflight_target", state = "RUNNING",
+    step_index = 1L)
+
+  dsHPC:::.executor_run_step(db, "job_inflight_target", 1L, spec)
+
+  target_job <- dsHPC:::.store_get_job(db, "job_inflight_target")
+  expect_equal(target_job$state, "PENDING")
+  expect_true(is.na(target_job$worker_pid))
+  expect_equal(nrow(DBI::dbGetQuery(db,
+    "SELECT * FROM resource_leases WHERE job_id = 'job_inflight_target'")), 0L)
+
+  target_step <- DBI::dbGetQuery(db,
+    "SELECT state, step_hash, cache_source_job_id, cache_source_step_index
+     FROM steps WHERE job_id = 'job_inflight_target' AND step_index = 1")
+  expect_equal(target_step$state[1], "waiting_cache")
+  expect_equal(target_step$step_hash[1], step_hash)
+  expect_equal(target_step$cache_source_job_id[1], "job_inflight_source")
+  expect_equal(as.integer(target_step$cache_source_step_index[1]), 1L)
+  expect_true(dsHPC:::.step_cache_waiting_active(db,
+    "job_inflight_target", 1L))
+
+  events <- DBI::dbGetQuery(db,
+    "SELECT event FROM events WHERE job_id = 'job_inflight_target'")
+  expect_true("step_cache_wait" %in% events$event)
+
+  dsHPC:::.worker_dispatch(db)
+  expect_equal(dsHPC:::.store_get_job(db, "job_inflight_target")$state,
+    "PENDING")
+
+  source_step_dir <- dsHPC:::.ensure_step_dir("job_inflight_source", 1L)
+  source_out <- file.path(source_step_dir, "output", "result.txt")
+  writeLines("single-flight-output", source_out)
+  source_ref <- file.path("artifacts", "job_inflight_source", "step_001",
+                          "output")
+  dsHPC:::.db_register_output(db, "job_inflight_source", 1L, "result.txt",
+    "artifact_file", source_out, size_bytes = file.info(source_out)$size,
+    safe_for_client = FALSE)
+  dsHPC:::.store_update_step(db, "job_inflight_source", 1L,
+    state = "done", output_ref = source_ref,
+    finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+  dsHPC:::.store_update_job(db, "job_inflight_target", state = "RUNNING",
+    step_index = 1L, error_message = NA_character_)
+
+  dsHPC:::.executor_run_step(db, "job_inflight_target", 1L, spec)
+
+  expect_equal(dsHPC:::.store_get_job(db, "job_inflight_target")$state,
+    "FINISHED")
+  target_step_done <- DBI::dbGetQuery(db,
+    "SELECT state, cache_hit, cache_source_job_id
+     FROM steps WHERE job_id = 'job_inflight_target' AND step_index = 1")
+  expect_equal(target_step_done$state[1], "done")
+  expect_equal(as.integer(target_step_done$cache_hit[1]), 1L)
+  expect_equal(target_step_done$cache_source_job_id[1], "job_inflight_source")
 })
 
 test_that("step cache reuses shared multi-step prefixes by content", {

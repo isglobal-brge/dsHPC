@@ -114,8 +114,8 @@
      WHERE s.step_hash = ?
        AND s.state = 'done'
        AND s.output_ref IS NOT NULL
-       AND j.state IN ('FINISHED', 'PUBLISHED')
-     ORDER BY j.finished_at DESC, s.job_id DESC
+       AND j.state IN ('RUNNING', 'FINISHED', 'PUBLISHED')
+     ORDER BY COALESCE(s.finished_at, j.finished_at) DESC, s.job_id DESC
      LIMIT 20",
     params = list(step_hash))
   if (nrow(rows) == 0L) return(NULL)
@@ -131,6 +131,78 @@
     if (file.exists(path)) return(as.list(rows[i, ]))
   }
   NULL
+}
+
+#' @keywords internal
+.step_cache_inflight_find <- function(db, step_hash, current_job_id = NULL) {
+  if (is.null(step_hash) || is.na(step_hash) || !nzchar(step_hash)) return(NULL)
+  rows <- DBI::dbGetQuery(db,
+    "SELECT s.job_id, s.step_index, s.started_at
+     FROM steps s
+     JOIN jobs j ON j.job_id = s.job_id
+     WHERE s.step_hash = ?
+       AND s.state = 'running'
+       AND j.state = 'RUNNING'
+     ORDER BY s.started_at, s.job_id
+     LIMIT 20",
+    params = list(step_hash))
+  if (nrow(rows) == 0L) return(NULL)
+  for (i in seq_len(nrow(rows))) {
+    if (!is.null(current_job_id) && identical(rows$job_id[i], current_job_id)) {
+      next
+    }
+    return(as.list(rows[i, ]))
+  }
+  NULL
+}
+
+#' @keywords internal
+.step_cache_wait_for_inflight <- function(db, job_id, step_index, step_hash,
+                                          inflight_step) {
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  .store_update_step(db, job_id, step_index,
+    state = "waiting_cache",
+    step_hash = step_hash,
+    cache_source_job_id = inflight_step$job_id,
+    cache_source_step_index = as.integer(inflight_step$step_index),
+    started_at = now,
+    error_message = NA_character_)
+  .scheduler_release_leases(db, job_id)
+  .store_update_job(db, job_id, state = "PENDING",
+    worker_pid = NA_integer_,
+    error_message = paste("Waiting for equivalent step",
+      inflight_step$job_id, inflight_step$step_index))
+  .db_log_event(db, job_id, "step_cache_wait",
+    list(step_index = as.integer(step_index),
+         source_job_id = inflight_step$job_id,
+         source_step_index = as.integer(inflight_step$step_index)))
+  TRUE
+}
+
+#' @keywords internal
+.step_cache_waiting_active <- function(db, job_id, step_index) {
+  row <- DBI::dbGetQuery(db,
+    "SELECT state, step_hash, cache_source_job_id, cache_source_step_index
+     FROM steps WHERE job_id = ? AND step_index = ?",
+    params = list(job_id, as.integer(step_index)))
+  if (nrow(row) == 0L || !identical(row$state[1], "waiting_cache")) {
+    return(FALSE)
+  }
+  source_job <- row$cache_source_job_id[1]
+  source_step <- as.integer(row$cache_source_step_index[1])
+  if (is.na(source_job) || !nzchar(source_job) ||
+      is.na(source_step) || source_step < 1L) {
+    return(FALSE)
+  }
+  source <- DBI::dbGetQuery(db,
+    "SELECT s.state AS step_state, j.state AS job_state
+     FROM steps s
+     JOIN jobs j ON j.job_id = s.job_id
+     WHERE s.job_id = ? AND s.step_index = ?",
+    params = list(source_job, source_step))
+  nrow(source) > 0L &&
+    identical(source$step_state[1], "running") &&
+    identical(source$job_state[1], "RUNNING")
 }
 
 #' @keywords internal
