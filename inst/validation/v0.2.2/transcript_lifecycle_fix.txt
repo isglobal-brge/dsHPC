@@ -1,0 +1,175 @@
+
+> suppressPackageStartupMessages({
++     library(DSI)
++     library(DSLite)
++     library(dsHPC)
++     library(dsHPCClient)
++ })
+
+> options(warn = 1)
+
+> A <- file.path(Sys.getenv("AUDIT_ROOT"))
+
+> home <- file.path(A, "results_fix", "demo_dshpc_home")
+
+> unlink(home, recursive = TRUE)
+
+> for (d in c("", "runners", "artifacts", "publish", 
++     "staging")) dir.create(file.path(home, d), recursive = TRUE, 
++     showWarnings = FALSE)
+
+> options(dshpc.home = home)
+
+> cat("dsHPC version:", as.character(packageVersion("dsHPC")), 
++     "| dsHPCClient version:", as.character(packageVersion("dsHPCClient")), 
++     "\n")
+dsHPC version: 0.2.2 | dsHPCClient version: 0.3.2 
+
+> dsHPC::register_dshpc_runner(list(name = "audit_csv", 
++     plane = "artifact", command = "/bin/sh", args_template = c("-c", 
++         paste0("mkdir -p {output_dir}; sleep {sleep_secs}; i=1; ", 
++             "while [ $i -le {n_rows} ]; do ", "echo \"row$i,{message}\" >> {output_dir}/result.csv; i=$((i+1)); done; ", 
++             "echo runner-finished")), allowed_params = list("sleep_secs", 
++         "n_rows", "message"), resources = list(memory_mb = 64, 
++         cpu_slots = 1)))
+
+> config <- DSLite::defaultDSConfiguration(include = c("dsHPC"))
+
+> audit_site1 <- DSLite::newDSLiteServer(tables = list(), 
++     config = config)
+
+> builder <- DSI::newDSLoginBuilder()
+
+> builder$append(server = "site1", url = "audit_site1", 
++     driver = "DSLiteDriver")
+
+> conns <- DSI::datashield.login(builder$build())
+
+Logging into the collaborating servers
+
+> mkspec <- function(name, msg, secs) list(label = "dsHPC-audit-demo", 
++     name = name, tags = c("audit"), resource_class = "default", 
++     steps = list(list(type = "run_artifact", plane = "artifact", 
++         runner = "audit_csv", config = list(sleep_secs = secs, 
++             n_rows = 8, message = msg)), list(type = "emit", 
++         plane = "session", output_name = "note", value = "lifecycle-complete")))
+
+> cat("\n== Submitting jobs A and B (assign hpcSubmitDS) ==\n")
+
+== Submitting jobs A and B (assign hpcSubmitDS) ==
+
+> DSI::datashield.assign(conns, "jobA", call("hpcSubmitDS", 
++     dsHPCClient:::.ds_encode(mkspec("fix job A", "fix-a", 3))))
+dsHPC worker started (PID 54490)
+
+> DSI::datashield.assign(conns, "jobB", call("hpcSubmitDS", 
++     dsHPCClient:::.ds_encode(mkspec("fix job B", "fix-b", 4))))
+dsHPC worker already running (PID 54490)
+
+> cat("\n== ds.hpc.job_id: resolve ids from the assigned symbols ==\n")
+
+== ds.hpc.job_id: resolve ids from the assigned symbols ==
+
+> idsA <- ds.hpc.job_id(conns, "jobA")
+
+> idsB <- ds.hpc.job_id(conns, "jobB")
+
+> print(idsA)
+                                     site1 
+"job_a646a5a7-1b38-44c0-88e7-3ba656fea7b2" 
+
+> print(idsB)
+                                     site1 
+"job_f45e19e7-826d-4645-b1b7-3484cfa85095" 
+
+> cat("\n== Waiting for both jobs ==\n")
+
+== Waiting for both jobs ==
+
+> invisible(ds.hpc.wait(conns, idsA[["site1"]], timeout = 120, 
++     poll_interval = 1))
+Waiting for job 'job_a646a5a7-1b38-44c0-88e7-3ba656fea7b2' ...
+  site1: PENDING [0/2]
+  site1: RUNNING [1/2]
+  site1: FINISHED [2/2]
+
+> invisible(ds.hpc.wait(conns, idsB[["site1"]], timeout = 120, 
++     poll_interval = 1))
+Waiting for job 'job_f45e19e7-826d-4645-b1b7-3484cfa85095' ...
+  site1: FINISHED [2/2]
+
+> cat("\n== ds.hpc.list: must render as a formatted table ==\n")
+
+== ds.hpc.list: must render as a formatted table ==
+
+> print(ds.hpc.list(conns))
+dshpc_result
+  Servers: site1 
+  site1: 2 job(s)
+                                       job_id    state      name            label
+     job_f45e19e7-826d-4645-b1b7-3484cfa85095 FINISHED fix job B dsHPC-audit-demo
+     job_a646a5a7-1b38-44c0-88e7-3ba656fea7b2 FINISHED fix job A dsHPC-audit-demo
+                 submitted_at progress
+     2026-08-31T15:09:04.492Z      2/2
+     2026-08-31T15:09:04.350Z      2/2
+
+> cat("\n== ds.hpc.outputs(jobA): must render name/kind/size rows ==\n")
+
+== ds.hpc.outputs(jobA): must render name/kind/size rows ==
+
+> print(ds.hpc.outputs(conns, idsA[["site1"]]))
+dshpc_result
+  Servers: site1 
+  site1: 2 output(s)
+    result.csv  [artifact_file]  88 B
+    note  [emit_value]  71 B
+
+> cat("\n== ds.hpc.logs(jobA): must render as indented log lines ==\n")
+
+== ds.hpc.logs(jobA): must render as indented log lines ==
+
+> print(ds.hpc.logs(conns, idsA[["site1"]]))
+dshpc_result
+  Servers: site1 
+  site1: 1 log line(s)
+    [step_001<path>] runner-finished
+
+> cat("\n== ds.hpc.status(jobA): unchanged one-line state format ==\n")
+
+== ds.hpc.status(jobA): unchanged one-line state format ==
+
+> print(ds.hpc.status(conns, idsA[["site1"]]))
+dshpc_result
+  Servers: site1 
+  site1: FINISHED [2/2]
+
+> cat("\n== ds.hpc.outputs on a nonexistent job: warning must surface ==\n")
+
+== ds.hpc.outputs on a nonexistent job: warning must surface ==
+
+> res_err <- ds.hpc.outputs(conns, "job_does_not_exist")
+Warning: dsHPC call failed on server 'site1': There are some DataSHIELD errors, list them with datashield.errors()
+
+> cat("\n-- print of the errored result (Errors block expected):\n")
+
+-- print of the errored result (Errors block expected):
+
+> print(res_err)
+dshpc_result
+  Servers:  
+  Errors:
+    site1: There are some DataSHIELD errors, list them with datashield.errors()
+
+> cat("\n-- ds_errors attribute:\n")
+
+-- ds_errors attribute:
+
+> str(attr(res_err$per_site, "ds_errors"))
+List of 1
+ $ site1: chr "There are some DataSHIELD errors, list them with datashield.errors()"
+
+> DSI::datashield.logout(conns)
+
+> cat("\n== LIFECYCLE FIX TRANSCRIPT COMPLETE ==\n")
+
+== LIFECYCLE FIX TRANSCRIPT COMPLETE ==

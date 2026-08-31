@@ -1,0 +1,353 @@
+> source("demo_lifecycle.R", echo=TRUE, max.deparse.length=10000)
+
+> suppressPackageStartupMessages({
++     library(DSI)
++     library(DSLite)
++     library(dsHPC)
++     library(dsHPCClient)
++ })
+
+> A <- file.path(Sys.getenv("AUDIT_ROOT"))
+
+> home <- file.path(A, "demo_dshpc_home")
+
+> unlink(home, recursive = TRUE)
+
+> for (d in c("", "runners", "artifacts", "publish", 
++     "staging")) dir.create(file.path(home, d), recursive = TRUE, 
++     showWarnings = FALSE)
+
+> options(dshpc.home = home)
+
+> dsHPC::register_dshpc_runner(list(name = "audit_csv", 
++     plane = "artifact", command = "/bin/sh", args_template = c("-c", 
++         paste0("mkdir -p {output_dir}; sleep {sleep_secs}; i=1; ", 
++             "while [ $i -le {n_rows} ]; do ", "echo \"row$i,{message}\" >> {output_dir}/result.csv; i=$((i+1)); done; ", 
++             "echo runner-finished")), allowed_params = list("sleep_secs", 
++         "n_rows", "message"), resources = list(memory_mb = 64, 
++         cpu_slots = 1)))
+
+> cat("Registered runners:", paste(dsHPC:::.list_runners(), 
++     collapse = ", "), "\n")
+Registered runners: image_preprocess, pyradiomics, stage_parquet, audit_csv 
+
+> config <- DSLite::defaultDSConfiguration(include = c("dsHPC"))
+
+> audit_site1 <- DSLite::newDSLiteServer(tables = list(), 
++     config = config)
+
+> builder <- DSI::newDSLoginBuilder()
+
+> builder$append(server = "site1", url = "audit_site1", 
++     driver = "DSLiteDriver")
+
+> conns <- DSI::datashield.login(builder$build())
+
+Logging into the collaborating servers
+
+> cat("\n== Server capabilities as seen by the analyst ==\n")
+
+== Server capabilities as seen by the analyst ==
+
+> str(ds.hpc.capabilities(conns)$site1$backend)
+ NULL
+
+> spec <- list(label = "dsHPC-audit-demo", name = "audit lifecycle job", 
++     tags = c("audit"), resource_class = "default", steps = list(list(type = "run_artifact", 
++         plane = "artifact", runner = "audit_csv", config = list(sleep_secs = 6, 
++             n_rows = 8, message = "hello-audit")), list(type = "emit", 
++         plane = "session", output_name = "note", value = "lifecycle-complete")))
+
+> enc <- dsHPCClient:::.ds_encode(spec)
+
+> cat("\n== Submitting job A (assign hpcSubmitDS) ==\n")
+
+== Submitting job A (assign hpcSubmitDS) ==
+
+> DSI::datashield.assign(conns, "jobA", call("hpcSubmitDS", 
++     enc))
+dsHPC worker started (PID 41808)
+
+> stA0 <- ds.hpc.status(conns, "jobA")
+
+> print(stA0)
+dshpc_result
+  Servers: site1 
+  site1: PENDING [0/2]
+
+> jobA_id <- stA0$site1$job_id
+
+> cat("job A id:", jobA_id, " state at submit+0s:", 
++     stA0$site1$state, "\n")
+job A id: job_fb9881a1-405c-4de0-a4bf-6c5ace365fda  state at submit+0s: PENDING 
+
+> cat("\n== Waiting for job A (ds.hpc.wait) ==\n")
+
+== Waiting for job A (ds.hpc.wait) ==
+
+> stA <- ds.hpc.wait(conns, jobA_id, timeout = 120, 
++     poll_interval = 1)
+Waiting for job 'job_fb9881a1-405c-4de0-a4bf-6c5ace365fda' ...
+  site1: PENDING [0/2]
+  site1: RUNNING [1/2]
+  site1: FINISHED [2/2]
+
+> print(stA)
+dshpc_result
+  Servers: site1 
+  site1: FINISHED [2/2]
+
+> cat("\n== Job A outputs ==\n")
+
+== Job A outputs ==
+
+> print(ds.hpc.outputs(conns, jobA_id))
+dshpc_result
+  Servers: site1 
+
+> cat("\n== Job A disclosure-safe result ==\n")
+
+== Job A disclosure-safe result ==
+
+> str(ds.hpc.result(conns, jobA_id)$site1)
+List of 3
+ $ job_id           : chr "job_fb9881a1-405c-4de0-a4bf-6c5ace365fda"
+ $ ready            : logi TRUE
+ $ available_outputs:List of 2
+  ..$ :List of 3
+  .. ..$ name      : chr "result.csv"
+  .. ..$ kind      : chr "artifact_file"
+  .. ..$ size_bytes: int 136
+  ..$ :List of 3
+  .. ..$ name      : chr "note"
+  .. ..$ kind      : chr "emit_value"
+  .. ..$ size_bytes: int 71
+
+> cat("\n== Job A sanitized logs ==\n")
+
+== Job A sanitized logs ==
+
+> print(ds.hpc.logs(conns, jobA_id))
+dshpc_result
+  Servers: site1 
+
+> cat("\n== Loading result.csv into server session via hpcLoadOutputDS ==\n")
+
+== Loading result.csv into server session via hpcLoadOutputDS ==
+
+> DSI::datashield.assign(conns, "tblA", call("hpcLoadOutputDS", 
++     jobA_id, "result.csv", FALSE, "dsHPC-audit-demo"))
+
+> print(DSI::datashield.symbols(conns))
+$site1
+[1] "jobA" "tblA"
+
+
+> cat("\n== Submitting job B: identical spec ==\n")
+
+== Submitting job B: identical spec ==
+
+> t_before <- Sys.time()
+
+> DSI::datashield.assign(conns, "jobB", call("hpcSubmitDS", 
++     enc))
+
+> t_after <- Sys.time()
+
+> stB <- ds.hpc.status(conns, "jobB")
+
+> print(stB)
+dshpc_result
+  Servers: site1 
+  site1: FINISHED [2/2]
+
+> jobB_id <- stB$site1$job_id
+
+> cat(sprintf("job B id: %s  state immediately after submit: %s (submit call took %.2fs)\n", 
++     jobB_id, stB$site1$state, as.numeric(t_after - t_before, 
++         units = "secs")))
+job B id: job_f22392b0-69bd-497d-bc32-4ca93fa3fa05  state immediately after submit: FINISHED (submit call took 0.01s)
+
+> cat("job B started_at (inherited from A):", stB$site1$started_at, 
++     "| job A started_at:", stA$site1$started_at, "\n")
+job B started_at (inherited from A): 2026-08-31T11:34:43.559Z | job A started_at: 2026-08-31T11:34:43.559Z 
+
+> cat("\n== Job B outputs (copied from A) ==\n")
+
+== Job B outputs (copied from A) ==
+
+> print(ds.hpc.outputs(conns, jobB_id))
+dshpc_result
+  Servers: site1 
+
+> db <- dsHPC:::.db_connect()
+
+> ev <- DBI::dbGetQuery(db, "SELECT job_id, event, details_json FROM events WHERE job_id = ? AND event = 'deduplicated'", 
++     params = list(jobB_id))
+
+> dsHPC:::.db_close(db)
+
+> cat("\n[server-side evidence] events table:\n")
+
+[server-side evidence] events table:
+
+> print(ev)
+                                    job_id        event
+1 job_f22392b0-69bd-497d-bc32-4ca93fa3fa05 deduplicated
+                                                    details_json
+1 {"original_job_id":"job_fb9881a1-405c-4de0-a4bf-6c5ace365fda"}
+
+> specC <- list(label = "dsHPC-audit-demo", name = "recovery demo job", 
++     tags = c("audit"), resource_class = "default", steps = list(list(type = "run_artifact", 
++         plane = "artifact", runner = "audit_csv", config = list(sleep_secs = 25, 
++             n_rows = 6, message = "recovery-demo"))))
+
+> cat("\n== Submitting job C (25s artifact step) ==\n")
+
+== Submitting job C (25s artifact step) ==
+
+> DSI::datashield.assign(conns, "jobC", call("hpcSubmitDS", 
++     dsHPCClient:::.ds_encode(specC)))
+dsHPC worker already running for cell (Davids-MacBook-Air.local@cell_3f7a3f6e5bde:41808)
+
+> stC <- ds.hpc.status(conns, "jobC")
+
+> jobC_id <- stC$site1$job_id
+
+> for (i in 1:30) {
++     stC <- ds.hpc.status(conns, jobC_id)
++     if (identical(stC$site1$state, "RUNNING")) 
++         break
++     Sys.sleep(1)
++ }
+
+> cat("job C:", jobC_id, "state:", stC$site1$state, 
++     "\n")
+job C: job_3b91e1fa-4aa1-4069-a815-f3768a9c26c2 state: RUNNING 
+
+> Sys.sleep(3)
+
+> worker_pid <- as.integer(readLines(file.path(home, 
++     "worker.pid"), n = 1))
+
+> db <- dsHPC:::.db_connect()
+
+> row <- DBI::dbGetQuery(db, "SELECT worker_pid FROM jobs WHERE job_id = ?", 
++     params = list(jobC_id))
+
+> dsHPC:::.db_close(db)
+
+> wrapper_pid <- as.integer(row$worker_pid[1])
+
+> child_pid_file <- file.path(home, "artifacts", jobC_id, 
++     "step_001", "child.pid")
+
+> child_pid <- as.integer(readLines(child_pid_file, 
++     n = 1))
+
+> cat(sprintf("[crash] SIGKILL worker daemon %d, step wrapper %d, child %d\n", 
++     worker_pid, wrapper_pid, child_pid))
+[crash] SIGKILL worker daemon 41808, step wrapper NA, child 41887
+
+> tools::pskill(worker_pid, tools::SIGKILL)
+
+> tools::pskill(wrapper_pid, tools::SIGKILL)
+
+> tools::pskill(child_pid, tools::SIGKILL)
+
+> Sys.sleep(2)
+
+> stC_crash <- ds.hpc.status(conns, jobC_id)
+
+> cat("state right after crash (stale RUNNING expected):", 
++     stC_crash$site1$state, "\n")
+state right after crash (stale RUNNING expected): RUNNING 
+
+> cat("\n[admin] restarting worker daemon: dsHPC:::.dshpc_worker_start()\n")
+
+[admin] restarting worker daemon: dsHPC:::.dshpc_worker_start()
+
+> invisible(dsHPC:::.dshpc_worker_start())
+dsHPC worker started (PID 41926)
+
+> for (i in 1:20) {
++     stC2 <- ds.hpc.status(conns, jobC_id)
++     if (isTRUE(stC2$site1$retrying) || stC2$site1$state != "RUNNING") 
++         break
++     Sys.sleep(1)
++ }
+
+> cat(sprintf("after restart: state=%s retrying=%s retries=%d\n", 
++     stC2$site1$state, stC2$site1$retrying, stC2$site1$retries))
+after restart: state=RUNNING retrying=FALSE retries=1
+
+> stC3 <- ds.hpc.wait(conns, jobC_id, timeout = 180, 
++     poll_interval = 2)
+Waiting for job 'job_3b91e1fa-4aa1-4069-a815-f3768a9c26c2' ...
+  site1: RUNNING [1/1]
+  site1: FINISHED [1/1]
+
+> print(stC3)
+dshpc_result
+  Servers: site1 
+  site1: FINISHED [1/1]
+
+> cat(sprintf("job C final: state=%s retries=%d\n", 
++     stC3$site1$state, stC3$site1$retries))
+job C final: state=FINISHED retries=1
+
+> cat("\n== Job C outputs after recovery ==\n")
+
+== Job C outputs after recovery ==
+
+> print(ds.hpc.outputs(conns, jobC_id))
+dshpc_result
+  Servers: site1 
+
+> cat("\n== Logging out and back in; jobs must survive the session ==\n")
+
+== Logging out and back in; jobs must survive the session ==
+
+> DSI::datashield.logout(conns)
+
+> conns2 <- DSI::datashield.login(builder$build())
+
+Logging into the collaborating servers
+
+> cat("\n== ds.hpc.list from the NEW session ==\n")
+
+== ds.hpc.list from the NEW session ==
+
+> print(ds.hpc.list(conns2))
+dshpc_result
+  Servers: site1 
+  site1: FINISHEDFINISHEDFINISHED
+
+> st_again <- ds.hpc.status(conns2, jobA_id)
+
+> cat("job A from new session:", st_again$site1$state, 
++     "\n")
+job A from new session: FINISHED 
+
+> cat("\n== Scheduler observability ==\n")
+
+== Scheduler observability ==
+
+> sch <- ds.hpc.scheduler_status(conns2)$site1
+
+> str(sch[c("backend", "queue", "cell")], max.level = 2)
+List of 3
+ $ NA  : NULL
+ $ NA  : NULL
+ $ cell:List of 4
+  ..$ cell_id: chr "cell_3f7a3f6e5bde"
+  ..$ node_id: chr "Davids-MacBook-Air.local@cell_3f7a3f6e5bde"
+  ..$ leader :List of 5
+  ..$ workers:'data.frame':	2 obs. of  9 variables:
+
+> DSI::datashield.logout(conns2)
+
+> cat("\n== TRANSCRIPT COMPLETE ==\n")
+
+== TRANSCRIPT COMPLETE ==
+> 

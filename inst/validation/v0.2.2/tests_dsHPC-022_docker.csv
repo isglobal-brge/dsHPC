@@ -1,0 +1,100 @@
+"file","context","test","nb","failed","skipped","error","warning","user","system","real","passed"
+"test-api-plugins.R","api-plugins","cancel_jobs_by_tag requires admin key and cancels matching active jobs",8,0,FALSE,FALSE,0,0.123,0.01,0.142,8
+"test-api-plugins.R","api-plugins","admin key can be supplied by environment",4,0,FALSE,FALSE,0,0.032,0.005,0.0369999999999999,4
+"test-backend.R","backend","executor backend status reports embedded and missing slurm",9,0,FALSE,FALSE,0,0.055,0.005,0.0939999999999999,9
+"test-backend.R","backend","external backends delegate local resources unless configured otherwise",5,0,FALSE,FALSE,0,0.082,0.00399999999999999,0.101,5
+"test-backend.R","backend","external command backend can submit and reap an artifact step",6,0,FALSE,FALSE,0,0.069,0.011,0.581,6
+"test-backend.R","backend","kubernetes backend submits job manifest and reaps completion",23,0,FALSE,FALSE,0,0.186,0.015,0.384,23
+"test-backend.R","backend","external status command failures do not create duplicate retries",3,0,FALSE,FALSE,0,0.012,0.004,0.185,3
+"test-backend.R","backend","backend step scripts write exit_code atomically",2,0,FALSE,FALSE,0,0.004,0.002,0.00600000000000023,2
+"test-backend.R","backend","backend path mappings support alternate host/container views",4,0,FALSE,FALSE,0,0.012,0.002,0.0139999999999998,4
+"test-backend.R","backend","external backend can execute through a mapped backend path",4,0,FALSE,FALSE,0,0.0489999999999999,0.00899999999999998,0.352,4
+"test-backend.R","backend","container runners use container command and backend paths",5,0,FALSE,FALSE,0,0.016,0.006,0.0329999999999999,5
+"test-backend.R","backend","external docker container runner can execute without backend deps",2,0,FALSE,FALSE,0,0.0349999999999999,0.00800000000000001,0.665,2
+"test-backend.R","backend","slurm backend submits with runner resources and reaps completion",8,0,FALSE,FALSE,0,0.044,0.013,0.533,8
+"test-backend.R","backend","slurm status falls back to local exit_code file when sacct is missing",7,0,FALSE,FALSE,0,0.032,0.00700000000000001,0.339,7
+"test-backend.R","backend","optional backend GPUs are requested independently of Rock GPUs",2,0,FALSE,FALSE,0,0.0329999999999999,0.00700000000000001,0.223,2
+"test-backend.R","backend","slurm capabilities auto-detect backend GPUs for optional requests",3,0,FALSE,FALSE,0,0.04,0.00900000000000001,0.401,3
+"test-backend.R","backend","external capabilities command drives optional GPU requests",3,0,FALSE,FALSE,0,0.0349999999999999,0.00799999999999998,0.387,3
+"test-builders.R","builders","step constructors return dshpc_step S3 objects",5,0,FALSE,FALSE,0,0.00499999999999989,0.002,0.00699999999999967,5
+"test-builders.R","builders","artifact step has runner field",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00399999999999956,3
+"test-builders.R","builders","inputs field is preserved",1,0,FALSE,FALSE,0,0.00099999999999989,0.001,0.00199999999999978,1
+"test-builders.R","builders","publish_asset has correct fields",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00399999999999956,3
+"test-builders.R","builders","safe_summary has no extra args",2,0,FALSE,FALSE,0,0.002,0.001,0.00300000000000011,2
+"test-builders.R","builders","step print works",3,0,FALSE,FALSE,0,0.002,0.001,0.00399999999999956,3
+"test-builders.R","builders","all session step types exist",9,0,FALSE,FALSE,0,0.004,0,0.00499999999999989,9
+"test-builders.R","builders","ds_job creates valid job object",4,0,FALSE,FALSE,0,0.006,0.001,0.00699999999999967,4
+"test-builders.R","builders","ds_job requires a label",1,0,FALSE,FALSE,0,0.01,0,0.00999999999999979,1
+"test-builders.R","builders","ds_job rejects empty steps",1,0,FALSE,FALSE,0,0.002,0.001,0.00300000000000011,1
+"test-builders.R","builders","ds_job rejects non-step objects",1,0,FALSE,FALSE,0,0.002,0,0.00199999999999978,1
+"test-builders.R","builders","ds_job strips S3 classes from steps for serialization",1,0,FALSE,FALSE,0,0.00099999999999989,0.001,0.00200000000000067,1
+"test-builders.R","builders","ds_job with publish config",1,0,FALSE,FALSE,0,0.002,0,0.00199999999999978,1
+"test-builders.R","builders","job print works",2,0,FALSE,FALSE,0,0.01,0.001,0.00999999999999979,2
+"test-builders.R","builders","ds_job accepts DAG pipelines",5,0,FALSE,FALSE,0,0.004,0.002,0.00500000000000078,5
+"test-canonical.R","canonical","canonical spec hashing sorts top-level named lists",1,0,FALSE,FALSE,0,0.00100000000000011,0.001,0.00199999999999978,1
+"test-canonical.R","canonical","canonical spec hashing preserves positional step order",2,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00399999999999956,2
+"test-canonical.R","canonical","canonical spec hashing sorts deeply nested named lists",1,0,FALSE,FALSE,0,0.002,0,0.00199999999999978,1
+"test-canonical.R","canonical","canonical spec hashing sorts named subset before unnamed entries",2,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00300000000000011,2
+"test-dag.R","dag","DAG specs compile to ordered steps",5,0,FALSE,FALSE,0,0.022,0.002,0.0229999999999997,5
+"test-dag.R","dag","DAG validation rejects cycles and unknown nodes",2,0,FALSE,FALSE,0,0.0289999999999999,0.001,0.0299999999999994,2
+"test-dag.R","dag","DAG and legacy steps are mutually exclusive",1,0,FALSE,FALSE,0,0.002,0,0.00300000000000011,1
+"test-db.R","db","SQLite database is created with correct schema",15,0,FALSE,FALSE,0,0.0209999999999999,0.00599999999999998,0.0270000000000001,15
+"test-db.R","db","WAL mode is enabled",1,0,FALSE,FALSE,0,0.006,0.002,0.00699999999999967,1
+"test-db.R","db","event logging works",2,0,FALSE,FALSE,0,0.0069999999999999,0.003,0.0119999999999996,2
+"test-docker-hpc-unit.R","docker-hpc-unit","external backend can delegate to a dockerized HPC unit",8,0,FALSE,FALSE,0,0.034,0.013,1.024,8
+"test-domain-label-policy.R","domain-label-policy","hpcSubmitDS requires a domain label",1,0,FALSE,FALSE,0,0.004,0.001,0.00499999999999989,1
+"test-domain-label-policy.R","domain-label-policy","hpcLoadOutputDS always requires a domain label",2,0,FALSE,FALSE,0,0.0210000000000001,0,0.0209999999999999,2
+"test-domain-label-policy.R","domain-label-policy","get_job_output_ref always requires a domain label",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00400000000000045,1
+"test-naming.R","naming","job name templates use the next visible number",2,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00399999999999956,2
+"test-naming.R","naming","job name template validation is strict",2,0,FALSE,FALSE,0,0.01,0,0.00999999999999979,2
+"test-naming.R","naming","job name templates are resolved when a job is stored",2,0,FALSE,FALSE,0,0.022,0.004,0.0259999999999998,2
+"test-naming.R","naming","hpcSubmitDS resolves job name templates",2,0,FALSE,FALSE,0,0.0569999999999999,0.00700000000000001,0.0649999999999995,2
+"test-quotas.R","quotas","per-user quota blocks excess submissions",1,0,FALSE,FALSE,0,0.01,0.003,0.0130000000000008,1
+"test-quotas.R","quotas","global quota blocks excess submissions",1,0,FALSE,FALSE,0,0.01,0.002,0.0120000000000005,1
+"test-quotas.R","quotas","completed jobs don't count against quota",1,0,FALSE,FALSE,0,0.02,0.003,0.0229999999999997,1
+"test-runner-artifact.R","runner-artifact","blocked env vars are rejected in validation spec",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00499999999999989,3
+"test-runner-artifact.R","runner-artifact","env var names are prefixed with DSHPC_CFG_",2,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00299999999999923,2
+"test-runner-artifact.R","runner-artifact","runner argument templating is literal and vector-safe",5,0,FALSE,FALSE,0,0.00499999999999989,0.002,0.00600000000000023,5
+"test-runner-artifact.R","runner-artifact","blocked env var in config list is caught",1,0,FALSE,FALSE,0,0.002,0,0.00200000000000067,1
+"test-runner-artifact.R","runner-artifact","missing exit_code is not treated as success for durable wrappers",2,0,FALSE,FALSE,0,0.00800000000000001,0.001,0.00900000000000034,2
+"test-runner-artifact.R","runner-artifact","legacy output-only jobs remain recoverable",1,0,FALSE,FALSE,0,0.002,0.001,0.00199999999999978,1
+"test-runner-artifact.R","runner-artifact","interrupted running jobs are requeued without losing state",5,0,FALSE,FALSE,0,0.0129999999999999,0.003,0.016,5
+"test-runner-artifact.R","runner-artifact","worker recovers jobs committed after step completion before advance",2,0,FALSE,FALSE,0,0.00900000000000012,0.002,0.0120000000000005,2
+"test-runner-registry.R","runner-registry","external runner registry installs allowlisted YAML runners",4,0,FALSE,FALSE,0,0.022,0.002,0.0249999999999995,4
+"test-runner-registry.R","runner-registry","runner registry rejects unsafe runner names",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,1
+"test-scheduler.R","scheduler","scheduler derives conservative node budgets without configuration",4,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00499999999999989,4
+"test-scheduler.R","scheduler","runner resources are read from YAML and options can override them",6,0,FALSE,FALSE,0,0.0069999999999999,0.002,0.00999999999999979,6
+"test-scheduler.R","scheduler","scheduler gates pending jobs by memory budget",3,0,FALSE,FALSE,0,0.02,0.003,0.0229999999999997,3
+"test-scheduler.R","scheduler","scheduler records OOM cooldowns for runners",3,0,FALSE,FALSE,0,0.0089999999999999,0.002,0.0110000000000001,3
+"test-scheduler.R","scheduler","recent OOM failures throttle runner concurrency after cooldown",6,0,FALSE,FALSE,0,0.0290000000000001,0.004,0.0380000000000003,6
+"test-scheduler.R","scheduler","optional GPU runners receive devices only when available",2,0,FALSE,FALSE,0,0.00800000000000001,0.003,0.0119999999999996,2
+"test-scheduler.R","scheduler","worker leader election creates one active scheduler per cell",5,0,FALSE,FALSE,0,0.0350000000000001,0.004,0.0430000000000001,5
+"test-scheduler.R","scheduler","dead worker leaders can be marked stale for shared-cell takeover",3,0,FALSE,FALSE,0,0.0150000000000001,0.004,0.0270000000000001,3
+"test-step-cache.R","step-cache","step cache hashes input content and executable step definition",6,0,FALSE,FALSE,0,0.0150000000000001,0.004,0.0179999999999998,6
+"test-step-cache.R","step-cache","step cache detects relative names, empty dirs and symlinked input content",4,0,FALSE,FALSE,0,0.00499999999999989,0.003,0.00800000000000001,4
+"test-step-cache.R","step-cache","step cache ignores volatile staged input paths",2,0,FALSE,FALSE,0,0.004,0.003,0.00600000000000023,2
+"test-step-cache.R","step-cache","step cache includes runner registry definition in the hash",1,0,FALSE,FALSE,0,0.00299999999999967,0.001,0.00300000000000011,1
+"test-step-cache.R","step-cache","completed artifact steps are reused across different jobs",11,0,FALSE,FALSE,0,0.0210000000000004,0.00700000000000001,0.0289999999999999,11
+"test-step-cache.R","step-cache","step cache does not reuse running steps or missing cached outputs",2,0,FALSE,FALSE,0,0.0129999999999999,0.003,0.016,2
+"test-step-cache.R","step-cache","step cache reuses completed steps from still-running parent jobs",4,0,FALSE,FALSE,0,0.0249999999999999,0.00499999999999995,0.0300000000000002,4
+"test-step-cache.R","step-cache","step cache coalesces equivalent in-flight steps",14,0,FALSE,FALSE,0,0.0499999999999998,0.00900000000000001,0.0590000000000002,14
+"test-step-cache.R","step-cache","step cache reuses shared multi-step prefixes by content",5,0,FALSE,FALSE,0,0.0179999999999998,0.00700000000000001,0.0260000000000007,5
+"test-step-cache.R","step-cache","step cache can be disabled per step and skips session side effects",3,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00400000000000045,3
+"test-store.R","store","job creation persists to database",6,0,FALSE,FALSE,0,0.0109999999999997,0.003,0.0149999999999997,6
+"test-store.R","store","job update is atomic",2,0,FALSE,FALSE,0,0.0089999999999999,0.003,0.0119999999999996,2
+"test-store.R","store","job update accepts SQL NULL values",2,0,FALSE,FALSE,0,0.00700000000000012,0.002,0.00999999999999979,2
+"test-store.R","store","listing jobs filters by owner",3,0,FALSE,FALSE,0,0.0089999999999999,0.002,0.0120000000000005,3
+"test-store.R","store","listing jobs filters by state",3,0,FALSE,FALSE,0,0.0089999999999999,0.002,0.0120000000000005,3
+"test-store.R","store","all jobs are visible in global pool",2,0,FALSE,FALSE,0,0.00800000000000001,0.002,0.0110000000000001,2
+"test-store.R","store","spec retrieval returns parsed JSON",3,0,FALSE,FALSE,0,0.00800000000000001,0.003,0.0110000000000001,3
+"test-studio.R","studio","Studio snapshot exposes scoped jobs, names, DAG and safe metadata",10,0,FALSE,FALSE,0,0.0800000000000001,0.005,0.0950000000000006,10
+"test-studio.R","studio","hpcListDS scopes jobs and includes display name",3,0,FALSE,FALSE,0,0.0189999999999997,0.003,0.0230000000000006,3
+"test-validation.R","validation","empty spec is rejected",1,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00300000000000011,1
+"test-validation.R","validation","spec with too many steps is rejected",1,0,FALSE,FALSE,0,0.00299999999999967,0,0.00399999999999956,1
+"test-validation.R","validation","step without type is rejected",1,0,FALSE,FALSE,0,0.00299999999999967,0.001,0.00300000000000011,1
+"test-validation.R","validation","artifact step without runner is rejected",1,0,FALSE,FALSE,0,0.004,0,0.00300000000000011,1
+"test-validation.R","validation","valid session step passes validation",1,0,FALSE,FALSE,0,0.00200000000000022,0.001,0.00199999999999978,1
+"test-validation.R","validation","step plane is inferred from type",1,0,FALSE,FALSE,0,0.00200000000000022,0,0.00300000000000011,1
+"test-validation.R","validation","identifier validation blocks path traversal",4,0,FALSE,FALSE,0,0.00599999999999978,0,0.00599999999999934,4
+"test-validation.R","validation","spec size limit is enforced",1,0,FALSE,FALSE,0,0.004,0.001,0.00400000000000045,1
+"test-validation.R","validation","publish step identifiers are validated",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00399999999999956,1
