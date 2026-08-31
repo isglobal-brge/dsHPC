@@ -557,6 +557,9 @@ test_that("slurm backend submits with runner resources and reaps completion", {
     dshpc.slurm_sbatch = sbatch,
     dshpc.slurm_squeue = squeue,
     dshpc.slurm_sacct = sacct,
+    dshpc.slurm_partition = "gpu_part",
+    dshpc.slurm_account = "proj_acct",
+    dshpc.slurm_qos = "fast_qos",
     dshpc.backend_path_mappings = c(stats::setNames(backend_home, home)),
     dshpc.max_retries = 0
   ))
@@ -573,6 +576,9 @@ test_that("slurm backend submits with runner resources and reaps completion", {
   args <- readLines(args_file, warn = FALSE)
   expect_true("--mem=4096" %in% args)
   expect_true("--cpus-per-task=2" %in% args)
+  expect_true("--partition=gpu_part" %in% args)
+  expect_true("--account=proj_acct" %in% args)
+  expect_true("--qos=fast_qos" %in% args)
   expect_true(paste0("--chdir=", file.path(backend_home, "artifacts",
     "job_slurm", "step_001")) %in% args)
   expect_equal(args[length(args)], file.path(backend_home, "artifacts",
@@ -581,6 +587,49 @@ test_that("slurm backend submits with runner resources and reaps completion", {
   dsHPC:::.worker_reap(db)
   job <- dsHPC:::.store_get_job(db, "job_slurm")
   expect_equal(job$state, "FINISHED")
+})
+
+test_that("slurm status falls back to local exit_code file when sacct is missing", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  squeue_empty <- file.path(bin, "squeue_empty")
+  squeue_running <- file.path(bin, "squeue_running")
+  writeLines(c("#!/bin/sh", "exit 0"), squeue_empty)
+  writeLines(c("#!/bin/sh", "echo RUNNING"), squeue_running)
+  Sys.chmod(c(squeue_empty, squeue_running), "0755")
+
+  step_dir <- file.path(home, "artifacts", "job_sacctless", "step_001")
+  dir.create(step_dir, recursive = TRUE, showWarnings = FALSE)
+
+  withr::local_options(list(
+    dshpc.slurm_squeue = squeue_empty,
+    dshpc.slurm_sacct = "/definitely/not/sacct"
+  ))
+
+  # Job left the queue, sacct unresolvable, exit_code file says success
+  writeLines("0", file.path(step_dir, "exit_code"))
+  st <- dsHPC:::.backend_status_slurm("99001", step_dir)
+  expect_equal(st$state, "succeeded")
+  expect_equal(st$external_state, "LOCAL_EXIT_FILE")
+
+  # Same, but the step wrapper recorded a non-zero exit code
+  writeLines("3", file.path(step_dir, "exit_code"))
+  st <- dsHPC:::.backend_status_slurm("99001", step_dir)
+  expect_equal(st$state, "failed")
+  expect_equal(st$exit_code, 3L)
+
+  # No exit_code file at all: status is unknown, keep polling
+  unlink(file.path(step_dir, "exit_code"))
+  st <- dsHPC:::.backend_status_slurm("99001", step_dir)
+  expect_equal(st$state, "running")
+  expect_equal(st$external_state, "UNKNOWN")
+
+  # Active squeue state short-circuits before any fallback
+  withr::local_options(list(dshpc.slurm_squeue = squeue_running))
+  st <- dsHPC:::.backend_status_slurm("99001", step_dir)
+  expect_equal(st$state, "running")
 })
 
 test_that("optional backend GPUs are requested independently of Rock GPUs", {

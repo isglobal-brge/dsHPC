@@ -144,25 +144,27 @@ hpcSubmitDS <- function(spec_encoded) {
 
 #' Load a Job Output into the Server Session
 #'
+#' Guarded DataSHIELD assign method, declared as an \code{AssignMethods} entry
+#' in \code{DESCRIPTION}. Domain server-side packages are the primary intended
+#' callers, composing it R-internally after validating their own workflows
+#' (see the module header at the top of this file). Deployments may also
+#' allowlist it for direct analyst use, in which case the same guards apply:
+#' a mandatory non-empty \code{required_label} that must match the job's
+#' domain label (ownership check), the job must be in a terminal
+#' \code{FINISHED} or \code{PUBLISHED} state, and tabular outputs are checked
+#' against the \code{nfilter.subset} disclosure floor before loading.
+#'
 #' When \code{as_descriptor = TRUE} and the output is a Parquet file,
 #' returns a \code{FlowerDatasetDescriptor} instead of loading the data
 #' into memory. This enables zero-copy column projection downstream.
 #'
-#' @param job_id_or_symbol Character; job ID or symbol name
-#' @param output_name Character; name of the output to load
+#' @param job_id_or_symbol Character; job ID or symbol name.
+#' @param output_name Character; name of the output to load.
 #' @param as_descriptor Logical; if TRUE and output is Parquet, return a
-#'   FlowerDatasetDescriptor instead of loading data into memory
-#' Load a job output (server-side only)
-#'
-#' NOT a DataSHIELD method -- not directly callable by users.
-#' Domain packages should use this internally
-#' after verifying ownership and applying their own disclosure controls.
-#'
-#' @param job_id_or_symbol Job ID or symbol.
-#' @param output_name Output name.
-#' @param as_descriptor If TRUE, return FlowerDatasetDescriptor for Parquet.
-#' @param required_label Required label substring identifying the caller domain
-#'   and used as the package ownership check.
+#'   FlowerDatasetDescriptor instead of loading data into memory.
+#' @param required_label Mandatory label substring identifying the caller
+#'   domain (typically the calling server-side package's name), matched
+#'   against the job's label as the ownership check.
 #' @return The loaded object.
 #' @export
 hpcLoadOutputDS <- function(job_id_or_symbol, output_name,

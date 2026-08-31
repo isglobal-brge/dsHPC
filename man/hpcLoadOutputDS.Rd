@@ -12,19 +12,32 @@ hpcLoadOutputDS(
 )
 }
 \arguments{
-\item{job_id_or_symbol}{Job ID or symbol.}
+\item{job_id_or_symbol}{Character; job ID or symbol name.}
 
-\item{output_name}{Output name.}
+\item{output_name}{Character; name of the output to load.}
 
-\item{as_descriptor}{If TRUE, return FlowerDatasetDescriptor for Parquet.}
+\item{as_descriptor}{Logical; if TRUE and output is Parquet, return a
+FlowerDatasetDescriptor instead of loading data into memory.}
 
-\item{required_label}{Required label substring identifying the caller domain
-and used as the package ownership check.}
+\item{required_label}{Mandatory label substring identifying the caller
+domain (typically the calling server-side package's name), matched
+against the job's label as the ownership check.}
 }
 \value{
 The loaded object.
 }
 \description{
+Guarded DataSHIELD assign method, declared as an \code{AssignMethods} entry
+in \code{DESCRIPTION}. Domain server-side packages are the primary intended
+callers, composing it R-internally after validating their own workflows
+(see the module header at the top of this file). Deployments may also
+allowlist it for direct analyst use, in which case the same guards apply:
+a mandatory non-empty \code{required_label} that must match the job's
+domain label (ownership check), the job must be in a terminal
+\code{FINISHED} or \code{PUBLISHED} state, and tabular outputs are checked
+against the \code{nfilter.subset} disclosure floor before loading.
+}
+\details{
 When \code{as_descriptor = TRUE} and the output is a Parquet file,
 returns a \code{FlowerDatasetDescriptor} instead of loading the data
 into memory. This enables zero-copy column projection downstream.
