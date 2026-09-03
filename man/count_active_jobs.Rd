@@ -13,6 +13,7 @@ count_active_jobs(tag_pattern)
 Integer; count of active jobs.
 }
 \description{
-Returns the number of PENDING or RUNNING jobs matching a tag pattern.
+Returns the number of PENDING, RUNNING, or CLONING jobs matching a tag
+pattern.
 Used by domain packages for backpressure / drip feed decisions.
 }

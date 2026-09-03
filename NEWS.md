@@ -1,3 +1,69 @@
+# dsHPC 0.2.3
+
+* Retired generic DataSHIELD submission, loading, enumeration, studio, and
+  scheduler methods. Persisted entries for those dsHPC functions now fail
+  closed; trusted domain packages use non-registered `*Internal` functions
+  instead. Upgrades must also remove the historical `c=base::c` and
+  `list=base::list` aggregate aliases from the effective server allowlist,
+  because direct base-R aliases cannot be retired by dsHPC code.
+* Added per-job capabilities containing 244 random bits; only their SHA-256
+  digests are stored. Analyst status, result, output, and log calls reject raw
+  job identifiers and expose only capability-authorized, disclosure-controlled
+  data. Persisted pre-0.2.3 jobs lack a capability hash and therefore fail
+  closed after upgrade; operators must drain them before upgrading or resubmit
+  them afterwards. Job-symbol resolution no longer consults the process-global
+  workspace, preventing a private handle there from crossing DataSHIELD
+  sessions in a shared R process.
+* Added the explicit `hpcJobReferenceDS()` endpoint for exporting a portable
+  bearer. Routine status and result payloads no longer contain that credential,
+  and result-reconstruction failures are mapped to a path-free public error.
+* Reduced public status to coarse state/completion, removed runner logs and
+  exact operational progress, and rebuilt results exclusively from outputs
+  explicitly marked client-safe with an allowed kind. Marked-safe values now
+  also pass the same configured cardinality floor used by internal loading;
+  arbitrary list summaries fail closed, while the built-in count-only summary
+  has a closed schema.
+* Runner parameters now fail closed when `allowed_params` is absent. Managed
+  runner and publisher registrations default to no overwrite, record their
+  registering package, reject cross-package replacement, and enforce that
+  package against the job label. Installed dsHPC runners take precedence over
+  writable registry files, preventing built-in name shadowing. Deployments
+  using dsImaging's directly written `image_preprocess` definition must rename
+  that domain runner (and its workflow references) because dsHPC already ships
+  a built-in with that name.
+* **Runner migration:** artifact subprocesses no longer inherit the Rock,
+  worker, or scheduler environment. They receive a minimal explicit
+  environment with per-step `HOME`/temporary directories; Slurm uses
+  `--export=NONE`. Runner definitions that relied on inherited variables must
+  declare the required non-reserved values in their YAML `env` mapping.
+* Disabled private cross-job cache/deduplication, enforced output cardinality
+  before internal assignment, parsed CSV records rather than counting physical
+  lines, rejected non-tabular references with unknown cardinality, and
+  suppressed all counts below the configured DataSHIELD subset threshold,
+  including zero.
+* Added a runtime boundary for DataSHIELD evaluators that validate only the
+  outer call: public methods accept literal/symbol arguments without evaluating
+  nested calls, while server-only APIs require a matching domain package
+  namespace in the call stack.
+* Confined output references to their exact job artifact tree, rejected
+  symbolic links throughout runner outputs, cache inputs, deduplicated jobs,
+  and publisher inputs, and copied reused outputs into a job-owned tree.
+* Workers now recover interrupted whole-job clones after restart, rebuilding
+  their independently owned output trees from an exact-label, exact-spec
+  completed source and failing closed when no valid source remains.
+* Hardened upgrades of existing storage: package load performs a symlink-safe,
+  once-per-version permission pass (`0770` directories, `0660` files), and the
+  supplied systemd unit now creates worker logs under `UMask=0007`.
+* Removed dsHPC's cross-package call to `dsImaging` generation cleanup. Imaging
+  generation expiry must account for domain lifecycle state and no longer runs
+  from the generic job garbage collector.
+* Preserved artifact sizes above 2 GiB as validated SQLite integers/R doubles
+  (exact through 2^53) while continuing to suppress sizes from public payloads.
+* Resource leases remain conservatively scoped to the maximum requirement of
+  any step for the whole job. Sites must configure finite quotas and domain
+  packages must provide a stable authorized owner; per-step leasing and a
+  runtime-authenticated analyst identity remain deployment/policy concerns.
+
 # dsHPC 0.2.2
 
 * Corrected the `hpcLoadOutputDS` documentation to describe its actual

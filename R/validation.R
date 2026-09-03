@@ -5,6 +5,12 @@
 .validate_job_spec <- function(spec) {
   if (!is.list(spec)) stop("Job spec must be a list.", call. = FALSE)
   spec <- .normalize_job_graph(spec)
+  visibility <- spec$visibility %||% "private"
+  if (!is.character(visibility) || length(visibility) != 1L ||
+      is.na(visibility) || !visibility %in% c("private", "global")) {
+    stop("visibility must be 'private' or 'global'.", call. = FALSE)
+  }
+  spec$visibility <- visibility
   steps <- spec$steps
   if (is.null(steps) || length(steps) == 0)
     stop("Job spec must contain at least one step.", call. = FALSE)
@@ -34,12 +40,20 @@
       cfg <- .load_runner_config(step$runner)
       if (is.null(cfg))
         stop("Runner '", step$runner, "' not in allowlist.", call. = FALSE)
+      registered_by <- cfg$registered_by %||% NULL
+      if (!is.null(registered_by) && !identical(registered_by, "dsHPC") &&
+          !.dshpc_label_matches_package(spec$label, registered_by)) {
+        stop("Runner '", step$runner,
+          "' is not registered for this job label.", call. = FALSE)
+      }
       .validate_runner_params(step, cfg, i)
     }
     if (!is.null(step$dataset_id))
       .validate_identifier(step$dataset_id, paste0("Step ", i, " dataset_id"))
     if (!is.null(step$asset_name))
       .validate_identifier(step$asset_name, paste0("Step ", i, " asset_name"))
+    if (!is.null(step$output_name))
+      .validate_identifier(step$output_name, paste0("Step ", i, " output_name"))
   }
   spec$steps <- steps
   if (is.null(spec$resource_class)) spec$resource_class <- "default"
@@ -58,22 +72,37 @@
 .load_runner_config <- function(runner_name) {
   if (!grepl("^[a-zA-Z0-9_]+$", runner_name)) return(NULL)
   tryCatch(.dshpc_sync_runner_registries(quiet = TRUE), error = function(e) NULL)
+  # Package runners are immutable installation content and cannot be shadowed
+  # by a same-named file in the writable registry.
+  bp <- system.file("runners", paste0(runner_name, ".yml"), package = "dsHPC")
+  if (nzchar(bp) && file.exists(bp) && requireNamespace("yaml", quietly = TRUE)) {
+    return(tryCatch(.validate_runner_config(yaml::read_yaml(bp)),
+      error = function(e) NULL))
+  }
   home <- .dshpc_home(must_exist = FALSE)
   if (!is.null(home)) {
     p <- file.path(home, "runners", paste0(runner_name, ".yml"))
-    if (file.exists(p) && requireNamespace("yaml", quietly = TRUE))
-      return(yaml::read_yaml(p))
+    if (file.exists(p) && !.dshpc_path_is_symlink(p) &&
+        !.dshpc_path_is_symlink(dirname(p)) &&
+        requireNamespace("yaml", quietly = TRUE)) {
+      return(tryCatch(.validate_runner_config(yaml::read_yaml(p)),
+        error = function(e) NULL))
+    }
   }
-  bp <- system.file("runners", paste0(runner_name, ".yml"), package = "dsHPC")
-  if (nzchar(bp) && file.exists(bp) && requireNamespace("yaml", quietly = TRUE))
-    return(yaml::read_yaml(bp))
   NULL
 }
 
 #' @keywords internal
 .validate_runner_params <- function(step, runner_config, step_index) {
-  allowed <- runner_config$allowed_params
-  if (!is.null(allowed) && !is.null(step$config)) {
+  allowed <- runner_config$allowed_params %||% character(0)
+  if (!is.null(step$config)) {
+    if (!is.list(step$config) ||
+        (length(step$config) > 0L &&
+          (is.null(names(step$config)) || any(!nzchar(names(step$config))) ||
+            anyDuplicated(names(step$config))))) {
+      stop("Step ", step_index, ": runner config must be a uniquely named list.",
+        call. = FALSE)
+    }
     bad <- setdiff(names(step$config), allowed)
     if (length(bad) > 0)
       stop("Step ", step_index, ": runner '", step$runner,

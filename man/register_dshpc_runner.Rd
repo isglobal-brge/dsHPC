@@ -4,7 +4,7 @@
 \alias{register_dshpc_runner}
 \title{Register an allowlisted dsHPC runner}
 \usage{
-register_dshpc_runner(config, name = NULL, overwrite = TRUE)
+register_dshpc_runner(config, name = NULL, overwrite = FALSE)
 }
 \arguments{
 \item{config}{Named list containing at least `name`, `command`, and
@@ -12,7 +12,9 @@ register_dshpc_runner(config, name = NULL, overwrite = TRUE)
 
 \item{name}{Optional runner name overriding `config$name`.}
 
-\item{overwrite}{Logical; replace an existing runner file.}
+\item{overwrite}{Logical; replace a runner owned by the same registering
+package. Defaults to `FALSE`. A package cannot replace another package's
+runner, and installed dsHPC runners cannot be shadowed.}
 }
 \value{
 Invisibly, the installed runner file path.
@@ -20,6 +22,8 @@ Invisibly, the installed runner file path.
 \description{
 Registers a runner definition by writing a validated YAML file into
 `DSHPC_HOME/runners`. This is intended for domain packages and site
-administrators that need hospital-local task runners without modifying the
-dsHPC package itself.
+packages. Site administrators install hospital-local definitions through
+the configured runner-registry paths, which dsHPC synchronizes internally.
+The registering package is recorded and later matched to the job label.
+Missing `allowed_params` means that no step parameters are permitted.
 }

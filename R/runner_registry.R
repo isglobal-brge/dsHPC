@@ -5,25 +5,87 @@
 #'
 #' Registers a runner definition by writing a validated YAML file into
 #' `DSHPC_HOME/runners`. This is intended for domain packages and site
-#' administrators that need hospital-local task runners without modifying the
-#' dsHPC package itself.
+#' packages. Site administrators install hospital-local definitions through
+#' the configured runner-registry paths, which dsHPC synchronizes internally.
+#' The registering package is recorded and later matched to the job label.
+#' Missing `allowed_params` means that no step parameters are permitted.
 #'
 #' @param config Named list containing at least `name`, `command`, and
 #'   `args_template`.
 #' @param name Optional runner name overriding `config$name`.
-#' @param overwrite Logical; replace an existing runner file.
+#' @param overwrite Logical; replace a runner owned by the same registering
+#'   package. Defaults to `FALSE`. A package cannot replace another package's
+#'   runner, and installed dsHPC runners cannot be shadowed.
 #' @return Invisibly, the installed runner file path.
 #' @export
-register_dshpc_runner <- function(config, name = NULL, overwrite = TRUE) {
+register_dshpc_runner <- function(config, name = NULL, overwrite = FALSE) {
+  .dshpc_require_trusted_server_caller()
+  owner <- .dshpc_trusted_server_caller()
   config <- .validate_runner_config(config, name = name)
-  dest <- file.path(.dshpc_home(must_exist = FALSE), "runners",
-    paste0(config$name, ".yml"))
-  if (file.exists(dest) && !isTRUE(overwrite)) {
-    stop("Runner already exists: ", config$name, call. = FALSE)
+  builtin <- system.file("runners", paste0(config$name, ".yml"),
+    package = "dsHPC")
+  if (nzchar(builtin) && file.exists(builtin)) {
+    stop("Installed dsHPC runner cannot be replaced: ", config$name,
+      call. = FALSE)
   }
-  dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE, mode = "0777")
-  yaml::write_yaml(config, dest)
-  tryCatch(Sys.chmod(dest, "0666"), error = function(e) NULL)
+  home <- .dshpc_home(must_exist = FALSE)
+  runners_dir <- file.path(home, "runners")
+  locks_dir <- file.path(home, "locks")
+  if (.dshpc_path_is_symlink(home) ||
+      .dshpc_path_is_symlink(runners_dir) ||
+      .dshpc_path_is_symlink(locks_dir)) {
+    stop("Runner registry storage is unavailable.", call. = FALSE)
+  }
+  .dshpc_with_private_umask(dir.create(runners_dir, recursive = TRUE,
+    showWarnings = FALSE, mode = "0770"))
+  .dshpc_with_private_umask(dir.create(locks_dir, recursive = TRUE,
+    showWarnings = FALSE, mode = "0770"))
+  if (!dir.exists(runners_dir) || !dir.exists(locks_dir) ||
+      .dshpc_path_is_symlink(runners_dir) ||
+      .dshpc_path_is_symlink(locks_dir)) {
+    stop("Runner registry storage is unavailable.", call. = FALSE)
+  }
+  lock_path <- file.path(locks_dir, paste0("runner.", config$name, ".lock"))
+  .lock_acquire(lock_path)
+  on.exit(.lock_release(lock_path), add = TRUE)
+  dest <- file.path(runners_dir, paste0(config$name, ".yml"))
+  if (.dshpc_path_is_symlink(dest)) {
+    stop("Runner registry entry must not be a symbolic link.", call. = FALSE)
+  }
+  if (file.exists(dest)) {
+    existing <- tryCatch(.validate_runner_config(yaml::read_yaml(dest)),
+      error = function(e) NULL)
+    if (!isTRUE(overwrite)) {
+      stop("Runner already exists: ", config$name, call. = FALSE)
+    }
+    existing_owner <- if (is.null(existing)) NULL else
+      existing$registered_by %||% NULL
+    if (!is.null(existing_owner) && !identical(existing_owner, owner)) {
+      stop("Runner is owned by another server package: ", config$name,
+        call. = FALSE)
+    }
+    if (is.null(existing_owner)) {
+      comparable <- existing
+      if (!is.null(comparable)) comparable$registered_by <- NULL
+      candidate <- config
+      candidate$registered_by <- NULL
+      if (is.null(existing) || !identical(comparable, candidate)) {
+        stop("Unowned runner must be migrated by the site operator before replacement: ",
+          config$name, call. = FALSE)
+      }
+    }
+  }
+  config$registered_by <- owner
+  tmp <- tempfile(pattern = ".runner-", tmpdir = dirname(dest),
+                  fileext = ".yml")
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  .dshpc_with_private_umask(yaml::write_yaml(config, tmp))
+  tryCatch(Sys.chmod(tmp, "0660", use_umask = FALSE),
+           error = function(e) NULL)
+  if (!file.rename(tmp, dest)) {
+    stop("Could not atomically register runner: ", config$name,
+         call. = FALSE)
+  }
   invisible(dest)
 }
 
@@ -147,11 +209,14 @@ register_dshpc_runner <- function(config, name = NULL, overwrite = TRUE) {
   config$command <- command
 
   if (!is.null(config$args_template)) {
-    if (!is.atomic(config$args_template)) {
+    if (is.list(config$args_template) && length(config$args_template) == 0L) {
+      config$args_template <- character(0)
+    } else if (!is.atomic(config$args_template)) {
       stop("Runner '", config$name, "' args_template must be a vector.",
            call. = FALSE)
+    } else {
+      config$args_template <- as.character(config$args_template)
     }
-    config$args_template <- as.character(config$args_template)
   }
 
   if (!is.null(config$allowed_params)) {
@@ -162,6 +227,41 @@ register_dshpc_runner <- function(config, name = NULL, overwrite = TRUE) {
            call. = FALSE)
     }
     config$allowed_params <- params
+  } else {
+    # Missing allowlists mean no client-configurable parameters, never all.
+    config$allowed_params <- character(0)
+  }
+
+  if (!is.null(config$env)) {
+    if (is.list(config$env) && length(config$env) == 0L) {
+      config$env <- list()
+    } else if (!is.list(config$env) || is.null(names(config$env)) ||
+        any(!nzchar(names(config$env))) || anyDuplicated(names(config$env))) {
+      stop("Runner '", config$name, "' env must be a uniquely named list.",
+        call. = FALSE)
+    }
+    env_names <- names(config$env)
+    bad_names <- !grepl("^[A-Za-z_][A-Za-z0-9_]*$", env_names)
+    reserved <- toupper(env_names) %in% .BLOCKED_ENV_VARS |
+      startsWith(toupper(env_names), "DSHPC_")
+    if (any(bad_names) || any(reserved)) {
+      stop("Runner '", config$name,
+        "' env contains an invalid or reserved variable.", call. = FALSE)
+    }
+    valid_values <- vapply(config$env, function(value) {
+      is.atomic(value) && length(value) == 1L && !is.na(value)
+    }, logical(1))
+    if (!all(valid_values)) {
+      stop("Runner '", config$name, "' env values must be scalar.",
+        call. = FALSE)
+    }
+  }
+  if (!is.null(config$registered_by) &&
+      (!is.character(config$registered_by) ||
+        length(config$registered_by) != 1L || is.na(config$registered_by) ||
+        !grepl("^[A-Za-z][A-Za-z0-9.]*$", config$registered_by))) {
+    stop("Runner '", config$name, "' has invalid registration ownership.",
+      call. = FALSE)
   }
   config
 }

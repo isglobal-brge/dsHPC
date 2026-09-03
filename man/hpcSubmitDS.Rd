@@ -2,22 +2,19 @@
 % Please edit documentation in R/interface.R
 \name{hpcSubmitDS}
 \alias{hpcSubmitDS}
-\title{Submit a Job}
+\title{Disabled Legacy DataSHIELD Job Submission}
 \usage{
 hpcSubmitDS(spec_encoded)
 }
 \arguments{
-\item{spec_encoded}{Job specification as a list, JSON string, or `B64:`
-encoded JSON string.}
+\item{spec_encoded}{Ignored.}
 }
 \value{
-Named list containing `job_id`, resolved `name`, `state`, and
-  `submitted_at`.
+This function never returns successfully.
 }
 \description{
-DataSHIELD assign method used by clients and domain packages to enqueue a
-validated job specification. The specification may be a decoded list, JSON,
-or a `B64:`-prefixed JSON payload. The decoded specification must contain a
-non-empty character `label` field identifying the submitting server-side
-domain package.
+This compatibility symbol always reports that the method was retired. Older
+DataSHIELD server configurations may retain an allowlist entry after a
+package upgrade, so the exported name remains available with no submission
+behavior.
 }

@@ -8,7 +8,7 @@ cancel_jobs_by_tag(
   tag_pattern,
   admin_key,
   reason = "Cancelled by admin",
-  states = c("PENDING", "RUNNING")
+  states = c("PENDING", "RUNNING", "CLONING")
 )
 }
 \arguments{
@@ -24,7 +24,8 @@ cancel_jobs_by_tag(
 data.frame with `job_id`, previous `state`, and new `state`.
 }
 \description{
-Cancels PENDING/RUNNING jobs matching a tag pattern. This is server-side API
+Cancels PENDING/RUNNING/CLONING jobs matching a tag pattern. This is
+server-side API
 for domain packages that own a higher-level workflow, such as a dsImaging
 generation. It is intentionally not registered as a DataSHIELD method.
 }

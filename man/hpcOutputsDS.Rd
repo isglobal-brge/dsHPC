@@ -7,11 +7,12 @@
 hpcOutputsDS(job_id_or_symbol)
 }
 \arguments{
-\item{job_id_or_symbol}{Job id, or a symbol resolving to an object with a
-`job_id` field in the server session.}
+\item{job_id_or_symbol}{Submission symbol resolving to the server-side
+handle, or a B64 bearer returned by \code{\link{hpcJobReferenceDS}()}.}
 }
 \value{
-Data frame with output name, kind, disclosure flag, and size.
+Data frame with output name, kind, disclosure flag, and a
+  compatibility `size_bytes` column containing only `NA`.
 }
 \description{
 Return output names and metadata for a job without loading the output values.

@@ -2,24 +2,21 @@
 % Please edit documentation in R/studio.R
 \name{hpcStudioDS}
 \alias{hpcStudioDS}
-\title{dsHPC Studio snapshot}
+\title{Disabled Legacy DataSHIELD Studio Snapshot}
 \usage{
 hpcStudioDS(scope = NULL, label = NULL, mode = "mine+global")
 }
 \arguments{
-\item{scope}{Optional B64/list payload with `.owner`.}
+\item{scope}{Ignored.}
 
-\item{label}{Character or NULL; optional label filter.}
+\item{label}{Ignored.}
 
-\item{mode}{Character; one of `"mine"`, `"mine+global"`, or `"global"`.}
+\item{mode}{Ignored.}
 }
 \value{
-Named list consumed by dsHPCClient's dsHPC Studio.
+This function never returns successfully.
 }
 \description{
-Return a disclosure-safe snapshot for one server. This method exposes job
-control-plane metadata only: job state, timings, step state, DAG structure,
-output names/kinds/sizes, and sanitized scheduler health. It never returns
-output values, artifact paths, raw logs, owner identifiers, worker PIDs, or
-executable backend command paths.
+This compatibility symbol always reports that the method was retired,
+including when it remains in a persisted DataSHIELD allowlist.
 }

@@ -1,30 +1,48 @@
 # Module: dsHPC Studio observability API
-# Aggregate-only, disclosure-safe metadata for client-side dashboards.
+# Trusted server-side metadata plus a retired legacy DataSHIELD wrapper.
 
-#' dsHPC Studio snapshot
+#' Disabled Legacy DataSHIELD Studio Snapshot
 #'
-#' Return a disclosure-safe snapshot for one server. This method exposes job
-#' control-plane metadata only: job state, timings, step state, DAG structure,
-#' output names/kinds/sizes, and sanitized scheduler health. It never returns
+#' This compatibility symbol always reports that the method was retired,
+#' including when it remains in a persisted DataSHIELD allowlist.
+#'
+#' @param scope Ignored.
+#' @param label Ignored.
+#' @param mode Ignored.
+#' @return This function never returns successfully.
+#' @export
+hpcStudioDS <- function(scope = NULL, label = NULL, mode = "mine+global") {
+  .legacy_ds_method_disabled("hpcStudioDS")
+}
+
+#' dsHPC Studio Snapshot for Trusted Server Code
+#'
+#' Return an operational snapshot of explicitly global jobs for one server.
+#' This server-to-server API exposes control-plane metadata: job state, timings, step
+#' state, DAG structure, output names/kinds, and sanitized scheduler health.
+#' It never returns exact output sizes,
 #' output values, artifact paths, raw logs, owner identifiers, worker PIDs, or
 #' executable backend command paths.
 #'
-#' @param scope Optional B64/list payload with `.owner`.
+#' @param scope Retained for server API compatibility; ignored.
 #' @param label Character or NULL; optional label filter.
-#' @param mode Character; one of `"mine"`, `"mine+global"`, or `"global"`.
-#' @return Named list consumed by dsHPCClient's dsHPC Studio.
+#' @param mode Retained for server API compatibility; global scope is enforced.
+#' @return Named operational snapshot for trusted server-side consumers.
 #' @export
-hpcStudioDS <- function(scope = NULL, label = NULL, mode = "mine+global") {
+hpcStudioInternal <- function(scope = NULL, label = NULL,
+                              mode = "mine+global") {
+  .dshpc_require_trusted_server_caller()
+  .dshpc_require_trusted_server_caller(label)
   mode <- match.arg(mode, c("mine", "mine+global", "global"))
-  scope <- .ds_arg(scope)
-  owner <- if (is.list(scope)) scope$.owner else scope
-  owner_id <- .get_owner_id(owner)
   label <- .studio_label(label)
 
   db <- .db_connect()
   on.exit(.db_close(db))
 
-  jobs <- .studio_jobs(db, owner_id = owner_id, label = label, mode = mode)
+  # Client-supplied owner scopes are not an authenticated Rock identity.
+  # Analyst Studio therefore exposes explicitly global jobs only.
+  mode <- "global"
+  jobs <- .studio_jobs(db, owner_id = "", label = label, mode = mode)
   job_ids <- jobs$job_id
   specs <- .studio_specs(db, job_ids)
   steps <- .studio_steps(db, job_ids, specs)
@@ -271,13 +289,13 @@ hpcStudioDS <- function(scope = NULL, label = NULL, mode = "mine+global") {
   if (length(job_ids) == 0) return(.studio_empty_outputs())
   rows <- .studio_query_for_jobs(db, job_ids,
     paste(
-      "SELECT job_id, step_index, name, kind, safe_for_client, size_bytes,",
+      "SELECT job_id, step_index, name, kind, safe_for_client,",
       "created_at FROM outputs WHERE job_id IN (%s)",
       "ORDER BY job_id, id"))
   if (nrow(rows) == 0) return(.studio_empty_outputs())
   rows$step_index <- as.integer(rows$step_index)
   rows$safe_for_client <- as.logical(rows$safe_for_client)
-  rows$size_bytes <- as.numeric(rows$size_bytes)
+  rows$size_bytes <- rep(NA_real_, nrow(rows))
   rows
 }
 
@@ -371,10 +389,7 @@ hpcStudioDS <- function(scope = NULL, label = NULL, mode = "mine+global") {
 
 #' @keywords internal
 .studio_sanitize_error <- function(x) {
-  if (is.null(x) || length(x) == 0 || is.na(x[1]) || !nzchar(x[1])) {
-    return(NA_character_)
-  }
-  sub(":.*", "", as.character(x[1]))
+  .safe_job_error(x)
 }
 
 #' @keywords internal

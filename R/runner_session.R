@@ -3,7 +3,7 @@
 
 #' @keywords internal
 .run_session_step <- function(db, job_id, step_index, step, step_dir, input_dir) {
-  result <- tryCatch({
+  result <- tryCatch(.dshpc_with_private_umask({
     switch(step$type,
       resolve_dataset = .session_resolve_dataset(step, step_dir, db, job_id, step_index),
       assign_table    = list(type = "assign_table", symbol = step$symbol),
@@ -16,7 +16,7 @@
       publish_dataset = .execute_publish(job_id, step, input_dir, db),
       stop("Unknown session step type: ", step$type, call. = FALSE)
     )
-  }, error = function(e) {
+  }), error = function(e) {
     .store_update_step(db, job_id, step_index, state = "failed",
       error_message = conditionMessage(e),
       finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
@@ -65,7 +65,7 @@
   size <- file.info(out_path)$size
 
   # Emit outputs stay server-side -- NOT safe for client disclosure.
-  # Use hpcLoadOutputDS (assign) to load them into the server R session.
+  # Use hpcLoadOutputInternal to load them into the server R session.
   .db_register_output(db, job_id, step_index, output_name,
     "emit_value", out_path, size_bytes = size, safe_for_client = FALSE)
 
@@ -74,36 +74,33 @@
 
 #' @keywords internal
 .session_safe_summary <- function(job_id, step_dir, input_dir, db, step_index) {
-  summary <- list(job_id = job_id)
+  summary <- list()
 
   if (!is.null(input_dir) && dir.exists(input_dir)) {
     files <- list.files(input_dir, full.names = TRUE)
     summary$n_output_files <- length(files)
-    summary$output_size_bytes <- sum(file.info(files)$size, na.rm = TRUE)
 
     # Count rows in output tables for summary reporting.
-    # nfilter enforcement happens at upstream layers, not here.
-    # The summary only reports
-    # bucketed counts -- the data already exists on the server.
     for (f in files) {
       if (grepl("\\.csv$", f, ignore.case = TRUE)) {
-        summary$n_samples <- length(readLines(f, warn = FALSE)) - 1L
+        # Quoted fields may contain newlines, so physical lines are not rows.
+        summary$n_samples <- tryCatch(
+          nrow(utils::read.csv(f, stringsAsFactors = FALSE)),
+          error = function(e) NA_integer_)
       } else if (grepl("\\.parquet$", f, ignore.case = TRUE)) {
-        summary$n_samples <- nrow(arrow::read_parquet(f, as_data_frame = FALSE))
+        summary$n_samples <- tryCatch(
+          nrow(arrow::read_parquet(f, as_data_frame = FALSE)),
+          error = function(e) NA_integer_)
       }
     }
   }
 
-  # Bucket counts (standard DataSHIELD disclosure control)
+  # Suppress small counts, then bucket counts above the disclosure floor.
   if (!is.null(summary$n_output_files)) {
-    n <- as.integer(summary$n_output_files)
-    if (!is.na(n) && n >= 4)
-      summary$n_output_files <- as.integer(2^round(log2(n)))
+    summary$n_output_files <- .safe_summary_count(summary$n_output_files)
   }
   if (!is.null(summary$n_samples)) {
-    n <- as.integer(summary$n_samples)
-    if (!is.na(n) && n >= 4)
-      summary$n_samples <- as.integer(2^round(log2(n)))
+    summary$n_samples <- .safe_summary_count(summary$n_samples)
   }
 
   out_path <- file.path(step_dir, "output", "summary.rds")

@@ -52,12 +52,12 @@ test_that("job name templates are resolved when a job is stored", {
     "LUNG1 4 radiomics")
 })
 
-test_that("hpcSubmitDS resolves job name templates", {
+test_that("hpcSubmitInternal resolves job name templates", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
 
-  first <- hpcSubmitDS(list(
+  first <- trusted_hpc_call(hpcSubmitInternal, list(
     .owner = "alice",
     job_id = "job_template_1",
     name = "Aerts signature {number}",
@@ -66,7 +66,7 @@ test_that("hpcSubmitDS resolves job name templates", {
     steps = list(list(type = "emit", plane = "session",
       output_name = "out", value = 1))
   ))
-  second <- hpcSubmitDS(list(
+  second <- trusted_hpc_call(hpcSubmitInternal, list(
     .owner = "alice",
     job_id = "job_template_2",
     name = "Aerts signature {number}",

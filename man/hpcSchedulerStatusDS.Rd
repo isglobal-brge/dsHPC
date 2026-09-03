@@ -2,10 +2,14 @@
 % Please edit documentation in R/interface.R
 \name{hpcSchedulerStatusDS}
 \alias{hpcSchedulerStatusDS}
-\title{Get Scheduler Status}
+\title{Disabled Legacy DataSHIELD Scheduler Status}
 \usage{
 hpcSchedulerStatusDS()
 }
+\value{
+This function never returns successfully.
+}
 \description{
-Get Scheduler Status
+This compatibility symbol always reports that the method was retired,
+including when it remains in a persisted DataSHIELD allowlist.
 }

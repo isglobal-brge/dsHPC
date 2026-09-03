@@ -1,13 +1,13 @@
 # Module: Step Execution
 # Called by worker daemon or inline for session-only jobs.
 
-.BLOCKED_ENV_VARS <- c("PATH", "HOME", "USER", "SHELL",
+.BLOCKED_ENV_VARS <- c("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "USER", "SHELL",
   "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
   "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP",
   "BASH_ENV", "ENV", "CDPATH", "IFS")
 
 # Output kinds that are safe to return to the client via hpcResultDS.
-# Everything else stays server-side (loadable via hpcLoadOutputDS).
+# Everything else stays server-side (loadable via hpcLoadOutputInternal).
 .CLIENT_SAFE_KINDS <- c("summary", "aggregate_result", "job_metadata")
 
 #' Execute the current step of a job
@@ -18,7 +18,7 @@
   input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir)
 
   step_hash <- NA_character_
-  if (.step_cache_enabled(step)) {
+  if (.step_cache_enabled_for_job(db, job_id, step)) {
     step_hash <- .step_cache_hash(step, input_dir)
     cached <- .step_cache_find(db, step_hash, current_job_id = job_id)
     if (!is.null(cached) &&
@@ -29,9 +29,9 @@
     inflight <- .step_cache_inflight_find(db, step_hash,
       current_job_id = job_id)
     if (!is.null(inflight)) {
-      .step_cache_wait_for_inflight(db, job_id, step_index, step_hash,
-        inflight)
-      return(invisible(TRUE))
+      waiting <- .step_cache_wait_for_inflight(db, job_id, step_index,
+        step_hash, inflight)
+      if (isTRUE(waiting)) return(invisible(TRUE))
     }
   }
 
@@ -113,50 +113,73 @@
 #' or "job_metadata" can have their values returned to the client via
 #' hpcResultDS(). All other outputs (emit_value, artifact_file, etc.)
 #' are listed by name/kind only -- their values stay server-side and
-#' must be loaded via hpcLoadOutputDS() (assign) or published as assets.
+#' must be loaded via hpcLoadOutputInternal() or published as assets.
 #'
 #' @keywords internal
 .build_job_result <- function(db, job_id) {
   home <- .dshpc_home()
   result_dir <- file.path(home, "artifacts", job_id, "result")
-  dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+  if (.dshpc_path_is_symlink(result_dir)) {
+    stop("Job result storage is unavailable.", call. = FALSE)
+  }
+  .dshpc_with_private_umask(dir.create(
+    result_dir, recursive = TRUE, showWarnings = FALSE, mode = "0770"))
+  if (!dir.exists(result_dir)) {
+    stop("Job result storage is unavailable.", call. = FALSE)
+  }
+  .dshpc_validate_job_artifact_path(result_dir, job_id, check_tree = TRUE)
+  tryCatch(Sys.chmod(result_dir, "0770", use_umask = FALSE),
+           error = function(e) NULL)
 
-  safe_result <- list(
-    job_id = job_id,
-    ready = TRUE
-  )
+  safe_result <- list(ready = TRUE)
 
   # Only summary/aggregate_result outputs cross the wire with values
   safe_outputs <- DBI::dbGetQuery(db,
-    "SELECT name, kind, path_or_ref, size_bytes FROM outputs
-     WHERE job_id = ? AND kind IN ('summary', 'aggregate_result', 'job_metadata')",
+    "SELECT name, kind, path_or_ref FROM outputs
+     WHERE job_id = ?
+       AND safe_for_client = 1
+       AND kind IN ('summary', 'aggregate_result', 'job_metadata')",
     params = list(job_id))
 
   if (nrow(safe_outputs) > 0) {
     safe_result$summaries <- lapply(seq_len(nrow(safe_outputs)), function(i) {
       row <- safe_outputs[i, ]
       out <- list(name = row$name, kind = row$kind)
-      if (!is.na(row$path_or_ref) && file.exists(row$path_or_ref) &&
-          grepl("\\.rds$", row$path_or_ref)) {
-        out$value <- readRDS(row$path_or_ref)
+      path <- .dshpc_validate_job_artifact_path(row$path_or_ref, job_id,
+        check_tree = TRUE)
+      if (grepl("\\.rds$", path)) {
+        value <- tryCatch(
+          suppressWarnings(readRDS(path)),
+          error = function(e) stop(
+            "A client-safe result could not be read.", call. = FALSE))
+        if (!.dshpc_client_safe_value(value, row$kind)) {
+          stop("A client-safe result failed disclosure validation.",
+            call. = FALSE)
+        }
+        out$value <- value
       }
       out
     })
   }
 
-  # ALL outputs listed by name/kind only (no values) -- for discoverability
-  all_outputs <- DBI::dbGetQuery(db,
-    "SELECT name, kind, size_bytes FROM outputs WHERE job_id = ?",
-    params = list(job_id))
-
-  safe_result$available_outputs <- if (nrow(all_outputs) > 0) {
-    lapply(seq_len(nrow(all_outputs)), function(i) {
-      list(name = all_outputs$name[i], kind = all_outputs$kind[i],
-           size_bytes = all_outputs$size_bytes[i])
+  # Unsafe output names can themselves contain record identifiers. Only
+  # explicitly client-safe outputs are discoverable through the result API.
+  safe_result$available_outputs <- if (nrow(safe_outputs) > 0) {
+    lapply(seq_len(nrow(safe_outputs)), function(i) {
+      list(name = safe_outputs$name[i], kind = safe_outputs$kind[i])
     })
   } else list()
 
-  saveRDS(safe_result, file.path(result_dir, "result.rds"))
+  result_path <- file.path(result_dir, "result.rds")
+  tmp <- tempfile(pattern = ".result-", tmpdir = result_dir,
+                  fileext = ".rds")
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  .dshpc_with_private_umask(saveRDS(safe_result, tmp))
+  tryCatch(Sys.chmod(tmp, "0660", use_umask = FALSE),
+           error = function(e) NULL)
+  if (!file.rename(tmp, result_path)) {
+    stop("Job result storage is unavailable.", call. = FALSE)
+  }
   safe_result
 }
 
@@ -168,13 +191,22 @@
   job_dir <- file.path(home, "artifacts", job_id)
   step_dir <- file.path(job_dir, sprintf("step_%03d", step_index))
   out_dir <- file.path(step_dir, "output")
+  if (any(.dshpc_path_is_symlink(c(job_dir, step_dir, out_dir)))) {
+    stop("Job artifact storage is unavailable.", call. = FALSE)
+  }
   # Create with permissive mode so both worker and DS sessions can access
-  dir.create(job_dir, recursive = TRUE, showWarnings = FALSE, mode = "0755")
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE, mode = "0755")
+  .dshpc_with_private_umask(dir.create(
+    job_dir, recursive = TRUE, showWarnings = FALSE, mode = "0770"))
+  .dshpc_with_private_umask(dir.create(
+    out_dir, recursive = TRUE, showWarnings = FALSE, mode = "0770"))
+  .dshpc_validate_job_artifact_path(step_dir, job_id, check_tree = TRUE)
   # Ensure the dirs are writable even if already existed with restrictive perms
-  tryCatch(Sys.chmod(job_dir, "0755"), error = function(e) NULL)
-  tryCatch(Sys.chmod(step_dir, "0755"), error = function(e) NULL)
-  tryCatch(Sys.chmod(out_dir, "0755"), error = function(e) NULL)
+  tryCatch(Sys.chmod(job_dir, "0770", use_umask = FALSE),
+           error = function(e) NULL)
+  tryCatch(Sys.chmod(step_dir, "0770", use_umask = FALSE),
+           error = function(e) NULL)
+  tryCatch(Sys.chmod(out_dir, "0770", use_umask = FALSE),
+           error = function(e) NULL)
   step_dir
 }
 
@@ -235,14 +267,18 @@
     "SELECT output_ref FROM steps WHERE job_id = ? AND step_index = ?",
     params = list(job_id, as.integer(step_index)))
   if (nrow(row) == 0 || is.na(row$output_ref[1])) return(NULL)
-  file.path(.dshpc_home(), row$output_ref[1])
+  .dshpc_resolve_job_artifact_ref(row$output_ref[1], job_id,
+    check_tree = TRUE)
 }
 
 #' @keywords internal
 .stage_step_inputs <- function(db, job_id, refs, step_dir) {
+  step_dir <- .dshpc_validate_job_artifact_path(step_dir, job_id,
+    check_tree = TRUE)
   input_root <- file.path(step_dir, "input")
   if (dir.exists(input_root)) unlink(input_root, recursive = TRUE, force = TRUE)
-  dir.create(input_root, recursive = TRUE, showWarnings = FALSE, mode = "0755")
+  .dshpc_with_private_umask(dir.create(
+    input_root, recursive = TRUE, showWarnings = FALSE, mode = "0770"))
 
   manifest <- list()
   used_names <- character(0)
@@ -254,8 +290,10 @@
     if (name %in% used_names) name <- paste0(name, "_", i)
     used_names <- c(used_names, name)
     target <- file.path(input_root, name)
-    ok <- tryCatch(file.symlink(source, target), error = function(e) FALSE)
-    if (!isTRUE(ok)) .copy_input_tree(source, target)
+    # Copies keep the staged input self-contained. Symlinks could be swapped
+    # after validation or point a later runner outside this job's artifacts.
+    .copy_input_tree(source, target,
+      target_root = file.path(.dshpc_home(), "artifacts"))
     manifest[[name]] <- list(
       step = as.integer(ref$step),
       ref = ref$ref %||% NA_character_,
@@ -263,24 +301,44 @@
       path = target
     )
   }
-  jsonlite::write_json(manifest, file.path(input_root, "inputs.json"),
-    auto_unbox = TRUE, pretty = TRUE)
+  manifest_path <- file.path(input_root, "inputs.json")
+  .dshpc_with_private_umask(jsonlite::write_json(manifest, manifest_path,
+    auto_unbox = TRUE, pretty = TRUE))
+  tryCatch(Sys.chmod(manifest_path, "0660", use_umask = FALSE),
+           error = function(e) NULL)
   input_root
 }
 
 #' @keywords internal
-.copy_input_tree <- function(source, target) {
+.copy_input_tree <- function(source, target, target_root = NULL) {
+  .dshpc_assert_symlink_free_tree(source)
+  if (!is.null(target_root)) {
+    .dshpc_validate_storage_target(target, target_root)
+  }
+  if (.dshpc_path_is_symlink(target)) {
+    stop("Artifact copy target failed validation.", call. = FALSE)
+  }
   if (dir.exists(source)) {
-    dir.create(target, recursive = TRUE, showWarnings = FALSE, mode = "0755")
+    .dshpc_with_private_umask(dir.create(
+      target, recursive = TRUE, showWarnings = FALSE, mode = "0770"))
     files <- list.files(source, all.files = TRUE, no.. = TRUE, full.names = TRUE)
     for (f in files) {
-      file.copy(f, target, recursive = TRUE, copy.date = TRUE,
-        overwrite = TRUE)
+      copied <- .dshpc_with_private_umask(file.copy(f, target,
+        recursive = TRUE, copy.date = TRUE, copy.mode = FALSE,
+        overwrite = TRUE))
+      if (!all(copied)) {
+        stop("Artifact copy failed.", call. = FALSE)
+      }
     }
   } else if (file.exists(source)) {
-    dir.create(dirname(target), recursive = TRUE, showWarnings = FALSE)
-    file.copy(source, target, overwrite = TRUE, copy.date = TRUE)
+    .dshpc_with_private_umask(dir.create(dirname(target), recursive = TRUE,
+      showWarnings = FALSE, mode = "0770"))
+    copied <- .dshpc_with_private_umask(file.copy(source, target,
+      overwrite = TRUE, copy.date = TRUE, copy.mode = FALSE))
+    if (!isTRUE(copied)) stop("Artifact copy failed.", call. = FALSE)
   }
+  .dshpc_assert_symlink_free_tree(target)
+  invisible(target)
 }
 
 #' @keywords internal

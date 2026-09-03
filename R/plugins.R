@@ -6,21 +6,56 @@
 #'
 #' Called by domain packages such as dsImaging to register
 #' publish logic. dsHPC calls the registered function when a
-#' publish_asset or publish_dataset step completes.
+#' publish_asset or publish_dataset step completes. Registration records the
+#' calling package and execution requires a matching job-label family.
 #'
 #' @param kind Character; publisher kind (e.g. "imaging_asset", "radiomics_dataset").
 #' @param fn Function; publisher function(job_id, step, output_dir, db) -> list.
+#' @param overwrite Logical; replace a publisher owned by the same registering
+#'   package. Defaults to `FALSE`; cross-package replacement is denied.
 #' @export
-register_dshpc_publisher <- function(kind, fn) {
+register_dshpc_publisher <- function(kind, fn, overwrite = FALSE) {
+  .dshpc_require_trusted_server_caller()
+  owner <- .dshpc_trusted_server_caller()
+  kind <- .validate_identifier(kind, "Publisher kind")
   if (!is.function(fn)) stop("Publisher must be a function.", call. = FALSE)
-  .dshpc_env$.publishers[[kind]] <- fn
+  existing <- .dshpc_env$.publishers[[kind]]
+  if (!is.null(existing)) {
+    existing_owner <- if (is.list(existing) && is.function(existing$fn)) {
+      existing$owner %||% "dsHPC"
+    } else {
+      # Pre-0.2.3 in-memory registrations were made inside the trusted node.
+      "dsHPC"
+    }
+    if (!identical(existing_owner, owner)) {
+      stop("Publisher is owned by another server package: ", kind,
+        call. = FALSE)
+    }
+    existing_fn <- if (is.list(existing) && is.function(existing$fn)) {
+      existing$fn
+    } else existing
+    if (!isTRUE(overwrite)) {
+      if (identical(existing_fn, fn)) return(invisible(TRUE))
+      stop("Publisher already exists: ", kind, call. = FALSE)
+    }
+  }
+  .dshpc_env$.publishers[[kind]] <- list(fn = fn, owner = owner)
   invisible(TRUE)
 }
 
 #' Get a registered publisher
 #' @keywords internal
 .get_publisher <- function(kind) {
-  .dshpc_env$.publishers[[kind]]
+  entry <- .dshpc_env$.publishers[[kind]]
+  if (is.list(entry) && is.function(entry$fn)) entry$fn else entry
+}
+
+#' Get the package owner of a registered publisher
+#' @noRd
+.get_publisher_owner <- function(kind) {
+  entry <- .dshpc_env$.publishers[[kind]]
+  if (is.list(entry) && is.function(entry$fn)) entry$owner %||% "dsHPC" else
+    if (is.function(entry)) "dsHPC" else NULL
 }
 
 #' List registered publishers
@@ -36,6 +71,8 @@ register_dshpc_publisher <- function(kind, fn) {
 #'
 #' @keywords internal
 .execute_publish <- function(job_id, step, output_dir, db) {
+  output_dir <- .dshpc_validate_job_artifact_path(output_dir, job_id,
+    check_tree = TRUE)
   publish_kind <- step$publish_kind %||% "generic"
   publisher <- .get_publisher(publish_kind)
   if (is.null(publisher)) {
@@ -44,6 +81,13 @@ register_dshpc_publisher <- function(kind, fn) {
   }
 
   if (!is.null(publisher)) {
+    owner <- .get_publisher_owner(publish_kind)
+    job <- .store_get_job(db, job_id)
+    if (is.null(job) ||
+        (!identical(owner, "dsHPC") &&
+          !.dshpc_label_matches_package(job$label, owner))) {
+      stop("Publisher is not registered for this job label.", call. = FALSE)
+    }
     # Delegate to domain-specific publisher
     return(publisher(job_id, step, output_dir, db))
   }
@@ -86,23 +130,27 @@ register_dshpc_publisher <- function(kind, fn) {
   .validate_identifier(asset_name, "asset_name")
 
   home <- .dshpc_home()
+  output_dir <- .dshpc_validate_job_artifact_path(output_dir, job_id,
+    check_tree = TRUE)
   lock_path <- .lock_acquire_dataset(dataset_id)
   tryCatch({
     publish_dir <- file.path(home, "publish", dataset_id, asset_name)
-    dir.create(dirname(publish_dir), recursive = TRUE, showWarnings = FALSE)
+    .dshpc_with_private_umask(dir.create(dirname(publish_dir),
+      recursive = TRUE, showWarnings = FALSE, mode = "0770"))
+    tryCatch(Sys.chmod(dirname(publish_dir), "0770", use_umask = FALSE),
+             error = function(e) NULL)
     if (dir.exists(publish_dir)) {
       backup <- paste0(publish_dir, ".bak.", format(Sys.time(), "%Y%m%d%H%M%S"))
       file.rename(publish_dir, backup)
     }
     # Copy output to publish location
-    dir.create(publish_dir, recursive = TRUE, showWarnings = FALSE)
-    files <- list.files(output_dir, full.names = TRUE)
-    for (f in files) file.copy(f, publish_dir, recursive = TRUE)
+    .copy_input_tree(output_dir, publish_dir,
+      target_root = file.path(home, "publish"))
 
     .db_log_event(db, job_id, "published",
       list(dataset_id = dataset_id, asset_name = asset_name))
     .db_register_output(db, job_id, step$step_index %||% NA_integer_,
-      asset_name, "published_asset", publish_dir, safe_for_client = FALSE)
+      asset_name, "published_asset", output_dir, safe_for_client = FALSE)
 
     list(status = "published", dataset_id = dataset_id, asset_name = asset_name,
          path = publish_dir)
@@ -115,7 +163,10 @@ register_dshpc_publisher <- function(kind, fn) {
 .lock_acquire_dataset <- function(dataset_id, timeout_secs = 60) {
   home <- .dshpc_home()
   lock_dir <- file.path(home, "locks")
-  dir.create(lock_dir, recursive = TRUE, showWarnings = FALSE)
+  .dshpc_with_private_umask(dir.create(lock_dir, recursive = TRUE,
+    showWarnings = FALSE, mode = "0770"))
+  tryCatch(Sys.chmod(lock_dir, "0770", use_umask = FALSE),
+           error = function(e) NULL)
   lock_path <- file.path(lock_dir, paste0("dataset.", dataset_id, ".lock"))
   .lock_acquire(lock_path, timeout_secs)
   lock_path
@@ -127,9 +178,13 @@ register_dshpc_publisher <- function(kind, fn) {
   repeat {
     if (!file.exists(lock_path)) {
       tryCatch({
-        con <- file(lock_path, open = "wx")
-        writeLines(as.character(Sys.getpid()), con)
-        close(con)
+        .dshpc_with_private_umask(local({
+          con <- file(lock_path, open = "wx")
+          on.exit(close(con))
+          writeLines(as.character(Sys.getpid()), con)
+        }))
+        tryCatch(Sys.chmod(lock_path, "0660", use_umask = FALSE),
+                 error = function(e) NULL)
         return(TRUE)
       }, error = function(e) {})
     }

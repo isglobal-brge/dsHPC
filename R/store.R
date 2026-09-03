@@ -3,8 +3,13 @@
 
 #' @keywords internal
 .store_create_job <- function(db, job_id, owner_id, spec, total_steps,
-                               spec_hash = NULL) {
+                               spec_hash = NULL, access_token_hash = NULL,
+                               initial_state = "PENDING", clone_owner = NULL) {
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  if (!is.character(initial_state) || length(initial_state) != 1L ||
+      !initial_state %in% c("PENDING", "CLONING")) {
+    stop("Invalid initial job state.", call. = FALSE)
+  }
 
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
@@ -18,17 +23,20 @@
       null = "null"))
     tags <- if (!is.null(spec$tags))
       paste(spec$tags, collapse = ",") else NA_character_
-    visibility <- spec$visibility %||% "global"
+    visibility <- spec$visibility %||% "private"
+    if (!visibility %in% c("private", "global"))
+      stop("visibility must be 'private' or 'global'.", call. = FALSE)
     DBI::dbExecute(db,
       "INSERT INTO jobs (job_id, owner_id, state, step_index, total_steps,
                          resource_class, name, label, tags, visibility,
-                         spec_hash, submitted_at, spec_json)
-       VALUES (?, ?, 'PENDING', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      params = list(job_id, owner_id, total_steps,
+                         spec_hash, access_token_hash, submitted_at, spec_json)
+       VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      params = list(job_id, owner_id, initial_state, total_steps,
                      spec$resource_class %||% "default",
                      name,
                      label, tags, visibility,
                      spec_hash %||% NA_character_,
+                     access_token_hash %||% NA_character_,
                      now, spec_json))
     for (i in seq_along(spec$steps)) {
       s <- spec$steps[[i]]
@@ -41,8 +49,9 @@
         params = list(job_id, i, s$type, s$plane,
                        s$runner %||% NA_character_, input_refs))
     }
-    .db_log_event(db, job_id, "created",
-      list(total_steps = total_steps, owner = owner_id))
+    created_details <- list(total_steps = total_steps, owner = owner_id)
+    if (!is.null(clone_owner)) created_details$clone_owner <- clone_owner
+    .db_log_event(db, job_id, "created", created_details)
     DBI::dbExecute(db, "COMMIT")
   }, error = function(e) {
     tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)

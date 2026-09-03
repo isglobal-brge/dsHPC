@@ -2,17 +2,21 @@
 % Please edit documentation in R/interface.R
 \name{hpcListDS}
 \alias{hpcListDS}
-\title{List Jobs}
+\title{Disabled Legacy DataSHIELD Job Enumeration}
 \usage{
 hpcListDS(label = NULL, scope = NULL, mode = "mine+global")
 }
 \arguments{
-\item{label}{Character or NULL; filter by label.}
+\item{label}{Ignored.}
 
-\item{scope}{Optional B64/list payload with `.owner`.}
+\item{scope}{Ignored.}
 
-\item{mode}{Character; `"mine"`, `"mine+global"`, or `"global"`.}
+\item{mode}{Ignored.}
+}
+\value{
+This function never returns successfully.
 }
 \description{
-Returns disclosure-safe job rows, optionally filtered by label and scope.
+This compatibility symbol always reports that the method was retired,
+including under a persisted allowlist from an older dsHPC deployment.
 }

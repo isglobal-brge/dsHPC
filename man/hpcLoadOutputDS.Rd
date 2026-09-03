@@ -2,7 +2,7 @@
 % Please edit documentation in R/interface.R
 \name{hpcLoadOutputDS}
 \alias{hpcLoadOutputDS}
-\title{Load a Job Output into the Server Session}
+\title{Disabled Legacy DataSHIELD Output Loading}
 \usage{
 hpcLoadOutputDS(
   job_id_or_symbol,
@@ -12,33 +12,19 @@ hpcLoadOutputDS(
 )
 }
 \arguments{
-\item{job_id_or_symbol}{Character; job ID or symbol name.}
+\item{job_id_or_symbol}{Ignored.}
 
-\item{output_name}{Character; name of the output to load.}
+\item{output_name}{Ignored.}
 
-\item{as_descriptor}{Logical; if TRUE and output is Parquet, return a
-FlowerDatasetDescriptor instead of loading data into memory.}
+\item{as_descriptor}{Ignored.}
 
-\item{required_label}{Mandatory label substring identifying the caller
-domain (typically the calling server-side package's name), matched
-against the job's label as the ownership check.}
+\item{required_label}{Ignored.}
 }
 \value{
-The loaded object.
+This function never returns successfully.
 }
 \description{
-Guarded DataSHIELD assign method, declared as an \code{AssignMethods} entry
-in \code{DESCRIPTION}. Domain server-side packages are the primary intended
-callers, composing it R-internally after validating their own workflows
-(see the module header at the top of this file). Deployments may also
-allowlist it for direct analyst use, in which case the same guards apply:
-a mandatory non-empty \code{required_label} that must match the job's
-domain label (ownership check), the job must be in a terminal
-\code{FINISHED} or \code{PUBLISHED} state, and tabular outputs are checked
-against the \code{nfilter.subset} disclosure floor before loading.
-}
-\details{
-When \code{as_descriptor = TRUE} and the output is a Parquet file,
-returns a \code{FlowerDatasetDescriptor} instead of loading the data
-into memory. This enables zero-copy column projection downstream.
+This compatibility symbol always reports that the method was retired,
+including when an upgraded server still has the former assign method in its
+persisted allowlist.
 }

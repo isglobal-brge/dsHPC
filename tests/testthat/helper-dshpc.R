@@ -17,6 +17,11 @@ cleanup_test_home <- function(home) {
   unlink(home, recursive = TRUE)
 }
 
+# Exercise server-only APIs through a package-namespace caller, matching how
+# dsImaging/dsRadiomics invoke them in production.
+trusted_hpc_call <- function(fn, ...) fn(...)
+environment(trusted_hpc_call) <- asNamespace("dsHPC")
+
 #' Create a minimal valid job spec
 make_test_spec <- function(n_steps = 1) {
   steps <- lapply(seq_len(n_steps), function(i) {

@@ -539,8 +539,14 @@
     written_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
   path <- file.path(step_dir, "external_backend.json")
   tmp <- paste0(path, ".tmp")
-  writeLines(jsonlite::toJSON(marker, auto_unbox = TRUE, pretty = TRUE), tmp)
-  file.rename(tmp, path)
+  .dshpc_with_private_umask(writeLines(
+    jsonlite::toJSON(marker, auto_unbox = TRUE, pretty = TRUE), tmp))
+  tryCatch(Sys.chmod(tmp, "0660", use_umask = FALSE),
+           error = function(e) NULL)
+  if (!file.rename(tmp, path)) {
+    unlink(tmp, force = TRUE)
+    stop("External backend state could not be persisted.", call. = FALSE)
+  }
   invisible(TRUE)
 }
 
@@ -571,6 +577,7 @@
   job_name <- paste0("dshpc_", substr(gsub("[^A-Za-z0-9]", "", job_id), 1, 16),
     "_", step_index)
   args <- c("--parsable",
+    "--export=NONE",
     paste0("--job-name=", job_name),
     paste0("--output=", file.path(prepared$step_dir, "stdout.log")),
     paste0("--error=", file.path(prepared$step_dir, "stderr.log")),
@@ -1143,8 +1150,21 @@
     }, character(1))
   } else character(0)
   command <- .backend_step_command(prepared, settings)
+  clean_assignments <- vapply(names(env), function(nm) {
+    shQuote(paste0(nm, "=", as.character(env[[nm]])))
+  }, character(1))
+  clean_exec <- paste(c(
+    "  exec /usr/bin/env -i",
+    clean_assignments,
+    "DSHPC_RUNTIME_ENV_INITIALIZED=1",
+    "/usr/bin/env bash \"$0\" \"$@\""), collapse = " ")
   lines <- c(
     "#!/usr/bin/env bash",
+    "umask 007",
+    "if [ \"${DSHPC_RUNTIME_ENV_INITIALIZED:-}\" != \"1\" ]; then",
+    clean_exec,
+    "fi",
+    "unset DSHPC_RUNTIME_ENV_INITIALIZED",
     "set -u",
     paste0("cd ", shQuote(prepared$step_dir %||% dirname(path))),
     paste0("mkdir -p ", shQuote(prepared$output_dir)),
@@ -1157,8 +1177,9 @@
     "status=$?",
     "write_exit_code \"$status\"",
     "exit \"$status\"")
-  writeLines(lines, path)
-  tryCatch(Sys.chmod(path, "0755"), error = function(e) NULL)
+  .dshpc_with_private_umask(writeLines(lines, path))
+  tryCatch(Sys.chmod(path, "0770", use_umask = FALSE),
+           error = function(e) NULL)
   path
 }
 

@@ -16,11 +16,12 @@ test_that("cancel_jobs_by_tag requires admin key and cancels matching active job
   dsHPC:::.store_update_job(db, "job_gen_a_done", state = "FINISHED")
 
   expect_error(
-    cancel_jobs_by_tag("%gen_a%", admin_key = list(.admin_key = "wrong")),
+    trusted_hpc_call(cancel_jobs_by_tag, "%gen_a%",
+      admin_key = list(.admin_key = "wrong")),
     "invalid admin_key"
   )
 
-  cancelled <- cancel_jobs_by_tag("%gen_a%",
+  cancelled <- trusted_hpc_call(cancel_jobs_by_tag, "%gen_a%",
     admin_key = list(.admin_key = "secret"),
     reason = "superseded")
 
@@ -51,11 +52,12 @@ test_that("admin key can be supplied by environment", {
 
   expect_true(dsHPC:::.admin_is_configured())
   expect_error(
-    cancel_jobs_by_tag("%gen_env%", admin_key = list(.admin_key = "wrong")),
+    trusted_hpc_call(cancel_jobs_by_tag, "%gen_env%",
+      admin_key = list(.admin_key = "wrong")),
     "invalid admin_key"
   )
 
-  cancelled <- cancel_jobs_by_tag("%gen_env%",
+  cancelled <- trusted_hpc_call(cancel_jobs_by_tag, "%gen_env%",
     admin_key = list(.admin_key = "env-secret"))
 
   expect_equal(cancelled$job_id, "job_gen_env")

@@ -10,6 +10,7 @@ get_owner_id()
 Character; the owner identifier.
 }
 \description{
-Resolves the owner identity from the session context.
-Used by domain packages when submitting jobs on behalf of users.
+Resolves the node/session fallback owner. This is not an independently
+authenticated analyst identity. Domain packages submitting on behalf of
+users must authorize and inject their own stable owner value.
 }

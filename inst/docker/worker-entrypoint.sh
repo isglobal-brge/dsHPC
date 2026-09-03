@@ -13,9 +13,10 @@
 #   Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R /srv/dshpc &
 
 DSHPC_HOME="${DSHPC_HOME:-/srv/dshpc}"
+umask 0007
 mkdir -p "$DSHPC_HOME"/runners "$DSHPC_HOME"/artifacts \
   "$DSHPC_HOME"/publish "$DSHPC_HOME"/staging
-chmod 0777 "$DSHPC_HOME" "$DSHPC_HOME"/runners "$DSHPC_HOME"/artifacts \
+chmod 0770 "$DSHPC_HOME" "$DSHPC_HOME"/runners "$DSHPC_HOME"/artifacts \
   "$DSHPC_HOME"/publish "$DSHPC_HOME"/staging 2>/dev/null || true
 
 exec Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R "$DSHPC_HOME"

@@ -86,10 +86,8 @@ test_that("step cache detects relative names, empty dirs and symlinked input con
                               file.path(symlink_root, "input")),
                  error = function(e) FALSE)
   if (isTRUE(ok)) {
-    expect_equal(
-      dsHPC:::.step_cache_hash_path(symlink_root),
-      dsHPC:::.step_cache_hash_path(root_a)
-    )
+    expect_error(dsHPC:::.step_cache_hash_path(symlink_root),
+      "artifact tree failed validation")
   }
 })
 
@@ -173,9 +171,9 @@ test_that("completed artifact steps are reused across different jobs", {
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
   source_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default")
+                      resource_class = "default", visibility = "global")
   target_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default")
+                      resource_class = "default", visibility = "global")
 
   dsHPC:::.store_create_job(db, "job_source", "user_a", source_spec, 1L)
   source_step_dir <- dsHPC:::.ensure_step_dir("job_source", 1L)
@@ -197,6 +195,9 @@ test_that("completed artifact steps are reused across different jobs", {
   dsHPC:::.store_update_job(db, "job_target", state = "RUNNING",
     step_index = 1L)
 
+  # Cache discovery and rebasing rely only on durable DB/artifact state.
+  dsHPC:::.db_close(db)
+  db <- dsHPC:::.db_connect()
   dsHPC:::.executor_run_step(db, "job_target", 1L, target_spec)
 
   target_job <- dsHPC:::.store_get_job(db, "job_target")
@@ -276,9 +277,9 @@ test_that("step cache reuses completed steps from still-running parent jobs", {
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
   source_spec <- list(steps = list(step, step), label = "dsHPC_test",
-                      resource_class = "default")
+                      resource_class = "default", visibility = "global")
   target_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default")
+                      resource_class = "default", visibility = "global")
 
   dsHPC:::.store_create_job(db, "job_source_running", "user_a",
     source_spec, 2L)
@@ -326,7 +327,7 @@ test_that("step cache coalesces equivalent in-flight steps", {
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
   spec <- list(steps = list(step), label = "dsHPC_test",
-               resource_class = "default")
+               resource_class = "default", visibility = "global")
   step_hash <- dsHPC:::.step_cache_hash(step, NULL)
 
   dsHPC:::.store_create_job(db, "job_inflight_source", "user_a", spec, 1L)
@@ -407,7 +408,7 @@ test_that("step cache reuses shared multi-step prefixes by content", {
   step_b <- list(type = "run", plane = "artifact", runner = "dummy_b",
                  config = list(stage = "B"))
   source_spec <- list(steps = list(step_a, step_b), label = "dsHPC_test",
-                      resource_class = "default")
+                      resource_class = "default", visibility = "global")
   target_spec <- source_spec
 
   dsHPC:::.store_create_job(db, "job_prefix_source", "user_a", source_spec, 2L)
@@ -477,4 +478,82 @@ test_that("step cache can be disabled per step and skips session side effects", 
   publish_step <- list(type = "publish_asset", plane = "session",
                        dataset_id = "ds", asset_name = "asset")
   expect_false(dsHPC:::.step_cache_enabled(publish_step))
+})
+
+test_that("step cache never crosses a private job boundary", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home, dshpc.step_cache = TRUE))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+
+  step <- list(type = "run", plane = "artifact", runner = "dummy")
+  private_spec <- list(steps = list(step), label = "dsHPC_test",
+    visibility = "private")
+  global_spec <- private_spec
+  global_spec$visibility <- "global"
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+
+  dsHPC:::.store_create_job(db, "job_private_source", "user_a",
+    private_spec, 1L)
+  private_dir <- dsHPC:::.ensure_step_dir("job_private_source", 1L)
+  writeLines("private", file.path(private_dir, "output", "value.txt"))
+  dsHPC:::.store_update_step(db, "job_private_source", 1L, state = "done",
+    output_ref = file.path("artifacts", "job_private_source", "step_001",
+      "output"), step_hash = step_hash)
+  dsHPC:::.store_update_job(db, "job_private_source", state = "FINISHED",
+    step_index = 1L)
+
+  dsHPC:::.store_create_job(db, "job_private_target", "user_b",
+    private_spec, 1L)
+  dsHPC:::.store_create_job(db, "job_global_target", "user_b",
+    global_spec, 1L)
+
+  # Cache policy must come entirely from durable job metadata, not an
+  # in-memory worker/session association.
+  dsHPC:::.db_close(db)
+  db <- dsHPC:::.db_connect()
+
+  expect_false(dsHPC:::.step_cache_enabled_for_job(
+    db, "job_private_target", step))
+  expect_true(dsHPC:::.step_cache_enabled_for_job(
+    db, "job_global_target", step))
+  expect_null(dsHPC:::.step_cache_find(db, step_hash,
+    current_job_id = "job_global_target"))
+})
+
+test_that("step cache never crosses a domain label boundary", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home, dshpc.step_cache = TRUE))
+  on.exit(cleanup_test_home(home))
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+
+  step <- list(type = "run", plane = "artifact", runner = "dummy")
+  source_spec <- list(steps = list(step), label = "domain_a",
+    visibility = "global")
+  target_spec <- list(steps = list(step), label = "domain_b",
+    visibility = "global")
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  dsHPC:::.store_create_job(db, "job_label_source", "user_a",
+    source_spec, 1L)
+  source_dir <- dsHPC:::.ensure_step_dir("job_label_source", 1L)
+  writeLines("domain-a", file.path(source_dir, "output", "value.txt"))
+  dsHPC:::.store_update_step(db, "job_label_source", 1L, state = "done",
+    output_ref = file.path("artifacts", "job_label_source", "step_001",
+      "output"), step_hash = step_hash)
+  dsHPC:::.store_update_job(db, "job_label_source", state = "FINISHED",
+    step_index = 1L)
+  dsHPC:::.store_create_job(db, "job_label_target", "user_b",
+    target_spec, 1L)
+
+  expect_null(dsHPC:::.step_cache_find(
+    db, step_hash, current_job_id = "job_label_target"))
+  forged <- list(job_id = "job_label_source", step_index = 1L,
+    output_ref = file.path("artifacts", "job_label_source", "step_001",
+      "output"))
+  expect_false(dsHPC:::.step_cache_apply(
+    db, "job_label_target", 1L, step_hash, forged,
+    dsHPC:::.ensure_step_dir("job_label_target", 1L)))
 })

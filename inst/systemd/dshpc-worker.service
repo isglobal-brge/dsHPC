@@ -12,6 +12,7 @@ ExecStart=/usr/bin/Rscript /usr/local/lib/R/site-library/dsHPC/worker/main.R ${D
 WorkingDirectory=/srv/dshpc
 Restart=always
 RestartSec=5
+UMask=0007
 StandardOutput=append:/srv/dshpc/worker.log
 StandardError=append:/srv/dshpc/worker.log
 

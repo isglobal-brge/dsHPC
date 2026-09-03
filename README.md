@@ -15,8 +15,8 @@ delegation to HPC backends.
 dsHPC splits work into two planes:
 
 - `session`: short DataSHIELD work that runs inline in the server session.
-- `artifact`: heavier allowlisted runner work that is queued, isolated, and
-  executed by the dsHPC worker or by a delegated backend.
+- `artifact`: heavier allowlisted runner work that is queued and executed in a
+  minimized process environment by the dsHPC worker or a delegated backend.
 
 Jobs are persisted in SQLite under `dshpc.home` and survive session restarts.
 The default scheduler is adaptive: it reads cgroup/host CPU and memory, detects
@@ -34,6 +34,11 @@ the output. Whole-job deduplication by `spec_hash` remains in place for fully
 identical submissions. Domain packages can opt out per invocation with
 `cache = FALSE` or `cacheable = FALSE` for non-deterministic or effectful
 runners.
+
+Resource admission is conservative: a job leases the maximum CPU, memory, and
+GPU requirement declared by any of its steps until the job finishes. Resources
+are not currently resized between DAG steps. This can reduce utilization for
+heterogeneous pipelines, but it avoids under-accounting at step transitions.
 
 Jobs may be submitted as classic ordered steps or as a declarative DAG pipeline.
 The DAG form uses named nodes and explicit input dependencies; dsHPC validates
@@ -56,7 +61,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.2.1.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.2.3.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -89,8 +94,9 @@ options(
   dshpc.gpu_count = "auto",
   dshpc.oom_throttle_hours = 24,
   dshpc.oom_throttle_max_concurrent = 1,
-  dshpc.max_jobs_global = 1000000,
-  dshpc.max_jobs_per_user = Inf
+  dshpc.max_jobs_global = 8,
+  dshpc.max_queued_jobs_global = 100,
+  dshpc.max_jobs_per_user = 10
 )
 ```
 
@@ -106,6 +112,35 @@ options(
 
 Each YAML runner remains allowlisted, resource-declared, and validated before it
 can run.
+
+`allowed_params` is fail-closed: omitting it is equivalent to
+`allowed_params: []`. Managed registration through `register_dshpc_runner()`
+records the registering package, defaults to `overwrite = FALSE`, denies
+cross-package replacement, and binds use to that package's job-label family.
+Installed dsHPC runners cannot be shadowed by a same-named writable YAML file.
+Site/domain packages that write YAML directly bypass managed ownership; those
+files are operator-trusted configuration and their directory must not be
+writable by an untrusted runner identity. In particular, current dsImaging
+deployments directly write a different runner named `image_preprocess`, which
+now collides with dsHPC's installed runner and is ignored. Rename that domain
+runner and update its workflow references before deploying these versions
+together.
+
+Artifact commands receive only explicit runtime variables, runner-declared
+non-reserved `env` entries, and dsHPC step variables. `HOME`, `TMPDIR`, `TMP`,
+and `TEMP` point inside the current step directory. This is a breaking change
+for runners that depended on arbitrary Rock/worker environment variables: add
+each required value explicitly to the runner YAML `env` mapping. The minimized
+environment is not an OS sandbox. A runner using the same UID and mounts can
+still open sibling artifacts or the SQLite control database; production sites
+must use a separate UID/container and expose only the required step mounts when
+that code is not fully trusted.
+
+The default per-owner quota is retained for compatibility, but production sites
+should set a finite `dshpc.max_jobs_per_user`. dsHPC does not authenticate an
+analyst identity itself: the domain package must authorize the request and pass
+a stable owner value instead of forwarding an arbitrary client-controlled
+owner.
 
 Multiple Rock R sessions sharing the same `dshpc.home` participate in the same
 cell. Leader election and SQLite state keep queue ownership singleton-like for
@@ -146,6 +181,9 @@ Guardrails:
   `exit_code` is treated as interrupted and requeued, not as success.
 - Successful step completion is committed before advancing the next step; if a
   crash happens between those phases, the next worker resumes the advance.
+- Interrupted whole-job deduplication clones remain in `CLONING` until a worker
+  rebuilds their independently owned output tree from a completed job with the
+  exact same global label and specification.
 - Slurm/external submissions write `external_backend.json` before updating the
   DB so a new worker can recover the backend job id and continue polling.
 - Transient external status failures return `STATUS_UNKNOWN` and keep the job
@@ -190,6 +228,8 @@ options(
 
 Runner resource declarations become `sbatch` flags such as `--mem`,
 `--cpus-per-task`, and, when GPU is requested, `--gres=gpu:N`.
+dsHPC also submits with `--export=NONE`; only the generated step contract is
+reintroduced before the runner starts.
 
 ### External
 
@@ -356,18 +396,58 @@ only when a GPU appears available on the backend host or the site wrapper sets
 
 Aggregate methods:
 
-- `hpcStatusDS(job_id_or_symbol)`
-- `hpcResultDS(job_id_or_symbol)`
-- `hpcLogsDS(job_id_or_symbol, last_n = 50)`
-- `hpcListDS(label = NULL)`
-- `hpcOutputsDS(job_id_or_symbol)`
-- `hpcCapabilitiesDS()`
-- `hpcSchedulerStatusDS()`
+- `hpcJobReferenceDS(job_bearer_or_symbol)` (the explicit operation that
+  exports a portable bearer)
+- `hpcStatusDS(job_bearer_or_symbol)`
+- `hpcResultDS(job_bearer_or_symbol)`
+- `hpcLogsDS(job_bearer_or_symbol, last_n = 50)` (authorizes the job but does
+  not return runner stdout/stderr to analysts)
+- `hpcOutputsDS(job_bearer_or_symbol)`
+- `hpcCapabilitiesDS()` (minimal public contract; no topology or load data)
 
-Assign method:
+Low-level server API (not registered for direct DataSHIELD calls):
 
-- `hpcSubmitDS(spec_encoded)`; the decoded spec must include a non-empty
+- `hpcSubmitInternal(spec_encoded)`; the decoded spec must include a non-empty
   `label` identifying the server-side domain package that submitted the job.
+- `hpcLoadOutputInternal(...)`; domain packages may load an output after
+  applying their own domain contract. Descriptor mode may contain an absolute
+  node path for server-side consumers and must never be relayed to a client.
+- `hpcListInternal(...)`, `hpcStudioInternal(...)`, and
+  `hpcSchedulerStatusInternal()` provide operational data to trusted
+  server-side callers.
+
+These functions must be called by a server-side DataSHIELD domain package.
+dsHPC verifies that the caller namespace matches the domain label (including
+domain-owned suffixes such as `dsImaging_image`); direct evaluation from a
+DataSHIELD session or the global workspace fails closed.
+
+The retired names `hpcSubmitDS`, `hpcLoadOutputDS`, `hpcListDS`, `hpcStudioDS`,
+and `hpcSchedulerStatusDS` remain exported as compatibility stubs. They always
+report that the method was retired, including when an older server allowlist
+still names them. Domain methods such as those in `dsImaging` submit fixed
+workflows on the server. The resulting server-session handle contains a
+per-job capability; only `hpcJobReferenceDS()` returns a portable B64 bearer,
+while a raw job ID is never a credential. Public status and result payloads do
+not contain that bearer. Status contains only the coarse state, terminal flag,
+and a generic failure marker; exact steps, retries, labels, and timestamps stay
+on the node. A result value must additionally have defensible cardinality at or
+above `nfilter.subset`; arbitrary lists fail closed except for the built-in
+closed, count-only summary schema.
+
+For upgrades from dsHPC 0.2.2 or earlier, resynchronise the DataSHIELD package
+methods and inspect the effective server allowlist. Remove the historical
+aggregate aliases `c=base::c` and `list=base::list`; unlike dsHPC's retired
+function names, direct base-R aliases cannot be made fail-closed by a package
+compatibility wrapper. The upgraded deployment is not disclosure-safe while
+either persisted alias remains enabled.
+
+Persisted jobs created before dsHPC 0.2.3 lack an `access_token_hash` and
+therefore fail closed: they cannot be accessed through the analyst job APIs
+after the upgrade. Operators must drain those jobs before upgrading or
+resubmit them after upgrading.
+
+The reviewed disclosure boundary and its residual assumptions are recorded in
+[`DISCLOSURE_CONTROL.md`](DISCLOSURE_CONTROL.md).
 
 ## Client commands
 
@@ -376,15 +456,12 @@ plane regardless of whether execution is embedded, cell-shared, Slurm-backed, or
 delegated to an external HPC wrapper:
 
 ```r
-dsHPCClient::ds.hpc.list(conns, label = "dsImaging")
-dsHPCClient::ds.hpc.summary(conns, label = "dsImaging")
 dsHPCClient::ds.hpc.status(conns, job_id)
 dsHPCClient::ds.hpc.wait(conns, job_id, timeout = 3600, poll_interval = 10)
 dsHPCClient::ds.hpc.logs(conns, job_id, last_n = 100)
 dsHPCClient::ds.hpc.outputs(conns, job_id)
 dsHPCClient::ds.hpc.result(conns, job_id)
 dsHPCClient::ds.hpc.capabilities(conns)
-dsHPCClient::ds.hpc.scheduler_status(conns)
 
 # Admin-only, enabled by setting dshpc.admin_key on the server or
 # DSHPC_ADMIN_KEY in the Rock/HPC environment.
@@ -392,15 +469,20 @@ dsHPCClient::ds.hpc.admin.list(conns, admin_key, label = "dsImaging")
 dsHPCClient::ds.hpc.admin.cancel(conns, job_id, admin_key)
 ```
 
-Domain clients can wrap these for domain-specific labels or generation state.
-For example, `dsImagingClient::ds.imaging.jobs(conns)` lists imaging jobs, while
-`dsImagingClient::ds.imaging.radiomics.collection_status(conns, generation_id)`
-reports collection-level progress for a fire-and-forget imaging generation.
+Domain clients wrap these for domain-specific state. For example,
+`dsImagingClient` polls the opaque assigned workflow symbol rather than a raw
+generation or job identifier.
 
 Server-side package API:
 
-- `register_dshpc_publisher(kind, fn)`
-- `register_dshpc_runner(config, name = NULL, overwrite = TRUE)`
+- `hpcSubmitInternal(spec_encoded)`
+- `hpcLoadOutputInternal(job_id_or_symbol, output_name,
+  required_label = "domain-package")`
+- `hpcListInternal(label = NULL)`
+- `hpcStudioInternal(label = NULL)`
+- `hpcSchedulerStatusInternal()`
+- `register_dshpc_publisher(kind, fn, overwrite = FALSE)`
+- `register_dshpc_runner(config, name = NULL, overwrite = FALSE)`
 - `query_jobs_by_tag(tag_pattern, states = NULL)`
 - `query_failed_jobs(tag_pattern)`
 - `get_job_output_ref(job_id_or_symbol, output_name, required_label)`

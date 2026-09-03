@@ -7,15 +7,15 @@
 hpcLogsDS(job_id_or_symbol, last_n = 50L)
 }
 \arguments{
-\item{job_id_or_symbol}{Job id, or a symbol resolving to an object with a
-`job_id` field in the server session.}
+\item{job_id_or_symbol}{Submission symbol resolving to the server-side
+handle, or a B64 bearer returned by \code{\link{hpcJobReferenceDS}()}.}
 
 \item{last_n}{Maximum number of log lines to return. Values above 200 are
 capped server-side.}
 }
 \value{
-Character vector of sanitized log lines.
+Empty character vector. Runner logs remain server/admin-only.
 }
 \description{
-Return a sanitized tail of stdout/stderr logs for a job.
+Authorize access to a job without returning runner stdout/stderr content.
 }

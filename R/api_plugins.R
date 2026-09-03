@@ -14,6 +14,7 @@
 #' @return data.frame with safe operational columns.
 #' @export
 query_jobs_by_tag <- function(tag_pattern, states = NULL) {
+  .dshpc_require_trusted_server_caller()
   db <- .db_connect()
   on.exit(.db_close(db))
 
@@ -45,13 +46,15 @@ query_jobs_by_tag <- function(tag_pattern, states = NULL) {
 #' @return data.frame with columns: job_id, tags, error_message.
 #' @export
 query_failed_jobs <- function(tag_pattern) {
+  .dshpc_require_trusted_server_caller()
   rows <- query_jobs_by_tag(tag_pattern, states = "FAILED")
   return(rows[, c("job_id", "tags", "error_message"), drop = FALSE])
 }
 
 #' Cancel jobs by tag
 #'
-#' Cancels PENDING/RUNNING jobs matching a tag pattern. This is server-side API
+#' Cancels PENDING/RUNNING/CLONING jobs matching a tag pattern. This is
+#' server-side API
 #' for domain packages that own a higher-level workflow, such as a dsImaging
 #' generation. It is intentionally not registered as a DataSHIELD method.
 #'
@@ -63,7 +66,8 @@ query_failed_jobs <- function(tag_pattern) {
 #' @export
 cancel_jobs_by_tag <- function(tag_pattern, admin_key,
                                reason = "Cancelled by admin",
-                               states = c("PENDING", "RUNNING")) {
+                               states = c("PENDING", "RUNNING", "CLONING")) {
+  .dshpc_require_trusted_server_caller()
   .verify_admin_key(admin_key)
 
   rows <- query_jobs_by_tag(tag_pattern, states = states)
@@ -110,13 +114,17 @@ cancel_jobs_by_tag <- function(tag_pattern, admin_key,
 #'
 #' @param job_id_or_symbol Job ID or symbol.
 #' @param output_name Output name.
-#' @param required_label Required label substring used as package ownership check.
+#' @param required_label Required exact package label used as a secondary
+#'   domain-boundary check.
 #' @return Named list with job_id, name, kind, path, exists, and size_bytes.
 #' @export
 get_job_output_ref <- function(job_id_or_symbol, output_name,
                                required_label = NULL) {
+  .dshpc_require_trusted_server_caller()
   required_label <- .dshpc_require_label_value(required_label,
     "dsHPC load operation requires a domain label (required_label). The caller must identify the domain it belongs to (typically the calling server-side package's name). This is a hard requirement; there is no opt-out.")
+  .dshpc_require_trusted_server_caller(required_label)
+  output_name <- .validate_identifier(output_name, "output_name")
   job_id <- .resolve_job_id(job_id_or_symbol)
   db <- .db_connect()
   on.exit(.db_close(db))
@@ -125,7 +133,7 @@ get_job_output_ref <- function(job_id_or_symbol, output_name,
   if (!job$state %in% c("FINISHED", "PUBLISHED"))
     stop("Job not finished (state: ", job$state, ").", call. = FALSE)
   job_label <- job$label %||% ""
-  if (!grepl(required_label, job_label, fixed = TRUE))
+  if (!identical(job_label, required_label))
     stop("Job '", job_id, "' does not belong to '", required_label,
          "'. Access denied.", call. = FALSE)
 
@@ -137,35 +145,41 @@ get_job_output_ref <- function(job_id_or_symbol, output_name,
     stop("Output '", output_name, "' not found for job ", job_id, ".",
          call. = FALSE)
   path <- out$path_or_ref[1]
+  path <- .dshpc_validate_job_artifact_path(path, job_id,
+    check_tree = TRUE)
   list(job_id = job_id, name = out$name[1], kind = out$kind[1],
        path = path, exists = !is.na(path) && file.exists(path),
-       size_bytes = as.integer(out$size_bytes[1]))
+       size_bytes = .normalize_output_size_bytes(out$size_bytes[1]))
 }
 
 #' Count active jobs by tag
 #'
-#' Returns the number of PENDING or RUNNING jobs matching a tag pattern.
+#' Returns the number of PENDING, RUNNING, or CLONING jobs matching a tag
+#' pattern.
 #' Used by domain packages for backpressure / drip feed decisions.
 #'
 #' @param tag_pattern Character; pattern to match (SQL LIKE).
 #' @return Integer; count of active jobs.
 #' @export
 count_active_jobs <- function(tag_pattern) {
+  .dshpc_require_trusted_server_caller()
   db <- .db_connect()
   on.exit(.db_close(db))
   DBI::dbGetQuery(db,
     "SELECT COUNT(*) AS n FROM jobs
-     WHERE state IN ('PENDING','RUNNING') AND tags LIKE ?",
+     WHERE state IN ('PENDING','RUNNING','CLONING') AND tags LIKE ?",
     params = list(tag_pattern))$n
 }
 
 #' Get the current owner ID
 #'
-#' Resolves the owner identity from the session context.
-#' Used by domain packages when submitting jobs on behalf of users.
+#' Resolves the node/session fallback owner. This is not an independently
+#' authenticated analyst identity. Domain packages submitting on behalf of
+#' users must authorize and inject their own stable owner value.
 #'
 #' @return Character; the owner identifier.
 #' @export
 get_owner_id <- function() {
+  .dshpc_require_trusted_server_caller()
   .get_owner_id()
 }

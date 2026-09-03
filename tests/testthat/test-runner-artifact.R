@@ -132,3 +132,88 @@ test_that("worker recovers jobs committed after step completion before advance",
   expect_equal(job$state, "FINISHED")
   expect_true(is.na(job$worker_pid))
 })
+
+test_that("worker GC never expires domain-package workflows", {
+  gc_body <- paste(deparse(body(dsHPC:::.worker_gc)), collapse = "\n")
+  expect_false(grepl("dsImaging", gc_body, fixed = TRUE))
+  expect_false(grepl("cleanup_stale_generations", gc_body, fixed = TRUE))
+})
+
+test_that("embedded runners inherit only the explicit confined environment", {
+  skip_on_os("windows")
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  env_names <- c("DSHPC_ADMIN_KEY", "DSHPC_PARENT_SECRET")
+  old_env <- Sys.getenv(env_names, unset = NA_character_)
+  on.exit({
+    Sys.unsetenv(env_names)
+    restore <- !is.na(old_env)
+    if (any(restore)) do.call(Sys.setenv, as.list(old_env[restore]))
+  }, add = TRUE)
+  do.call(Sys.setenv, as.list(c(
+    DSHPC_ADMIN_KEY = "admin-secret-marker",
+    DSHPC_PARENT_SECRET = "parent-secret-marker")))
+  on.exit(cleanup_test_home(home), add = TRUE)
+
+  yaml::write_yaml(list(
+    name = "environment_probe",
+    command = Sys.which("env"),
+    args_template = character(0),
+    allowed_params = character(0),
+    env = list(RUNNER_DECLARED = "declared-value")),
+    file.path(home, "runners", "environment_probe.yml"))
+  step <- list(type = "run", plane = "artifact",
+    runner = "environment_probe", config = list())
+  spec <- list(label = "dsHPC_test", steps = list(step))
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_clean_env", "owner", spec, 1L)
+  step_dir <- dsHPC:::.ensure_step_dir("job_clean_env", 1L)
+
+  prepared <- dsHPC:::.prepare_artifact_command(db, "job_clean_env", 1L,
+    step, step_dir, NULL)
+  expect_false(any(unname(prepared$env_vars) == "current"))
+  expect_true(startsWith(prepared$env_vars[["HOME"]], step_dir))
+  expect_true(startsWith(prepared$env_vars[["TMPDIR"]], step_dir))
+  expect_true(dir.exists(prepared$env_vars[["HOME"]]))
+  expect_true(dir.exists(prepared$env_vars[["TMPDIR"]]))
+
+  dsHPC:::.launch_artifact_process(prepared, step_dir)
+  deadline <- Sys.time() + 10
+  exit_file <- file.path(step_dir, "exit_code")
+  while (!file.exists(exit_file) && Sys.time() < deadline) Sys.sleep(0.05)
+  expect_true(file.exists(exit_file))
+  expect_equal(readLines(exit_file, n = 1L, warn = FALSE), "0")
+  output <- paste(readLines(file.path(step_dir, "stdout.log"), warn = FALSE),
+    collapse = "\n")
+  expect_match(output, "RUNNER_DECLARED=declared-value", fixed = TRUE)
+  expect_match(output, paste0("HOME=", prepared$env_vars[["HOME"]]),
+    fixed = TRUE)
+  expect_false(grepl("admin-secret-marker", output, fixed = TRUE))
+  expect_false(grepl("parent-secret-marker", output, fixed = TRUE))
+  expect_false(grepl("DSHPC_ADMIN_KEY", output, fixed = TRUE))
+  expect_false(grepl("DSHPC_PARENT_SECRET", output, fixed = TRUE))
+  diagnostic <- paste(readLines(file.path(step_dir, "env.log"), warn = FALSE),
+    collapse = "\n")
+  expect_false(grepl("admin-secret-marker|parent-secret-marker", diagnostic))
+})
+
+test_that("execution revalidates persisted runner parameters", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  on.exit(cleanup_test_home(home))
+  yaml::write_yaml(list(name = "closed_runtime", command = "/bin/echo",
+    args_template = character(0)),
+    file.path(home, "runners", "closed_runtime.yml"))
+  step <- list(type = "run", plane = "artifact", runner = "closed_runtime",
+    config = list(secret = "must-not-run"))
+  spec <- list(label = "dsHPC_test", steps = list(step))
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_closed_runtime", "owner", spec, 1L)
+  step_dir <- dsHPC:::.ensure_step_dir("job_closed_runtime", 1L)
+
+  expect_error(dsHPC:::.prepare_artifact_command(db, "job_closed_runtime",
+    1L, step, step_dir, NULL), "does not allow: secret", fixed = TRUE)
+  expect_false(file.exists(file.path(step_dir, "run.sh")))
+})

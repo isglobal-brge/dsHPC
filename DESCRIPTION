@@ -1,7 +1,7 @@
 Package: dsHPC
 Type: Package
 Title: DataSHIELD Durable Federated Job Runtime
-Version: 0.2.2
+Version: 0.2.3
 Authors@R: c(
     person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
     person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))
@@ -10,7 +10,7 @@ Author: David Sarrat González [aut, cre],
 Maintainer: David Sarrat González <david.sarrat@isglobal.org>
 Description: Server-side DataSHIELD package for durable federated job execution.
     Provides a two-plane execution model: session-plane steps (DataSHIELD
-    assign/aggregate) and artifact-plane steps (processx-isolated subprocesses
+    assign/aggregate) and artifact-plane steps (processx-launched subprocesses
     with allowlisted runners). Jobs persist in a local SQLite database, survive
     session restarts, and are dispatched by a dedicated worker daemon. Includes
     per-user ownership, transactional state, quota enforcement, audit trail,
@@ -34,22 +34,16 @@ Suggests:
     dsImaging,
     testthat (>= 3.0.0),
     withr,
-    DSLite
+    DSLite,
+    DSI
 AggregateMethods:
+    hpcJobReferenceDS,
     hpcStatusDS,
     hpcResultDS,
-    hpcListDS,
     hpcOutputsDS,
     hpcLogsDS,
-    hpcStudioDS,
     hpcCapabilitiesDS,
-    hpcSchedulerStatusDS,
     hpcAdminListDS,
-    hpcAdminCancelDS,
-    c=base::c,
-    list=base::list
-AssignMethods:
-    hpcSubmitDS,
-    hpcLoadOutputDS
+    hpcAdminCancelDS
 Config/testthat/edition: 3
 RoxygenNote: 7.3.3

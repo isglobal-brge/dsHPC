@@ -6,14 +6,15 @@
   if (is.finite(settings$max_jobs_per_user)) {
     owner_n <- DBI::dbGetQuery(db,
       "SELECT COUNT(*) AS n FROM jobs
-       WHERE owner_id = ? AND state IN ('PENDING','RUNNING')",
+       WHERE owner_id = ? AND state IN ('PENDING','RUNNING','CLONING')",
       params = list(owner_id))$n
     if (owner_n >= settings$max_jobs_per_user)
       stop("Per-user quota exceeded.", call. = FALSE)
   }
 
   global_n <- DBI::dbGetQuery(db,
-    "SELECT COUNT(*) AS n FROM jobs WHERE state IN ('PENDING','RUNNING')")$n
+    "SELECT COUNT(*) AS n FROM jobs
+     WHERE state IN ('PENDING','RUNNING','CLONING')")$n
   if (global_n >= settings$max_queued_jobs_global)
     stop("Global job quota exceeded.", call. = FALSE)
 }

@@ -54,6 +54,7 @@
 
   lines <- c(
     "#!/bin/sh",
+    "umask 007",
     "set +e",
     env_lines,
     sprintf("cd %s || exit 1", shQuote(step_dir)),
@@ -81,11 +82,21 @@
     "write_exit_code \"$code\"",
     "exit \"$code\""
   )
-  writeLines(lines, script)
-  Sys.chmod(script, "0755")
+  .dshpc_with_private_umask(writeLines(lines, script))
+  Sys.chmod(script, "0770", use_umask = FALSE)
 
-  launch <- sprintf("cd %s && nohup /bin/sh %s >/dev/null 2>&1 & echo $!",
-                    shQuote(step_dir), shQuote(script))
+  env_command <- Sys.which("env")
+  nohup_command <- Sys.which("nohup")
+  if (!nzchar(env_command) || !nzchar(nohup_command)) {
+    stop("A clean artifact runner environment is unavailable.", call. = FALSE)
+  }
+  clean_env <- paste(vapply(names(env_vars), function(nm) {
+    shQuote(paste0(nm, "=", as.character(env_vars[[nm]])))
+  }, character(1)), collapse = " ")
+  launch <- sprintf(
+    "cd %s && %s -i %s %s /bin/sh %s >/dev/null 2>&1 & echo $!",
+    shQuote(step_dir), shQuote(env_command), clean_env,
+    shQuote(nohup_command), shQuote(script))
   pid <- tryCatch(
     as.integer(system2("/bin/sh", c("-c", launch), stdout = TRUE,
                        stderr = FALSE)[1]),
@@ -94,12 +105,57 @@
   pid
 }
 
+#' Build the minimal environment inherited by an artifact runner
+#' @noRd
+.artifact_runner_environment <- function(job_id, step_dir) {
+  .dshpc_validate_job_artifact_path(step_dir, job_id, check_tree = TRUE)
+  runtime_root <- file.path(step_dir, "runtime")
+  runtime_dirs <- file.path(runtime_root, c("home", "tmp"))
+  if (any(.dshpc_path_is_symlink(c(runtime_root, runtime_dirs)))) {
+    stop("Artifact runner runtime storage is unavailable.", call. = FALSE)
+  }
+  for (path in c(runtime_root, runtime_dirs)) {
+    .dshpc_with_private_umask(dir.create(path, recursive = TRUE,
+      showWarnings = FALSE, mode = "0770"))
+    if (!dir.exists(path) || .dshpc_path_is_symlink(path)) {
+      stop("Artifact runner runtime storage is unavailable.", call. = FALSE)
+    }
+    .dshpc_validate_job_artifact_path(path, job_id, check_tree = TRUE)
+    tryCatch(Sys.chmod(path, "0770", use_umask = FALSE),
+      error = function(e) NULL)
+  }
+
+  path <- Sys.getenv("PATH", unset = "/usr/local/bin:/usr/bin:/bin")
+  if (!nzchar(path)) path <- "/usr/local/bin:/usr/bin:/bin"
+  env <- c(
+    PATH = path,
+    HOME = runtime_dirs[[1L]],
+    TMPDIR = runtime_dirs[[2L]],
+    TMP = runtime_dirs[[2L]],
+    TEMP = runtime_dirs[[2L]])
+  for (name in c("LANG", "LC_ALL", "LC_CTYPE", "TZ")) {
+    value <- Sys.getenv(name, unset = "")
+    if (nzchar(value)) env[[name]] <- value
+  }
+  env
+}
+
 #' Prepare an allowlisted artifact runner command for an executor backend.
 #' @keywords internal
 .prepare_artifact_command <- function(db, job_id, step_index, step, step_dir, input_dir) {
   runner_name <- step$runner
   runner_config <- .load_runner_config(runner_name)
   if (is.null(runner_config)) stop("Runner '", runner_name, "' not found.", call. = FALSE)
+  .validate_runner_params(step, runner_config, step_index)
+  registered_by <- runner_config$registered_by %||% NULL
+  if (!is.null(registered_by) && !identical(registered_by, "dsHPC")) {
+    job <- .store_get_job(db, job_id)
+    if (is.null(job) ||
+        !.dshpc_label_matches_package(job$label, registered_by)) {
+      stop("Runner '", runner_name,
+        "' is not registered for this job label.", call. = FALSE)
+    }
+  }
 
   raw_command <- runner_config$command %||% "python"
   command <- raw_command
@@ -124,11 +180,12 @@
   }
   output_dir <- file.path(step_dir, "output")
 
-  # processx expects named character vector: c(VAR = "value", ...)
-  # "current" inherits the parent environment, but R's LD_LIBRARY_PATH
-  # conflicts with Python native libs (pyarrow's libarrow). Clear it.
+  # Runners start from a small explicit environment. HOME and temporary files
+  # remain inside the job tree; arbitrary Rock/worker variables are not
+  # inherited. R's LD_LIBRARY_PATH is cleared because it conflicts with some
+  # Python native libraries (notably pyarrow's libarrow).
   env_vars <- c(
-    "current",
+    .artifact_runner_environment(job_id, step_dir),
     LD_LIBRARY_PATH = "",
     DSHPC_STEP_DIR = step_dir,
     DSHPC_OUTPUT_DIR = output_dir,
@@ -171,21 +228,32 @@
   if (!is.null(runner_config$env) && is.list(runner_config$env)) {
     for (nm in names(runner_config$env)) {
       if (!nzchar(nm)) next
-      if (toupper(nm) %in% .BLOCKED_ENV_VARS) next
+      if (toupper(nm) %in% .BLOCKED_ENV_VARS ||
+          startsWith(toupper(nm), "DSHPC_")) {
+        stop("Runner env variable '", nm, "' is reserved.", call. = FALSE)
+      }
       v <- as.character(runner_config$env[[nm]])
       names(v) <- nm
       env_vars <- c(env_vars, v)
     }
   }
 
+  # Make overrides deterministic and keep one value per variable. Reserved
+  # runtime names cannot reach this point from runner configuration.
+  named <- !is.na(names(env_vars)) & nzchar(names(env_vars))
+  env_vars <- env_vars[named]
+  env_vars <- env_vars[!duplicated(names(env_vars), fromLast = TRUE)]
+
   # Persist the resolved command/args/env next to the step output. Useful for
   # post-mortem debugging when a runner exits non-zero; harmless otherwise.
-  tryCatch(writeLines(
+  tryCatch(.dshpc_with_private_umask(writeLines(
     c(paste0("# job=", job_id, " step=", step_index),
       paste0("# command=", command),
       paste0("# args=", paste(args, collapse = " ")),
       paste(names(env_vars), env_vars, sep = "=")),
-    file.path(step_dir, "env.log")), error = function(e) NULL)
+    file.path(step_dir, "env.log"))), error = function(e) NULL)
+  tryCatch(Sys.chmod(file.path(step_dir, "env.log"), "0660",
+                     use_umask = FALSE), error = function(e) NULL)
   list(command = command, raw_command = raw_command, args = args,
        env_vars = env_vars, step = step, input_dir = input_dir,
        step_dir = step_dir,

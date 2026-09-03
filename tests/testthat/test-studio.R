@@ -1,4 +1,4 @@
-test_that("Studio snapshot exposes scoped jobs, names, DAG and safe metadata", {
+test_that("Studio snapshot exposes global jobs only", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
@@ -32,6 +32,9 @@ test_that("Studio snapshot exposes scoped jobs, names, DAG and safe metadata", {
     started_at = format(Sys.time() - 30, "%Y-%m-%dT%H:%M:%OS3Z",
       tz = "UTC"),
     external_backend = "slurm", external_status = "RUNNING")
+  private_artifacts <- file.path(home, "artifacts", "job_private_a")
+  dir.create(private_artifacts, recursive = TRUE)
+  saveRDS(list(status = "safe"), file.path(private_artifacts, "summary.rds"))
   dsHPC:::.db_register_output(db, "job_private_a", 1L, "summary",
     "summary", file.path(home, "artifacts", "job_private_a", "summary.rds"),
     size_bytes = 128L, safe_for_client = TRUE)
@@ -54,23 +57,26 @@ test_that("Studio snapshot exposes scoped jobs, names, DAG and safe metadata", {
   ))
   dsHPC:::.store_create_job(db, "job_global", "bob", global_spec, 1L)
 
-  mine <- hpcStudioDS(scope = list(.owner = "alice"), mode = "mine")
-  expect_equal(mine$jobs$job_id, "job_private_a")
-  expect_equal(mine$jobs$name, "Radiomics cohort A")
+  mine <- trusted_hpc_call(hpcStudioInternal,
+    scope = list(.owner = "alice"), mode = "mine")
+  expect_equal(mine$mode, "global")
+  expect_equal(mine$jobs$job_id, "job_global")
+  expect_equal(mine$jobs$name, "Shared queue")
   expect_false("owner_id" %in% names(mine$jobs))
   expect_false("path_or_ref" %in% names(mine$outputs))
-  expect_equal(mine$steps$node_id, c("resolve", "features", "summary"))
-  expect_equal(nrow(mine$dag_edges), 2L)
-  expect_equal(mine$dag_edges$from_node, c("resolve", "features"))
+  expect_equal(mine$steps$node_id, "step_1")
+  expect_equal(nrow(mine$dag_edges), 0L)
   expect_true(all(c("node", "usage", "executor", "cell") %in%
     names(mine$scheduler)))
 
-  mixed <- hpcStudioDS(scope = list(.owner = "alice"), mode = "mine+global")
-  expect_setequal(mixed$jobs$job_id, c("job_private_a", "job_global"))
+  mixed <- trusted_hpc_call(hpcStudioInternal,
+    scope = list(.owner = "alice"), mode = "mine+global")
+  expect_equal(mixed$jobs$job_id, "job_global")
+  expect_false("job_private_a" %in% mixed$jobs$job_id)
   expect_false("job_private_b" %in% mixed$jobs$job_id)
 })
 
-test_that("hpcListDS scopes jobs and includes display name", {
+test_that("hpcListInternal ignores owner scopes and lists global jobs", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
@@ -86,9 +92,20 @@ test_that("hpcListDS scopes jobs and includes display name", {
   ))
   dsHPC:::.store_create_job(db, "job_named", "alice", spec, 1L)
 
-  listed <- hpcListDS(scope = list(.owner = "alice"), mode = "mine")
-  expect_equal(listed$name, "Named job")
+  global_spec <- dsHPC:::.validate_job_spec(list(
+    name = "Global job",
+    visibility = "global",
+    steps = list(list(type = "emit", plane = "session",
+      output_name = "out", value = 1))
+  ))
+  dsHPC:::.store_create_job(db, "job_global_named", "bob", global_spec, 1L)
+
+  listed <- trusted_hpc_call(hpcListInternal,
+    scope = list(.owner = "alice"), mode = "mine")
+  expect_equal(listed$job_id, "job_global_named")
+  expect_equal(listed$name, "Global job")
   expect_false("visibility" %in% names(listed))
-  expect_equal(nrow(hpcListDS(scope = list(.owner = "bob"), mode = "mine")),
-    0L)
+  expect_equal(trusted_hpc_call(hpcListInternal,
+    scope = list(.owner = "bob"), mode = "mine")$job_id,
+    "job_global_named")
 })

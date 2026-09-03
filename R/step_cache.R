@@ -16,6 +16,13 @@
 }
 
 #' @keywords internal
+.step_cache_enabled_for_job <- function(db, job_id, step) {
+  if (!.step_cache_enabled(step)) return(FALSE)
+  job <- .store_get_job(db, job_id)
+  !is.null(job) && identical(job$visibility, "global")
+}
+
+#' @keywords internal
 .step_cache_hash <- function(step, input_dir = NULL) {
   step_for_hash <- step[setdiff(names(step),
     c("inputs", "node_id", "cache", "cacheable"))]
@@ -50,6 +57,7 @@
     return(digest::digest(paste("dshpc:missing-input", path),
       algo = "sha256", serialize = FALSE))
   }
+  .dshpc_assert_symlink_free_tree(path)
   if (!dir.exists(path)) {
     return(digest::digest(path, algo = "sha256", file = TRUE))
   }
@@ -106,7 +114,15 @@
 
 #' @keywords internal
 .step_cache_find <- function(db, step_hash, current_job_id = NULL) {
-  if (is.null(step_hash) || is.na(step_hash) || !nzchar(step_hash)) return(NULL)
+  if (is.null(step_hash) || is.na(step_hash) || !nzchar(step_hash) ||
+      is.null(current_job_id) || is.na(current_job_id) ||
+      !nzchar(current_job_id)) return(NULL)
+  current <- DBI::dbGetQuery(db,
+    "SELECT label, visibility FROM jobs WHERE job_id = ?",
+    params = list(current_job_id))
+  if (nrow(current) != 1L || is.na(current$label[1]) ||
+      !nzchar(current$label[1]) ||
+      !identical(current$visibility[1], "global")) return(NULL)
   rows <- DBI::dbGetQuery(db,
     "SELECT s.job_id, s.step_index, s.output_ref, j.finished_at
      FROM steps s
@@ -114,38 +130,50 @@
      WHERE s.step_hash = ?
        AND s.state = 'done'
        AND s.output_ref IS NOT NULL
+       AND j.visibility = 'global'
+       AND j.label = ?
        AND j.state IN ('RUNNING', 'FINISHED', 'PUBLISHED')
      ORDER BY COALESCE(s.finished_at, j.finished_at) DESC, s.job_id DESC
      LIMIT 20",
-    params = list(step_hash))
+    params = list(step_hash, current$label[1]))
   if (nrow(rows) == 0L) return(NULL)
 
-  home <- .dshpc_home()
   for (i in seq_len(nrow(rows))) {
     if (!is.null(current_job_id) && identical(rows$job_id[i], current_job_id)) {
       next
     }
     ref <- rows$output_ref[i]
     if (is.na(ref) || !nzchar(ref)) next
-    path <- file.path(home, ref)
-    if (file.exists(path)) return(as.list(rows[i, ]))
+    path <- tryCatch(.dshpc_resolve_job_artifact_ref(ref, rows$job_id[i],
+      check_tree = TRUE), error = function(e) NULL)
+    if (!is.null(path)) return(as.list(rows[i, ]))
   }
   NULL
 }
 
 #' @keywords internal
 .step_cache_inflight_find <- function(db, step_hash, current_job_id = NULL) {
-  if (is.null(step_hash) || is.na(step_hash) || !nzchar(step_hash)) return(NULL)
+  if (is.null(step_hash) || is.na(step_hash) || !nzchar(step_hash) ||
+      is.null(current_job_id) || is.na(current_job_id) ||
+      !nzchar(current_job_id)) return(NULL)
+  current <- DBI::dbGetQuery(db,
+    "SELECT label, visibility FROM jobs WHERE job_id = ?",
+    params = list(current_job_id))
+  if (nrow(current) != 1L || is.na(current$label[1]) ||
+      !nzchar(current$label[1]) ||
+      !identical(current$visibility[1], "global")) return(NULL)
   rows <- DBI::dbGetQuery(db,
     "SELECT s.job_id, s.step_index, s.started_at
      FROM steps s
      JOIN jobs j ON j.job_id = s.job_id
      WHERE s.step_hash = ?
        AND s.state = 'running'
+       AND j.visibility = 'global'
+       AND j.label = ?
        AND j.state = 'RUNNING'
      ORDER BY s.started_at, s.job_id
      LIMIT 20",
-    params = list(step_hash))
+    params = list(step_hash, current$label[1]))
   if (nrow(rows) == 0L) return(NULL)
   for (i in seq_len(nrow(rows))) {
     if (!is.null(current_job_id) && identical(rows$job_id[i], current_job_id)) {
@@ -159,6 +187,13 @@
 #' @keywords internal
 .step_cache_wait_for_inflight <- function(db, job_id, step_index, step_hash,
                                           inflight_step) {
+  boundaries <- DBI::dbGetQuery(db,
+    "SELECT job_id, visibility, label FROM jobs WHERE job_id IN (?, ?)",
+    params = list(job_id, inflight_step$job_id))
+  if (nrow(boundaries) != 2L ||
+      !all(boundaries$visibility %in% "global") ||
+      anyNA(boundaries$label) ||
+      length(unique(boundaries$label)) != 1L) return(FALSE)
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   .store_update_step(db, job_id, step_index,
     state = "waiting_cache",
@@ -200,7 +235,14 @@
      JOIN jobs j ON j.job_id = s.job_id
      WHERE s.job_id = ? AND s.step_index = ?",
     params = list(source_job, source_step))
-  nrow(source) > 0L &&
+  boundaries <- DBI::dbGetQuery(db,
+    "SELECT job_id, visibility, label FROM jobs WHERE job_id IN (?, ?)",
+    params = list(job_id, source_job))
+  nrow(boundaries) == 2L &&
+    all(boundaries$visibility %in% "global") &&
+    !anyNA(boundaries$label) &&
+    length(unique(boundaries$label)) == 1L &&
+    nrow(source) > 0L &&
     identical(source$step_state[1], "running") &&
     identical(source$job_state[1], "RUNNING")
 }
@@ -208,27 +250,60 @@
 #' @keywords internal
 .step_cache_apply <- function(db, job_id, step_index, step_hash, cached_step,
                               step_dir) {
+  visibility <- DBI::dbGetQuery(db,
+    "SELECT job_id, visibility, label FROM jobs WHERE job_id IN (?, ?)",
+    params = list(job_id, cached_step$job_id))
+  if (nrow(visibility) != 2L ||
+      !all(visibility$visibility %in% "global") ||
+      anyNA(visibility$label) ||
+      length(unique(visibility$label)) != 1L) return(FALSE)
+
   source_ref <- cached_step$output_ref
-  source_path <- file.path(.dshpc_home(), source_ref)
+  source_path <- tryCatch(.dshpc_resolve_job_artifact_ref(
+    source_ref, cached_step$job_id, check_tree = TRUE),
+    error = function(e) NULL)
+  if (is.null(source_path)) return(FALSE)
   target_ref <- file.path("artifacts", job_id,
     sprintf("step_%03d", as.integer(step_index)), "output")
   target_path <- file.path(.dshpc_home(), target_ref)
-  if (!file.exists(source_path)) return(FALSE)
-
-  if (dir.exists(target_path) || file.exists(target_path)) {
-    unlink(target_path, recursive = TRUE, force = TRUE)
-  }
-  .copy_input_tree(source_path, target_path)
-  if (!file.exists(target_path)) return(FALSE)
+  target_parent <- tryCatch(.dshpc_validate_job_artifact_path(
+    dirname(target_path), job_id, check_tree = TRUE), error = function(e) NULL)
+  if (is.null(target_parent)) return(FALSE)
 
   source_outputs <- DBI::dbGetQuery(db,
     "SELECT name, kind, path_or_ref, size_bytes, safe_for_client
      FROM outputs WHERE job_id = ? AND step_index = ?",
     params = list(cached_step$job_id, as.integer(cached_step$step_index)))
+  mapped_outputs <- character(nrow(source_outputs))
+  if (nrow(source_outputs) > 0L) {
+    prefix <- paste0(source_path, "/")
+    for (i in seq_len(nrow(source_outputs))) {
+      src <- tryCatch(.dshpc_validate_job_artifact_path(
+        source_outputs$path_or_ref[i], cached_step$job_id,
+        check_tree = TRUE), error = function(e) NULL)
+      if (is.null(src) ||
+          (!identical(src, source_path) && !startsWith(src, prefix))) {
+        return(FALSE)
+      }
+      mapped_outputs[i] <- .step_cache_rewrite_output_path(
+        src, source_path, target_path)
+      if (is.na(mapped_outputs[i])) return(FALSE)
+    }
+  }
+
+  if (dir.exists(target_path) || file.exists(target_path)) {
+    if (.dshpc_path_is_symlink(target_path)) return(FALSE)
+    unlink(target_path, recursive = TRUE, force = TRUE)
+  }
+  .copy_input_tree(source_path, target_path,
+    target_root = file.path(.dshpc_home(), "artifacts"))
+  target_path <- tryCatch(.dshpc_validate_job_artifact_path(
+    target_path, job_id, check_tree = TRUE), error = function(e) NULL)
+  if (is.null(target_path)) return(FALSE)
+
   if (nrow(source_outputs) > 0L) {
     for (i in seq_len(nrow(source_outputs))) {
-      src <- source_outputs$path_or_ref[i]
-      dst <- .step_cache_rewrite_output_path(src, source_path, target_path)
+      dst <- mapped_outputs[i]
       size <- if (!is.na(dst) && file.exists(dst)) file.info(dst)$size
               else source_outputs$size_bytes[i]
       .db_register_output(db, job_id, step_index, source_outputs$name[i],
@@ -264,5 +339,5 @@
     rel <- substring(path_norm, nchar(prefix) + 1L)
     return(file.path(target_root, rel))
   }
-  path
+  NA_character_
 }

@@ -17,15 +17,30 @@
   # This fallback creates the structure at package load time.
   home <- .dshpc_option("home", "/srv/dshpc")
   subdirs <- c("artifacts", "runners", "publish", "staging", "locks")
-  for (d in c(home, file.path(home, subdirs))) {
-    if (!dir.exists(d)) {
-      tryCatch(
-        dir.create(d, recursive = TRUE, showWarnings = FALSE, mode = "0777"),
-        error = function(e) NULL
-      )
+  if (!.dshpc_path_is_symlink(home)) {
+    for (d in c(home, file.path(home, subdirs))) {
+      if (.dshpc_path_is_symlink(d)) next
+      if (!dir.exists(d)) {
+        tryCatch(
+          .dshpc_with_private_umask(
+            dir.create(d, recursive = TRUE, showWarnings = FALSE,
+                       mode = "0770")),
+          error = function(e) NULL
+        )
+      }
+      if (dir.exists(d) && !.dshpc_path_is_symlink(d)) {
+        tryCatch(Sys.chmod(d, "0770", use_umask = FALSE),
+          error = function(e) NULL)
+      }
     }
-    tryCatch(Sys.chmod(d, "0777"), error = function(e) NULL)
   }
+  tryCatch(
+    .dshpc_remediate_permissions(
+      home,
+      as.character(utils::packageVersion(pkgname, lib.loc = libname))
+    ),
+    error = function(e) NULL
+  )
   tryCatch({
     db <- .db_connect()
     .db_close(db)
@@ -62,7 +77,7 @@
 .dshpc_home <- function(must_exist = TRUE) {
   home <- .dshpc_option("home", "/srv/dshpc")
   if (must_exist && !dir.exists(home)) {
-    stop("DSHPC_HOME does not exist: ", home, call. = FALSE)
+    stop("dsHPC storage is unavailable.", call. = FALSE)
   }
   home
 }
@@ -79,6 +94,96 @@
   if (!is.na(env_value) && nzchar(env_value)) return(env_value)
 
   default
+}
+
+#' Evaluate one storage operation with owner/group-only default permissions
+#' @keywords internal
+.dshpc_with_private_umask <- function(expr) {
+  old <- Sys.umask("0007")
+  on.exit(Sys.umask(old), add = TRUE)
+  force(expr)
+}
+
+# Repair legacy storage permissions once for each installed dsHPC version.
+# Traversal is deliberately one directory at a time so symlinked directories
+# can be excluded before dir.exists() or list.files() would follow them.
+.dshpc_remediate_permissions <- function(home, version) {
+  if (!dir.exists(home) || .dshpc_path_is_symlink(home)) {
+    return(invisible(FALSE))
+  }
+
+  marker <- file.path(
+    home,
+    paste0(".permissions-remediated-",
+           gsub("[^A-Za-z0-9_.-]", "_", version))
+  )
+  if (file.exists(marker) && !dir.exists(marker) &&
+      !.dshpc_path_is_symlink(marker)) {
+    return(invisible(TRUE))
+  }
+
+  complete <- TRUE
+  directories <- home
+  next_directory <- 1L
+  while (next_directory <= length(directories)) {
+    directory <- directories[[next_directory]]
+    next_directory <- next_directory + 1L
+    if (.dshpc_path_is_symlink(directory)) next
+
+    changed <- tryCatch(
+      Sys.chmod(directory, "0770", use_umask = FALSE),
+      error = function(e) FALSE
+    )
+    complete <- complete && isTRUE(changed)
+
+    entries <- tryCatch(
+      list.files(directory, all.files = TRUE, full.names = TRUE,
+                 no.. = TRUE),
+      warning = function(w) {
+        complete <<- FALSE
+        character(0)
+      },
+      error = function(e) {
+        complete <<- FALSE
+        character(0)
+      }
+    )
+    for (entry in entries) {
+      if (.dshpc_path_is_symlink(entry)) next
+      if (dir.exists(entry)) {
+        directories <- c(directories, entry)
+      } else if (file.exists(entry)) {
+        changed <- tryCatch(
+          Sys.chmod(entry, "0660", use_umask = FALSE),
+          error = function(e) FALSE
+        )
+        complete <- complete && isTRUE(changed)
+      }
+    }
+  }
+
+  if (!complete || file.exists(marker) ||
+      .dshpc_path_is_symlink(marker)) {
+    return(invisible(FALSE))
+  }
+
+  marker_tmp <- tempfile(".permissions-remediated-", tmpdir = home)
+  on.exit(unlink(marker_tmp), add = TRUE)
+  written <- tryCatch(
+    .dshpc_with_private_umask({
+      writeLines(version, marker_tmp, useBytes = TRUE)
+      TRUE
+    }),
+    error = function(e) FALSE
+  )
+  if (!isTRUE(written) ||
+      !isTRUE(tryCatch(Sys.chmod(marker_tmp, "0660", use_umask = FALSE),
+                       error = function(e) FALSE)) ||
+      file.exists(marker) || .dshpc_path_is_symlink(marker)) {
+    return(invisible(FALSE))
+  }
+
+  invisible(isTRUE(file.rename(marker_tmp, marker)))
 }
 
 #' Deserialize B64/JSON argument from Opal transport
@@ -112,7 +217,7 @@
 #' @param spec_owner Character or NULL; owner from the job spec (.owner field).
 #' @keywords internal
 .get_owner_id <- function(spec_owner = NULL) {
-  # Best: explicit owner from client (injected by dsHPCClient)
+  # Best: stable owner authorized and injected by the domain server package.
   if (!is.null(spec_owner) && nzchar(spec_owner)) return(spec_owner)
   # DSLite / local fallback
   owner <- Sys.getenv("USER", unset = "")

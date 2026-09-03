@@ -4,15 +4,19 @@
 \alias{register_dshpc_publisher}
 \title{Register a publisher plugin}
 \usage{
-register_dshpc_publisher(kind, fn)
+register_dshpc_publisher(kind, fn, overwrite = FALSE)
 }
 \arguments{
 \item{kind}{Character; publisher kind (e.g. "imaging_asset", "radiomics_dataset").}
 
 \item{fn}{Function; publisher function(job_id, step, output_dir, db) -> list.}
+
+\item{overwrite}{Logical; replace a publisher owned by the same registering
+package. Defaults to `FALSE`; cross-package replacement is denied.}
 }
 \description{
 Called by domain packages such as dsImaging to register
 publish logic. dsHPC calls the registered function when a
-publish_asset or publish_dataset step completes.
+publish_asset or publish_dataset step completes. Registration records the
+calling package and execution requires a matching job-label family.
 }

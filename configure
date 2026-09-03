@@ -15,6 +15,7 @@
 
 DSHPC_HOME="${DSHPC_HOME:-/srv/dshpc}"
 LOG_PREFIX="[dsHPC configure]"
+umask 0007
 
 log_info() { echo "${LOG_PREFIX} $*"; }
 log_warn() { echo "${LOG_PREFIX} WARNING: $*" >&2; }
@@ -26,12 +27,12 @@ for dir in "" "/artifacts" "/runners" "/publish" "/staging"; do
   target="${DSHPC_HOME}${dir}"
   if [ ! -d "${target}" ]; then
     if mkdir -p "${target}" 2>/dev/null; then
-      chmod 0777 "${target}" 2>/dev/null || true
+      chmod 0770 "${target}" 2>/dev/null || true
     else
       log_warn "Cannot create ${target}. Will retry at runtime via .onLoad()."
     fi
   else
-    chmod 0777 "${target}" 2>/dev/null || true
+    chmod 0770 "${target}" 2>/dev/null || true
   fi
 done
 

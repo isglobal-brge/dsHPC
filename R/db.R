@@ -5,7 +5,8 @@
 .db_connect <- function() {
   home <- .dshpc_home()
   db_path <- file.path(home, "dshpc.sqlite")
-  first_time <- !file.exists(db_path)
+  old_umask <- Sys.umask("0007")
+  on.exit(Sys.umask(old_umask), add = TRUE)
   db <- DBI::dbConnect(RSQLite::SQLite(), db_path)
   DBI::dbExecute(db, "PRAGMA journal_mode=WAL")
   DBI::dbExecute(db, "PRAGMA busy_timeout=5000")
@@ -14,6 +15,12 @@
   # persistent volumes across package upgrades, so new scheduler tables must be
   # created on load/connect even when the database already exists.
   .db_create_schema(db)
+  for (path in c(db_path, paste0(db_path, "-wal"), paste0(db_path, "-shm"))) {
+    if (file.exists(path)) {
+      tryCatch(Sys.chmod(path, "0660", use_umask = FALSE),
+               error = function(e) NULL)
+    }
+  }
   db
 }
 
@@ -39,13 +46,15 @@
       name            TEXT,
       label           TEXT,
       tags            TEXT,
-      visibility      TEXT NOT NULL DEFAULT 'global',
+      visibility      TEXT NOT NULL DEFAULT 'private',
+      access_token_hash TEXT,
       spec_json       TEXT NOT NULL,
       spec_hash       TEXT
     )")
 
   .db_ensure_columns(db, "jobs", list(
-    name = "TEXT"))
+    name = "TEXT",
+    access_token_hash = "TEXT"))
 
   DBI::dbExecute(db, "
     CREATE TABLE IF NOT EXISTS steps (
@@ -194,14 +203,34 @@
 
 #' Register an output in the outputs table
 #' @keywords internal
+.normalize_output_size_bytes <- function(size_bytes) {
+  if (length(size_bytes) != 1L || !is.numeric(size_bytes)) {
+    stop("size_bytes must be one non-negative whole number or NA.",
+      call. = FALSE)
+  }
+  value <- as.numeric(size_bytes)
+  if (is.na(value)) return(NA_real_)
+  if (!is.finite(value) || value < 0 || value != floor(value) ||
+      value > 2^53) {
+    stop("size_bytes must be one non-negative whole number no greater than 2^53.",
+      call. = FALSE)
+  }
+  value
+}
+
+#' Register an output in the outputs table
+#' @keywords internal
 .db_register_output <- function(db, job_id, step_index, name, kind,
-                                 path_or_ref, size_bytes = NA_integer_,
+                                 path_or_ref, size_bytes = NA_real_,
                                  safe_for_client = FALSE) {
+  path_or_ref <- .dshpc_validate_job_artifact_path(path_or_ref, job_id,
+    check_tree = TRUE)
+  size_bytes <- .normalize_output_size_bytes(size_bytes)
   DBI::dbExecute(db,
     "INSERT INTO outputs (job_id, step_index, name, kind, path_or_ref,
                           size_bytes, safe_for_client, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     params = list(job_id, step_index, name, kind, path_or_ref,
-      as.integer(size_bytes), as.integer(safe_for_client),
+      size_bytes, as.integer(safe_for_client),
       format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")))
 }

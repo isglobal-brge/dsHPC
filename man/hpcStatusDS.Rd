@@ -7,12 +7,14 @@
 hpcStatusDS(job_id_or_symbol)
 }
 \arguments{
-\item{job_id_or_symbol}{Job id, or a symbol resolving to an object with a
-`job_id` field in the server session.}
+\item{job_id_or_symbol}{Submission symbol resolving to the server-side
+handle, or a B64 bearer returned by \code{\link{hpcJobReferenceDS}()}.}
 }
 \value{
-Named list with job id, state, progress, timestamps, sanitized error
-  string, and retry count.
+Named list with coarse state, completion flag, and a sanitized error
+  string. The job reference, step progress, retry counters, labels, and
+  timestamps remain omitted because they can form operational or credential
+  disclosure channels.
 }
 \description{
 Return disclosure-safe state for one job.

@@ -14,7 +14,9 @@ also supported for backend commands where noted below.
 - `dshpc.home`: dsHPC state directory. Defaults to `/srv/dshpc`.
 - `dshpc.scheduler`: scheduler mode. Defaults to `"adaptive"`.
 - `dshpc.max_jobs_global`: maximum simultaneously running jobs.
-- `dshpc.max_jobs_per_user`: per-user pending/running job quota.
+- `dshpc.max_jobs_per_user`: per-owner pending/running job quota. Its default
+  is `Inf` for compatibility; production sites should configure a finite
+  value and domain packages must supply a stable authorized owner.
 - `dshpc.max_queued_jobs_global`: global pending/running queue quota.
 - `dshpc.max_steps_per_job`: maximum steps accepted in one job spec.
 - `dshpc.max_retries`: retry count for failed artifact steps.
@@ -27,6 +29,8 @@ also supported for backend commands where noted below.
 
 \section{Embedded resource scheduling}{
 
+Admission conservatively leases the maximum requirement of any step for the
+whole job; leases are not resized at DAG step transitions.
 - `dshpc.node_memory_mb`: node memory budget, or `"auto"` for cgroup/host
   detection.
 - `dshpc.memory_reserve_mb`: memory reserved for Rock/Rserve and OS work.
@@ -122,5 +126,5 @@ or `dshpc.backend_capabilities_cmd`. With
 }
 
 \seealso{
-[hpcCapabilitiesDS()], [hpcSchedulerStatusDS()]
+[hpcCapabilitiesDS()], [hpcSchedulerStatusInternal()]
 }

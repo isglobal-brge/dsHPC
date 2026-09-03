@@ -63,12 +63,16 @@
     cmd <- rscript
     args <- c(worker_script, home)
   }
-  proc <- processx::process$new(
+  proc <- .dshpc_with_private_umask(processx::process$new(
     command = cmd, args = args,
     stdout = log_file, stderr = log_file,
     env = c("current", worker_env),
-    cleanup = FALSE, cleanup_tree = FALSE)
-  writeLines(as.character(proc$get_pid()), pid_file)
+    cleanup = FALSE, cleanup_tree = FALSE))
+  tryCatch(Sys.chmod(log_file, "0660", use_umask = FALSE),
+           error = function(e) NULL)
+  .dshpc_with_private_umask(writeLines(as.character(proc$get_pid()), pid_file))
+  tryCatch(Sys.chmod(pid_file, "0660", use_umask = FALSE),
+           error = function(e) NULL)
   .dshpc_env$.worker <- proc
 
   # When launched through `setsid -f`, processx sees the short-lived launcher
@@ -76,7 +80,9 @@
   # worker heartbeat and rewrite worker.pid with the real daemon PID.
   actual_pid <- .wait_for_worker_pid(home, timeout_secs = 5)
   if (!is.na(actual_pid)) {
-    writeLines(as.character(actual_pid), pid_file)
+    .dshpc_with_private_umask(writeLines(as.character(actual_pid), pid_file))
+    tryCatch(Sys.chmod(pid_file, "0660", use_umask = FALSE),
+             error = function(e) NULL)
     message("dsHPC worker started (PID ", actual_pid, ")")
     return(invisible(actual_pid))
   }
@@ -270,7 +276,10 @@
       .dshpc_env$.worker_started_at %||% Sys.time(), units = "secs"))
   )
   health_path <- file.path(home, "worker.health")
-  writeLines(jsonlite::toJSON(health, auto_unbox = TRUE, pretty = TRUE), health_path)
+  .dshpc_with_private_umask(writeLines(
+    jsonlite::toJSON(health, auto_unbox = TRUE, pretty = TRUE), health_path))
+  tryCatch(Sys.chmod(health_path, "0660", use_umask = FALSE),
+           error = function(e) NULL)
 }
 
 #' Check worker health status
@@ -312,12 +321,16 @@
 #' Main worker loop (runs inside the worker process)
 #' @keywords internal
 .worker_main <- function() {
+  # The dedicated worker keeps every newly created artifact owner/group-only.
+  # Rock and the worker should share a Unix group when they use different UIDs.
+  Sys.umask("0007")
   # Ensure DSHPC_HOME directories exist with correct permissions
   home <- .dshpc_home()
   for (subdir in c("artifacts", "publish", "staging", "runners")) {
     d <- file.path(home, subdir)
     dir.create(d, recursive = TRUE, showWarnings = FALSE)
-    tryCatch(Sys.chmod(d, "0777"), error = function(e) NULL)
+    tryCatch(Sys.chmod(d, "0770", use_umask = FALSE),
+             error = function(e) NULL)
   }
   pid_file <- file.path(home, "worker.pid")
   tryCatch(writeLines(as.character(Sys.getpid()), pid_file),
@@ -454,6 +467,7 @@
 
 #' @keywords internal
 .worker_reap <- function(db) {
+  .recover_deduplicated_job_clones(db)
   running <- DBI::dbGetQuery(db,
     "SELECT j.job_id, j.worker_pid, j.step_index,
             s.runner, s.state AS step_state,
@@ -579,6 +593,20 @@
 .worker_finalize_artifact_step <- function(db, jid, sidx, runner_name,
                                            exit_code,
                                            external_status = NULL) {
+  output_validation_failed <- FALSE
+  if (identical(as.integer(exit_code), 0L)) {
+    output_ref <- file.path("artifacts", jid,
+      sprintf("step_%03d", sidx), "output")
+    out_dir <- file.path(.dshpc_home(), output_ref)
+    valid <- tryCatch({
+      .dshpc_validate_job_artifact_path(out_dir, jid, check_tree = TRUE)
+      TRUE
+    }, error = function(e) FALSE)
+    if (!isTRUE(valid)) {
+      exit_code <- 1L
+      output_validation_failed <- TRUE
+    }
+  }
   advance_after_commit <- FALSE
   committed <- FALSE
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
@@ -586,10 +614,15 @@
     if (identical(as.integer(exit_code), 0L)) {
       output_ref <- file.path("artifacts", jid,
                                sprintf("step_%03d", sidx), "output")
-      out_dir <- file.path(.dshpc_home(), output_ref)
+      out_dir <- .dshpc_resolve_job_artifact_ref(output_ref, jid,
+        check_tree = TRUE)
       if (dir.exists(out_dir)) {
-        files <- list.files(out_dir, full.names = TRUE)
+        files <- list.files(out_dir, all.files = TRUE, no.. = TRUE,
+          full.names = TRUE)
         for (f in files) {
+          mode <- if (dir.exists(f)) "0770" else "0660"
+          tryCatch(Sys.chmod(f, mode, use_umask = FALSE),
+                   error = function(e) NULL)
           .db_register_output(db, jid, sidx, basename(f),
             "artifact_file", f, file.info(f)$size, safe_for_client = FALSE)
         }
@@ -606,11 +639,18 @@
       settings <- .dshpc_settings()
       job <- .store_get_job(db, jid)
       retries <- as.integer(job$retry_count %||% 0L)
+      failure_reason <- if (isTRUE(output_validation_failed)) {
+        "artifact_output_validation_failed"
+      } else {
+        "artifact_step_failed"
+      }
       .scheduler_record_runner_failure(db, runner_name, exit_code,
-        reason = "artifact_step_failed")
+        reason = failure_reason)
       updates <- list(state = "failed",
         exit_code = as.integer(exit_code),
-        error_message = paste("Exit:", exit_code),
+        error_message = if (isTRUE(output_validation_failed)) {
+          "Artifact output failed validation"
+        } else paste("Exit:", exit_code),
         finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
       if (!is.null(external_status)) updates$external_status <- external_status
       do.call(.store_update_step, c(list(db, jid, sidx), updates))
@@ -626,7 +666,9 @@
                retry_count = retries + 1L))
       } else {
         .store_update_job(db, jid, state = "FAILED",
-          error_message = paste("Step", sidx, "failed (exit", exit_code, ")"),
+          error_message = if (isTRUE(output_validation_failed)) {
+            paste("Step", sidx, "produced an invalid artifact tree")
+          } else paste("Step", sidx, "failed (exit", exit_code, ")"),
           worker_pid = NA_integer_,
           finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
       }
@@ -717,13 +759,6 @@
   if (stale_pending > 0)
     .worker_log("Expired ", stale_pending, " stale PENDING jobs")
 
-  # Also clean stale asset generations (dsImaging)
-  if (requireNamespace("dsImaging", quietly = TRUE)) {
-    tryCatch({
-      n_stale <- dsImaging::cleanup_stale_generations(max_age_hours = 2)
-      if (n_stale > 0) .worker_log("GC cleaned ", n_stale, " stale generations")
-    }, error = function(e) NULL)
-  }
 }
 
 #' @keywords internal

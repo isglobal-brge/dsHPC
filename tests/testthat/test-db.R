@@ -18,6 +18,7 @@ test_that("SQLite database is created with correct schema", {
   expect_true("owner_id" %in% cols)
   expect_true("state" %in% cols)
   expect_true("worker_pid" %in% cols)
+  expect_true("access_token_hash" %in% cols)
   expect_true("spec_json" %in% cols)
 
   # Steps table has expected columns

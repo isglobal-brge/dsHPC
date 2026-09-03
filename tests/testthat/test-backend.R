@@ -318,6 +318,39 @@ test_that("backend step scripts write exit_code atomically", {
   lines <- readLines(script, warn = FALSE)
   expect_true(any(grepl("exit_code.tmp", lines, fixed = TRUE)))
   expect_true(any(grepl("mv exit_code.tmp exit_code", lines, fixed = TRUE)))
+  expect_true(any(grepl("/usr/bin/env -i", lines, fixed = TRUE)))
+})
+
+test_that("backend runner scripts clear the submitting environment", {
+  skip_on_os("windows")
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  env_name <- "DSHPC_BACKEND_PARENT_SECRET"
+  old_env <- Sys.getenv(env_name, unset = NA_character_)
+  on.exit({
+    Sys.unsetenv(env_name)
+    if (!is.na(old_env)) Sys.setenv(DSHPC_BACKEND_PARENT_SECRET = old_env)
+  }, add = TRUE)
+  Sys.setenv(DSHPC_BACKEND_PARENT_SECRET = "backend-secret-marker")
+  on.exit(cleanup_test_home(home), add = TRUE)
+
+  step_dir <- file.path(home, "artifacts", "job_backend", "step_001")
+  dir.create(step_dir, recursive = TRUE)
+  script <- file.path(step_dir, "run_step.sh")
+  prepared <- list(
+    env_vars = c(PATH = Sys.getenv("PATH"), HOME = file.path(step_dir, "home")),
+    command = Sys.which("env"), args = character(0), step_dir = step_dir,
+    output_dir = file.path(step_dir, "output"), runner_config = list())
+  dsHPC:::.backend_write_step_script(script, prepared)
+  expect_false(any(grepl("backend-secret-marker",
+    readLines(script, warn = FALSE), fixed = TRUE)))
+  output <- system2("/bin/sh", script, stdout = TRUE, stderr = TRUE)
+
+  expect_false(any(grepl("backend-secret-marker", output, fixed = TRUE)))
+  expect_false(any(grepl("DSHPC_BACKEND_PARENT_SECRET", output,
+    fixed = TRUE)))
+  expect_true(any(grepl(paste0("HOME=", prepared$env_vars[["HOME"]]), output,
+    fixed = TRUE)))
 })
 
 test_that("backend path mappings support alternate host/container views", {
@@ -575,6 +608,7 @@ test_that("slurm backend submits with runner resources and reaps completion", {
 
   args <- readLines(args_file, warn = FALSE)
   expect_true("--mem=4096" %in% args)
+  expect_true("--export=NONE" %in% args)
   expect_true("--cpus-per-task=2" %in% args)
   expect_true("--partition=gpu_part" %in% args)
   expect_true("--account=proj_acct" %in% args)

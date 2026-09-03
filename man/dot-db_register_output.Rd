@@ -11,7 +11,7 @@
   name,
   kind,
   path_or_ref,
-  size_bytes = NA_integer_,
+  size_bytes = NA_real_,
   safe_for_client = FALSE
 )
 }

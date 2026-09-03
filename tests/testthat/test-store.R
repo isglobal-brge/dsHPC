@@ -100,7 +100,7 @@ test_that("listing jobs filters by state", {
   expect_equal(nrow(running), 1L)
 })
 
-test_that("all jobs are visible in global pool", {
+test_that("jobs default to private visibility", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
@@ -114,10 +114,10 @@ test_that("all jobs are visible in global pool", {
   spec_b <- make_test_spec()
   dsHPC:::.store_create_job(db, "job_b", "user_b", spec_b, 1L)
 
-  # All jobs visible to everyone
+  # Internal store queries can see all jobs, but new jobs are private by default.
   all <- dsHPC:::.store_list_jobs(db)
   expect_equal(nrow(all), 2L)
-  expect_true(all(all$visibility == "global"))
+  expect_true(all(all$visibility == "private"))
 })
 
 test_that("spec retrieval returns parsed JSON", {

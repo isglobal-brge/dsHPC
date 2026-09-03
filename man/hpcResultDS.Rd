@@ -7,14 +7,17 @@
 hpcResultDS(job_id_or_symbol)
 }
 \arguments{
-\item{job_id_or_symbol}{Job id, or a symbol resolving to an object with a
-`job_id` field in the server session.}
+\item{job_id_or_symbol}{Submission symbol resolving to the server-side
+handle, or a B64 bearer returned by \code{\link{hpcJobReferenceDS}()}.}
 }
 \value{
 A named list. If the job is not complete, the list contains
-  `ready = FALSE`; otherwise it contains the safe result metadata.
+  `ready = FALSE`; otherwise it contains the safe result metadata. It never
+  contains the job identifier or bearer.
 }
 \description{
 Return the disclosure-safe result object for a completed job. Raw artifact
-outputs are never returned directly through this method.
+outputs are never returned directly through this method. Marked-safe values
+must also pass the configured disclosure-cardinality floor; ambiguous
+structures fail closed.
 }
