@@ -6,6 +6,9 @@
 \usage{
 .executor_kill(db, job_id)
 }
+\value{
+Invisibly, \code{"terminated"}, \code{"requested"}, or \code{"failed"}.
+}
 \description{
 Kill a worker process
 }

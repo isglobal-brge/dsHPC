@@ -554,14 +554,47 @@
 #' @keywords internal
 .backend_read_external_marker <- function(step_dir) {
   path <- file.path(step_dir, "external_backend.json")
-  if (!file.exists(path)) return(NULL)
+  if (!file.exists(path) || .dshpc_path_is_symlink(path)) return(NULL)
   marker <- tryCatch(jsonlite::fromJSON(readLines(path, warn = FALSE),
     simplifyVector = FALSE), error = function(e) NULL)
   if (!is.list(marker)) return(NULL)
-  backend <- as.character(marker$backend %||% "")[1]
-  external_id <- as.character(marker$external_id %||% "")[1]
-  if (!nzchar(backend) || !nzchar(external_id)) return(NULL)
+  backend <- marker$backend %||% ""
+  external_id <- marker$external_id %||% ""
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend) ||
+      !backend %in% c("slurm", "kubernetes", "external") ||
+      !.backend_valid_external_id(external_id)) return(NULL)
   marker
+}
+
+#' @keywords internal
+.backend_valid_external_id <- function(external_id) {
+  if (!is.character(external_id) || length(external_id) != 1L ||
+      is.na(external_id)) return(FALSE)
+  bytes <- nchar(external_id, type = "bytes", allowNA = TRUE)
+  !is.na(bytes) && bytes >= 1L && bytes <= 256L &&
+    isTRUE(grepl("^[A-Za-z0-9][A-Za-z0-9._:-]*$", external_id,
+      useBytes = TRUE))
+}
+
+#' @keywords internal
+.backend_slurm_time <- function(settings = .dshpc_settings()) {
+  configured <- as.character(settings$slurm_time %||% "")[1]
+  if (!is.na(configured) && nzchar(trimws(configured))) return(trimws(configured))
+
+  seconds <- suppressWarnings(as.numeric(
+    settings$default_timeout_secs %||% NA_real_))[1]
+  if (!is.finite(seconds) || seconds <= 0) return("")
+  seconds <- ceiling(seconds)
+  days <- floor(seconds / 86400)
+  remainder <- seconds - days * 86400
+  hours <- floor(remainder / 3600)
+  minutes <- floor((remainder - hours * 3600) / 60)
+  seconds <- remainder - hours * 3600 - minutes * 60
+  if (days > 0) {
+    sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+  } else {
+    sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+  }
 }
 
 #' @keywords internal
@@ -591,8 +624,8 @@
     args <- c(args, paste0("--account=", settings$slurm_account))
   if (nzchar(settings$slurm_qos %||% ""))
     args <- c(args, paste0("--qos=", settings$slurm_qos))
-  if (nzchar(settings$slurm_time %||% ""))
-    args <- c(args, paste0("--time=", settings$slurm_time))
+  slurm_time <- .backend_slurm_time(settings)
+  if (nzchar(slurm_time)) args <- c(args, paste0("--time=", slurm_time))
 
   gpu_request <- .backend_gpu_request(profile, settings)
   gpu_n <- as.integer(gpu_request$requested %||% 0L)
@@ -602,14 +635,26 @@
   if (length(extra) > 0) args <- c(args, extra[nzchar(extra)])
   args <- c(args, prepared$script_path)
 
-  out <- tryCatch(system2(sbatch, args, stdout = TRUE, stderr = TRUE),
+  stderr_path <- tempfile("dshpc_sbatch_stderr_")
+  on.exit(unlink(stderr_path, force = TRUE), add = TRUE)
+  out <- tryCatch(suppressWarnings(system2(sbatch, args, stdout = TRUE,
+    stderr = stderr_path)),
     error = function(e) stop("sbatch failed: ", conditionMessage(e), call. = FALSE))
   status <- attr(out, "status")
-  if (!is.null(status) && !identical(as.integer(status), 0L))
-    stop("sbatch failed: ", paste(out, collapse = "\n"), call. = FALSE)
-  first <- trimws(out[1] %||% "")
-  id <- strsplit(first, ";", fixed = TRUE)[[1]][1]
-  if (!nzchar(id)) stop("sbatch did not return a job id.", call. = FALSE)
+  stderr <- if (file.exists(stderr_path)) {
+    tryCatch(readLines(stderr_path, warn = FALSE), error = function(e) character(0))
+  } else character(0)
+  if (!is.null(status) && !identical(as.integer(status), 0L)) {
+    detail <- paste(c(out, stderr), collapse = "\n")
+    stop("sbatch failed", if (nzchar(detail)) paste0(": ", detail) else ".",
+      call. = FALSE)
+  }
+  lines <- trimws(out[nzchar(trimws(out))])
+  if (length(lines) != 1L ||
+      !grepl("^[0-9]+(;[^;[:space:]]+)?$", lines[1])) {
+    stop("sbatch did not return a valid parsable job id.", call. = FALSE)
+  }
+  id <- strsplit(lines[1], ";", fixed = TRUE)[[1]][1]
   id
 }
 
@@ -646,15 +691,23 @@
     DSHPC_GPU_POLICY = gpu_request$policy %||% "auto",
     DSHPC_BACKEND_GPU_COUNT = as.character(gpu_request$backend_gpu_count %||% "auto"),
     DSHPC_BACKEND_GPU_SOURCE = as.character(gpu_request$backend_gpu_source %||% "unknown"))
-  out <- tryCatch(system2(submit$command, submit$args, stdout = TRUE,
-    stderr = TRUE, env = .backend_env(env)), error = function(e)
+  stderr_path <- tempfile("dshpc_external_submit_stderr_")
+  on.exit(unlink(stderr_path, force = TRUE), add = TRUE)
+  out <- tryCatch(suppressWarnings(system2(submit$command, submit$args,
+    stdout = TRUE, stderr = stderr_path, env = .backend_env(env))), error = function(e)
       stop("External submit failed: ", conditionMessage(e), call. = FALSE))
   status <- attr(out, "status")
-  if (!is.null(status) && !identical(as.integer(status), 0L))
-    stop("External submit failed: ", paste(out, collapse = "\n"), call. = FALSE)
-  id <- trimws(out[1] %||% "")
-  if (!nzchar(id)) stop("External submit did not return a job id.", call. = FALSE)
-  id
+  stderr <- if (file.exists(stderr_path)) {
+    tryCatch(readLines(stderr_path, warn = FALSE), error = function(e) character(0))
+  } else character(0)
+  if (!is.null(status) && !identical(as.integer(status), 0L)) {
+    detail <- paste(c(out, stderr), collapse = "\n")
+    stop("External submit failed", if (nzchar(detail)) paste0(": ", detail) else ".",
+      call. = FALSE)
+  }
+  if (length(out) != 1L || !.backend_valid_external_id(out[1]))
+    stop("External submit did not return a valid job id.", call. = FALSE)
+  out[1]
 }
 
 #' Kubernetes backend contract resolved from server options
@@ -971,6 +1024,7 @@
     return(list(state = "succeeded", external_state = state, exit_code = 0L))
   if (state %in% c("PENDING", "RUNNING", "CONFIGURING", "COMPLETING"))
     return(list(state = "running", external_state = state, exit_code = NA_integer_))
+  if (identical(exit_code, 0L)) exit_code <- 1L
   list(state = "failed", external_state = state, exit_code = exit_code)
 }
 
@@ -1063,25 +1117,40 @@
 #' @keywords internal
 .backend_status_external <- function(external_id, step_dir,
                                      settings = .dshpc_settings()) {
+  if (!.backend_valid_external_id(external_id)) {
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = "invalid_external_id"))
+  }
   status <- .backend_command_parts(settings$external_status_cmd)
   if (!nzchar(status$command))
-    return(list(state = "failed", exit_code = 1L,
-                reason = "external_status_not_configured"))
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = "external_status_not_configured"))
   backend_step_dir <- .backend_map_path(step_dir, "local_to_backend", settings)
   env <- c(DSHPC_EXTERNAL_ID = external_id,
     DSHPC_STEP_DIR = backend_step_dir,
     DSHPC_LOCAL_STEP_DIR = step_dir)
+  stderr_path <- tempfile("dshpc_external_status_stderr_")
+  on.exit(unlink(stderr_path, force = TRUE), add = TRUE)
   out <- tryCatch(suppressWarnings(system2(status$command,
-    c(status$args, external_id), stdout = TRUE, stderr = TRUE,
+    c(status$args, external_id), stdout = TRUE, stderr = stderr_path,
     env = .backend_env(env))), error = function(e)
       structure(paste("STATUS_ERROR", conditionMessage(e)), status = 127L))
   code <- attr(out, "status") %||% 0L
   if (!identical(as.integer(code), 0L)) {
+    stderr <- if (file.exists(stderr_path)) {
+      tryCatch(readLines(stderr_path, warn = FALSE), error = function(e) character(0))
+    } else character(0)
     return(list(state = "running", external_state = "STATUS_UNKNOWN",
-      exit_code = NA_integer_, reason = paste(out, collapse = "\n")))
+      exit_code = NA_integer_, reason = paste(c(out, stderr), collapse = "\n")))
   }
-  first <- trimws(out[1] %||% "")
-  .backend_parse_external_status(first)
+  if (length(out) != 1L ||
+      !isTRUE(grepl(paste0("^(SUCCEEDED|SUCCESS|COMPLETED|DONE|PENDING|RUNNING|",
+        "QUEUED|SUBMITTED|FAILED|CANCELLED)([[:space:]]+-?[0-9]+)?$"),
+        out[1], ignore.case = TRUE))) {
+    return(list(state = "running", external_state = "STATUS_UNKNOWN",
+      exit_code = NA_integer_, reason = "external_status_invalid"))
+  }
+  .backend_parse_external_status(out[1])
 }
 
 #' @keywords internal
@@ -1104,31 +1173,35 @@
   backend <- tolower(as.character(backend %||% "")[1])
   if (identical(backend, "slurm")) {
     scancel <- .backend_resolve_cmd(settings$slurm_scancel, "scancel")
-    if (nzchar(scancel)) {
-      tryCatch(system2(scancel, external_id, stdout = FALSE, stderr = FALSE),
-               error = function(e) NULL)
-    }
-    return(invisible(TRUE))
+    return(invisible(.backend_cancel_command(scancel, external_id)))
   }
   if (identical(backend, "external")) {
+    if (!.backend_valid_external_id(external_id)) return(invisible(FALSE))
     cancel <- .backend_command_parts(settings$external_cancel_cmd)
-    if (nzchar(cancel$command)) {
-      tryCatch(system2(cancel$command, c(cancel$args, external_id),
-        stdout = FALSE, stderr = FALSE,
-        env = .backend_env(c(DSHPC_EXTERNAL_ID = external_id))), error = function(e) NULL)
-    }
-    return(invisible(TRUE))
+    return(invisible(.backend_cancel_command(cancel$command,
+      c(cancel$args, external_id),
+      env = .backend_env(c(DSHPC_EXTERNAL_ID = external_id)))))
   }
   if (identical(backend, "kubernetes")) {
     kubectl <- .backend_kubernetes_contract(settings)$kubectl
-    if (nzchar(kubectl)) {
-      tryCatch(system2(kubectl, .backend_kubectl_args(settings,
+    return(invisible(.backend_cancel_command(kubectl,
+      .backend_kubectl_args(settings,
         c("delete", "job", external_id, "--ignore-not-found=true",
-          "--wait=false")), stdout = FALSE, stderr = FALSE),
-        error = function(e) NULL)
-    }
+          "--wait=false")))))
   }
-  invisible(TRUE)
+  invisible(FALSE)
+}
+
+#' Run a backend cancellation command and report whether it accepted the request
+#' @keywords internal
+.backend_cancel_command <- function(command, args, env = character(0)) {
+  if (is.null(command) || length(command) != 1L || is.na(command) ||
+      !nzchar(command)) return(FALSE)
+  out <- tryCatch(suppressWarnings(system2(command, args,
+    stdout = TRUE, stderr = TRUE, env = env)), error = function(e) NULL)
+  if (is.null(out)) return(FALSE)
+  status <- attr(out, "status") %||% 0L
+  identical(as.integer(status), 0L)
 }
 
 #' @keywords internal
@@ -1157,9 +1230,9 @@
     "  exec /usr/bin/env -i",
     clean_assignments,
     "DSHPC_RUNTIME_ENV_INITIALIZED=1",
-    "/usr/bin/env bash \"$0\" \"$@\""), collapse = " ")
+    "/bin/sh \"$0\" \"$@\""), collapse = " ")
   lines <- c(
-    "#!/usr/bin/env bash",
+    "#!/bin/sh",
     "umask 007",
     "if [ \"${DSHPC_RUNTIME_ENV_INITIALIZED:-}\" != \"1\" ]; then",
     clean_exec,

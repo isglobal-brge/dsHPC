@@ -408,8 +408,6 @@ hpcSubmitInternal <- function(spec_encoded) {
     stop("Job id already exists; submit with a new job id.", call. = FALSE)
   }
 
-  .check_quotas(db, owner_id)
-
   capability <- .generate_job_capability()
   capability_hash <- .hash_job_capability(capability)
 
@@ -440,7 +438,8 @@ hpcSubmitInternal <- function(spec_encoded) {
       .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
         spec_hash = spec_hash, access_token_hash = capability_hash,
         initial_state = "CLONING",
-        clone_owner = list(node = .scheduler_node_id(), pid = Sys.getpid()))
+        clone_owner = list(node = .scheduler_node_id(), pid = Sys.getpid()),
+        enforce_quotas = TRUE)
       cloned <- tryCatch({
         .clone_deduplicated_job(db, source_job_id, job_id, clone_plan)
         TRUE
@@ -460,7 +459,8 @@ hpcSubmitInternal <- function(spec_encoded) {
 
   .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
                      spec_hash = spec_hash,
-                     access_token_hash = capability_hash)
+                     access_token_hash = capability_hash,
+                     enforce_quotas = TRUE)
 
   # If all steps are session-plane, execute inline (synchronous).
   # Artifact-plane steps are deferred to the worker daemon.
@@ -949,6 +949,8 @@ hpcAdminListDS <- function(admin_key = NULL, label = NULL) {
 #' Cancel Any Job (admin only)
 #'
 #' Disabled by default. Enable by setting dshpc.admin_key or DSHPC_ADMIN_KEY.
+#' Remote executors acknowledge cancellation asynchronously: the job remains
+#' `RUNNING` until worker reconciliation observes a terminal backend state.
 #'
 #' @param job_id Character; job ID.
 #' @param admin_key Character; the admin key.
@@ -966,7 +968,15 @@ hpcAdminCancelDS <- function(job_id, admin_key = NULL) {
   if (job$state %in% c("FINISHED", "PUBLISHED", "FAILED", "CANCELLED"))
     stop("Job already in terminal state: ", job$state, call. = FALSE)
 
-  .executor_kill(db, job_id)
+  outcome <- .executor_kill(db, job_id)
+  if (identical(outcome, "failed")) {
+    stop("Job cancellation was not accepted by the executor.", call. = FALSE)
+  }
+  if (identical(outcome, "requested")) {
+    .db_log_event(db, job_id, "admin_cancel_requested")
+    return(list(job_id = job_id, state = job$state,
+      cancellation = "REQUESTED"))
+  }
   .scheduler_release_leases(db, job_id)
   .store_update_job(db, job_id, state = "CANCELLED", worker_pid = NA_integer_,
     finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"))

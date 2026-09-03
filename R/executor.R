@@ -14,6 +14,9 @@
 #' @keywords internal
 .executor_run_step <- function(db, job_id, step_index, spec) {
   step <- spec$steps[[step_index]]
+  if (identical(step$plane, "artifact")) {
+    .reset_failed_step_attempt(db, job_id, step_index)
+  }
   step_dir <- .ensure_step_dir(job_id, step_index)
   input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir)
 
@@ -74,6 +77,7 @@
 }
 
 #' Kill a worker process
+#' @return Invisibly, `"terminated"`, `"requested"`, or `"failed"`.
 #' @keywords internal
 .executor_kill <- function(db, job_id) {
   job <- .store_get_job(db, job_id)
@@ -84,15 +88,17 @@
       params = list(job_id, as.integer(job$step_index %||% 0L)))
     if (nrow(step) > 0 && !is.na(step$external_id[1]) &&
         nzchar(step$external_id[1])) {
-      .backend_cancel_step(step$external_backend[1], step$external_id[1])
-      .scheduler_release_leases(db, job_id)
-      .store_update_job(db, job_id, worker_pid = NA_integer_)
-      return(invisible(TRUE))
+      accepted <- .backend_cancel_step(step$external_backend[1],
+        step$external_id[1])
+      if (!isTRUE(accepted)) return(invisible("failed"))
+      .store_update_step(db, job_id, as.integer(job$step_index),
+        external_status = "CANCEL_REQUESTED")
+      return(invisible("requested"))
     }
   }
   if (!is.null(job) && !is.na(job$worker_pid)) {
     pid <- as.integer(job$worker_pid)
-    .terminate_pid(pid)
+    terminated <- .terminate_pid(pid)
     step_dir <- file.path(.dshpc_home(), "artifacts", job_id,
                           sprintf("step_%03d",
                                   as.integer(job$step_index %||% 0L)))
@@ -100,11 +106,14 @@
     if (file.exists(child_pid)) {
       child <- tryCatch(as.integer(readLines(child_pid, n = 1, warn = FALSE)),
                         error = function(e) NA_integer_)
-      .terminate_pid(child)
+      terminated <- isTRUE(.terminate_pid(child)) && isTRUE(terminated)
     }
+    if (!isTRUE(terminated)) return(invisible("failed"))
     .scheduler_release_leases(db, job_id)
     .store_update_job(db, job_id, worker_pid = NA_integer_)
+    return(invisible("terminated"))
   }
+  invisible("terminated")
 }
 
 #' Build the final result object for a completed job
@@ -184,6 +193,56 @@
 }
 
 # --- Helpers ---
+
+#' Remove durable state and files from a failed artifact attempt before retry
+#' @keywords internal
+.reset_failed_step_attempt <- function(db, job_id, step_index) {
+  previous <- DBI::dbGetQuery(db,
+    "SELECT state FROM steps WHERE job_id = ? AND step_index = ?",
+    params = list(job_id, as.integer(step_index)))
+  if (nrow(previous) != 1L || !identical(previous$state[1], "failed")) {
+    return(invisible(FALSE))
+  }
+
+  step_dir <- file.path(.dshpc_home(), "artifacts", job_id,
+                        sprintf("step_%03d", as.integer(step_index)))
+  if (file.exists(step_dir) || dir.exists(step_dir) ||
+      .dshpc_path_is_symlink(step_dir)) {
+    if (.dshpc_path_is_symlink(step_dir)) {
+      stop("Job artifact storage is unavailable.", call. = FALSE)
+    }
+    step_dir <- .dshpc_validate_job_artifact_path(step_dir, job_id,
+      check_tree = FALSE)
+    unlink(step_dir, recursive = TRUE, force = TRUE)
+    if (file.exists(step_dir) || dir.exists(step_dir) ||
+        .dshpc_path_is_symlink(step_dir)) {
+      stop("Failed artifact attempt could not be reset.", call. = FALSE)
+    }
+  }
+
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    DBI::dbExecute(db,
+      "DELETE FROM outputs WHERE job_id = ? AND step_index = ?",
+      params = list(job_id, as.integer(step_index)))
+    .store_update_step(db, job_id, step_index,
+      state = "pending",
+      output_ref = NA_character_,
+      started_at = NA_character_,
+      finished_at = NA_character_,
+      exit_code = NA_integer_,
+      error_class = NA_character_,
+      error_message = NA_character_,
+      external_backend = NA_character_,
+      external_id = NA_character_,
+      external_status = NA_character_)
+    DBI::dbExecute(db, "COMMIT")
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    stop(e)
+  })
+  invisible(TRUE)
+}
 
 #' @keywords internal
 .ensure_step_dir <- function(job_id, step_index) {

@@ -1,3 +1,25 @@
+# dsHPC 0.2.4
+
+* Queue admission now checks per-owner and global quotas inside the same
+  immediate SQLite transaction that creates the job, preventing concurrent
+  submissions from exceeding configured limits.
+* Artifact retries remove and verify the exact failed attempt directory before
+  resetting durable state, so stale outputs and scheduler markers cannot be
+  mistaken for a new attempt.
+* Remote cancellation and timeout are now two-phase operations. Jobs retain
+  their lease and remain running until Slurm, Kubernetes, or an external
+  wrapper confirms a terminal state; rejected cancellation never creates a
+  duplicate retry.
+* Slurm and external wrapper responses have strict, stderr-separated contracts;
+  backend identifiers are bounded ASCII values, cancelled Slurm jobs cannot be
+  interpreted as successful, and the default step timeout is enforced locally
+  and translated to a Slurm time limit.
+* Shared-cell leader liveness uses the persisted heartbeat for another node
+  instead of testing a process id from the wrong PID namespace.
+* Generated artifact scripts use portable POSIX `sh`, including minimal Alpine
+  executor images. The Docker HPC-unit and complete package checks cover the
+  resulting submit, poll, output, retry, cancellation, and recovery paths.
+
 # dsHPC 0.2.3
 
 * Retired generic DataSHIELD submission, loading, enumeration, studio, and

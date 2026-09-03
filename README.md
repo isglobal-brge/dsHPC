@@ -61,7 +61,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.2.3.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.2.4.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -96,7 +96,8 @@ options(
   dshpc.oom_throttle_max_concurrent = 1,
   dshpc.max_jobs_global = 8,
   dshpc.max_queued_jobs_global = 100,
-  dshpc.max_jobs_per_user = 10
+  dshpc.max_jobs_per_user = 10,
+  dshpc.default_timeout_secs = 86400
 )
 ```
 
@@ -120,11 +121,9 @@ cross-package replacement, and binds use to that package's job-label family.
 Installed dsHPC runners cannot be shadowed by a same-named writable YAML file.
 Site/domain packages that write YAML directly bypass managed ownership; those
 files are operator-trusted configuration and their directory must not be
-writable by an untrusted runner identity. In particular, current dsImaging
-deployments directly write a different runner named `image_preprocess`, which
-now collides with dsHPC's installed runner and is ignored. Rename that domain
-runner and update its workflow references before deploying these versions
-together.
+writable by an untrusted runner identity. Current dsImaging versions use the
+distinct runner name `dsimaging_image_preprocess`, avoiding the installed
+dsHPC `image_preprocess` runner.
 
 Artifact commands receive only explicit runtime variables, runner-declared
 non-reserved `env` entries, and dsHPC step variables. `HOME`, `TMPDIR`, `TMP`,
@@ -245,6 +244,13 @@ options(
 )
 ```
 
+These options are server-side administrative configuration. For SSH gateways,
+point them at an admin-controlled external wrapper; mount the SSH key and
+`known_hosts` as server secrets, never as R options or job-spec values. The
+wrapper must share or synchronize `DSHPC_STEP_SCRIPT` and `DSHPC_OUTPUT_DIR`
+with the remote host, and submission must be idempotent for each
+`DSHPC_JOB_ID` + `DSHPC_STEP_INDEX` pair.
+
 The submit wrapper receives environment variables including:
 
 ```text
@@ -260,9 +266,11 @@ DSHPC_CPU_SLOTS
 DSHPC_GPUS_REQUESTED
 ```
 
-The wrapper should return a backend job id on stdout. The status wrapper should
-return one of `RUNNING`, `PENDING`, `SUCCEEDED`, `FAILED`, or `CANCELLED`,
-optionally followed by an exit code.
+The submit wrapper must return exactly one stdout line containing a 1--256 byte
+backend job id matching `[A-Za-z0-9][A-Za-z0-9._:-]*`. The status wrapper must
+return exactly one stdout line containing one of `RUNNING`, `PENDING`,
+`SUCCEEDED`, `FAILED`, or `CANCELLED`, optionally followed by an exit code.
+Wrapper diagnostics belong on stderr.
 
 ## Path mappings
 

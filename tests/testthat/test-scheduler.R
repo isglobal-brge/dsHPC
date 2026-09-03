@@ -200,6 +200,7 @@ test_that("dead worker leaders can be marked stale for shared-cell takeover", {
   home <- setup_test_home()
   withr::local_options(list(
     dshpc.home = home,
+    dshpc.node_id = "node_a",
     dshpc.worker_leader_ttl_secs = 30
   ))
   on.exit(cleanup_test_home(home))
@@ -228,4 +229,35 @@ test_that("dead worker leaders can be marked stale for shared-cell takeover", {
 
   dsHPC:::.mark_workers_stopped(worker_ids = "dead_worker")
   expect_null(dsHPC:::.scheduler_worker_leader(db))
+})
+
+test_that("a remote leader is judged by heartbeat instead of its PID", {
+  home <- setup_test_home()
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.node_id = "node_b",
+    dshpc.worker_leader_ttl_secs = 30
+  ))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  expires <- format(Sys.time() + 60, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  DBI::dbExecute(db,
+    "INSERT OR REPLACE INTO worker_nodes
+      (worker_id, cell_id, node_id, hostname, pid, state, started_at,
+       last_heartbeat, resources_json, details_json)
+     VALUES ('remote_worker', 'cell_shared', 'node_a', 'host_a', 999999,
+       'running', ?, ?, '{}', '{}')",
+    params = list(now, now))
+  DBI::dbExecute(db,
+    "INSERT OR REPLACE INTO scheduler_locks
+      (name, holder, acquired_at, heartbeat_at, expires_at)
+     VALUES ('worker_leader', 'remote_worker', ?, ?, ?)",
+    params = list(now, now, expires))
+
+  leader <- dsHPC:::.scheduler_worker_leader(db)
+  expect_true(dsHPC:::.leader_process_alive(db, leader))
+  expect_equal(dsHPC:::.scheduler_worker_leader(db)$holder, "remote_worker")
 })

@@ -1,7 +1,7 @@
 Package: dsHPC
 Type: Package
 Title: DataSHIELD Durable Federated Job Runtime
-Version: 0.2.3
+Version: 0.2.4
 Authors@R: c(
     person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
     person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))

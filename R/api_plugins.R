@@ -93,7 +93,21 @@ cancel_jobs_by_tag <- function(tag_pattern, admin_key,
       next
     }
 
-    .executor_kill(db, job_id)
+    outcome <- .executor_kill(db, job_id)
+    if (identical(outcome, "failed")) {
+      .db_log_event(db, job_id, "cancel_failed",
+        list(reason = reason %||% "Cancelled", tag_pattern = tag_pattern))
+      out[[i]] <- data.frame(job_id = job_id, previous_state = job$state,
+        state = job$state, stringsAsFactors = FALSE)
+      next
+    }
+    if (identical(outcome, "requested")) {
+      .db_log_event(db, job_id, "cancel_requested_by_tag",
+        list(reason = reason %||% "Cancelled", tag_pattern = tag_pattern))
+      out[[i]] <- data.frame(job_id = job_id, previous_state = job$state,
+        state = job$state, stringsAsFactors = FALSE)
+      next
+    }
     .scheduler_release_leases(db, job_id)
     .store_update_job(db, job_id, state = "CANCELLED",
       worker_pid = NA_integer_, error_message = reason %||% "Cancelled",

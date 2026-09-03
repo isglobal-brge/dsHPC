@@ -4,7 +4,8 @@
 #' @keywords internal
 .store_create_job <- function(db, job_id, owner_id, spec, total_steps,
                                spec_hash = NULL, access_token_hash = NULL,
-                               initial_state = "PENDING", clone_owner = NULL) {
+                               initial_state = "PENDING", clone_owner = NULL,
+                               enforce_quotas = FALSE) {
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   if (!is.character(initial_state) || length(initial_state) != 1L ||
       !initial_state %in% c("PENDING", "CLONING")) {
@@ -13,6 +14,7 @@
 
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
+    if (isTRUE(enforce_quotas)) .check_quotas(db, owner_id)
     label <- spec$label %||% NA_character_
     filter_label <- if (is.na(label)) NULL else label
     raw_name <- spec$name %||% NA_character_

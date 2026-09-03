@@ -32,6 +32,8 @@
 #' - `dshpc.max_queued_jobs_global`: global pending/running queue quota.
 #' - `dshpc.max_steps_per_job`: maximum steps accepted in one job spec.
 #' - `dshpc.max_retries`: retry count for failed artifact steps.
+#' - `dshpc.default_timeout_secs`: maximum runtime for one artifact attempt.
+#'   Defaults to 86400 seconds; non-positive values disable the worker deadline.
 #' - `dshpc.step_cache`: enable content-addressed reuse and single-flight
 #'   coalescing of deterministic artifact steps across jobs. Defaults to
 #'   `TRUE`; set a step's `cache = FALSE` or `cacheable = FALSE` to opt out for
@@ -75,7 +77,8 @@
 #'   `dshpc.slurm_scancel`, `dshpc.slurm_sinfo`: command paths or names.
 #'   Environment fallbacks use `DSHPC_SLURM_*`.
 #' - `dshpc.slurm_partition`, `dshpc.slurm_account`, `dshpc.slurm_qos`,
-#'   `dshpc.slurm_time`, `dshpc.slurm_extra_args`: optional submit settings.
+#'   `dshpc.slurm_time`, `dshpc.slurm_extra_args`: optional submit settings. If
+#'   `dshpc.slurm_time` is empty, it is derived from `default_timeout_secs`.
 #'
 #' @section Kubernetes backend:
 #' - `dshpc.kubernetes_kubectl`: `kubectl` path/name. Environment fallback:

@@ -120,9 +120,21 @@
 .leader_process_alive <- function(db, leader) {
   if (is.null(leader$holder)) return(FALSE)
   worker <- tryCatch(DBI::dbGetQuery(db,
-    "SELECT pid FROM worker_nodes WHERE worker_id = ?",
+    "SELECT node_id, pid, state, last_heartbeat
+     FROM worker_nodes WHERE worker_id = ?",
     params = list(leader$holder)), error = function(e) data.frame())
-  nrow(worker) > 0 && .pid_is_alive(as.integer(worker$pid[1]))
+  if (nrow(worker) == 0L || !identical(worker$state[1], "running")) {
+    return(FALSE)
+  }
+  if (identical(worker$node_id[1], .scheduler_node_id())) {
+    return(.pid_is_alive(as.integer(worker$pid[1])))
+  }
+
+  heartbeat <- suppressWarnings(as.POSIXct(worker$last_heartbeat[1],
+    format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC"))
+  if (is.na(heartbeat)) return(FALSE)
+  age <- as.numeric(difftime(Sys.time(), heartbeat, units = "secs"))
+  is.finite(age) && age <= .scheduler_worker_ttl_secs() * 2
 }
 
 #' Wait for a detached worker to publish its actual PID
@@ -470,8 +482,9 @@
   .recover_deduplicated_job_clones(db)
   running <- DBI::dbGetQuery(db,
     "SELECT j.job_id, j.worker_pid, j.step_index,
-            s.runner, s.state AS step_state,
-            s.external_backend, s.external_id
+            s.runner, s.state AS step_state, s.started_at AS step_started_at,
+            s.external_backend, s.external_id,
+            s.external_status AS step_external_status
      FROM jobs j
      LEFT JOIN steps s
        ON s.job_id = j.job_id AND s.step_index = j.step_index
@@ -485,6 +498,8 @@
     step_state <- running$step_state[i]
     external_id <- running$external_id[i]
     external_backend <- running$external_backend[i]
+    previous_external_status <- running$step_external_status[i]
+    timed_out <- .worker_step_timed_out(running$step_started_at[i])
     step_dir <- file.path(.dshpc_home(), "artifacts", jid,
                            sprintf("step_%03d", sidx))
 
@@ -513,11 +528,52 @@
 
     if (!is.na(external_id) && nzchar(external_id)) {
       status <- .backend_step_status(external_backend, external_id, step_dir)
+      cancel_requested <- identical(previous_external_status,
+        "CANCEL_REQUESTED")
+      timeout_cancel_requested <- identical(previous_external_status,
+        "TIMEOUT_CANCEL_REQUESTED")
+      if ((cancel_requested || timeout_cancel_requested) &&
+          .worker_backend_absence_confirms_cancel(
+            external_backend, status)) {
+        status <- list(state = "cancelled", external_state = "NOT_FOUND",
+          exit_code = 143L)
+      }
       if (identical(status$state, "running")) {
+        if (cancel_requested || timeout_cancel_requested) next
+        if (isTRUE(timed_out)) {
+          cancelled <- .backend_cancel_step(external_backend, external_id)
+          if (isTRUE(cancelled)) {
+            .store_update_step(db, jid, sidx,
+              external_status = "TIMEOUT_CANCEL_REQUESTED")
+            .db_log_event(db, jid, "timeout_cancel_requested",
+              list(step_index = sidx, backend = external_backend))
+          } else {
+            .store_update_step(db, jid, sidx,
+              external_status = "TIMEOUT_CANCEL_FAILED")
+            if (is.na(previous_external_status) ||
+                !identical(previous_external_status,
+                  "TIMEOUT_CANCEL_FAILED")) {
+              .db_log_event(db, jid, "timeout_cancel_failed",
+                list(step_index = sidx, backend = external_backend))
+            }
+          }
+          next
+        }
         if (!is.null(status$external_state)) {
           tryCatch(.store_update_step(db, jid, sidx,
             external_status = status$external_state), error = function(e) NULL)
         }
+        next
+      }
+      if (cancel_requested && !identical(status$state, "succeeded")) {
+        .worker_finalize_external_cancellation(db, jid, sidx,
+          status$external_state %||% status$state)
+        next
+      }
+      if (timeout_cancel_requested &&
+          !identical(status$state, "succeeded")) {
+        .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
+          external_status = "TIMEOUT")
         next
       }
       exit_code <- as.integer(status$exit_code %||% 1L)
@@ -537,6 +593,23 @@
     still_alive <- .proc_is_alive(jid, sidx)
     if (!still_alive) still_alive <- .pid_is_alive(pid)
 
+    if (still_alive && isTRUE(timed_out)) {
+      cancelled <- .executor_kill(db, jid)
+      if (identical(cancelled, "terminated")) {
+        .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
+          external_status = "TIMEOUT")
+      } else {
+        .store_update_step(db, jid, sidx,
+          external_status = "TIMEOUT_CANCEL_FAILED")
+        if (is.na(previous_external_status) ||
+            !identical(previous_external_status, "TIMEOUT_CANCEL_FAILED")) {
+          .db_log_event(db, jid, "timeout_cancel_failed",
+            list(step_index = sidx, backend = "embedded"))
+        }
+      }
+      next
+    }
+
     if (!still_alive) {
       # Use processx exit status if available
       proc_exit <- .proc_get_exit(jid, sidx)
@@ -549,6 +622,55 @@
       }
     }
   }
+}
+
+#' Confirm a requested Kubernetes cancellation from an explicit NotFound reply
+#' @keywords internal
+.worker_backend_absence_confirms_cancel <- function(backend, status) {
+  identical(tolower(as.character(backend %||% "")[1]), "kubernetes") &&
+    identical(status$external_state %||% "", "STATUS_UNKNOWN") &&
+    is.character(status$reason) && length(status$reason) > 0L &&
+    isTRUE(any(grepl("not[ -]?found", status$reason, ignore.case = TRUE)))
+}
+
+#' Mark a remotely cancelled job terminal only after backend reconciliation
+#' @keywords internal
+.worker_finalize_external_cancellation <- function(db, jid, sidx,
+                                                   external_status) {
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    .store_update_step(db, jid, sidx, state = "failed", exit_code = 143L,
+      error_message = "Cancelled", finished_at = now,
+      external_status = as.character(external_status %||% "CANCELLED")[1])
+    .scheduler_release_leases(db, jid)
+    .store_update_job(db, jid, state = "CANCELLED",
+      error_message = "Cancelled", worker_pid = NA_integer_, finished_at = now)
+    .db_log_event(db, jid, "external_cancelled",
+      list(step_index = sidx,
+        external_status = external_status %||% "CANCELLED"))
+    DBI::dbExecute(db, "COMMIT")
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    .worker_log("Cancellation reconciliation error for ", jid, ": ",
+      conditionMessage(e))
+  })
+  invisible(TRUE)
+}
+
+#' Test whether one running step exceeded the configured execution deadline
+#' @keywords internal
+.worker_step_timed_out <- function(started_at,
+                                   settings = .dshpc_settings()) {
+  timeout <- suppressWarnings(as.numeric(
+    settings$default_timeout_secs %||% NA_real_))[1]
+  if (!is.finite(timeout) || timeout <= 0 || is.null(started_at) ||
+      length(started_at) == 0L || is.na(started_at[1]) ||
+      !nzchar(as.character(started_at[1]))) return(FALSE)
+  started <- suppressWarnings(as.POSIXct(as.character(started_at[1]),
+    format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC"))
+  if (is.na(started)) return(FALSE)
+  isTRUE(as.numeric(difftime(Sys.time(), started, units = "secs")) > timeout)
 }
 
 #' Requeue or fail a running step whose process disappeared

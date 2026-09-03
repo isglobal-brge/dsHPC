@@ -135,6 +135,98 @@ test_that("external command backend can submit and reap an artifact step", {
   expect_true("ok.txt" %in% outputs$name)
 })
 
+test_that("external submit accepts only one bounded safe stdout id", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  submit <- file.path(home, "submit")
+  step_dir <- file.path(home, "artifacts", "job_submit_contract", "step_001")
+  dir.create(step_dir, recursive = TRUE)
+  prepared <- list(
+    env_vars = character(0),
+    command = "/bin/sh",
+    args = c("-c", "true"),
+    step_dir = step_dir,
+    output_dir = file.path(step_dir, "output"),
+    script_path = file.path(step_dir, "run_step.sh"),
+    local_step_dir = step_dir,
+    local_output_dir = file.path(step_dir, "output"),
+    local_script_path = file.path(step_dir, "run_step.sh"),
+    runner_config = list())
+  step <- list(runner = NULL)
+  withr::local_options(list(dshpc.home = home,
+    dshpc.external_submit_cmd = submit))
+
+  run_submit <- function(body) {
+    writeLines(c("#!/bin/sh", body), submit)
+    Sys.chmod(submit, "0755")
+    dsHPC:::.backend_submit_external("job_submit_contract", 1L, step,
+      step_dir, prepared)
+  }
+
+  expect_equal(run_submit(c("echo gateway-warning >&2", "echo ext.Valid:123")),
+    "ext.Valid:123")
+  expect_error(run_submit(c("echo ext-1", "echo ext-2")), "valid job id")
+  expect_error(run_submit("printf ' ext-1\\n'"), "valid job id")
+  expect_error(run_submit("echo 'ext-1;touch'"), "valid job id")
+  expect_error(run_submit(paste0("echo ", paste(rep("a", 257), collapse = ""))),
+    "valid job id")
+})
+
+test_that("external status and recovery validate their backend id contracts", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  status <- file.path(home, "status")
+  cancel <- file.path(home, "cancel")
+  called <- file.path(home, "called")
+  withr::local_envvar(c(DSHPC_EXTERNAL_CONTRACT_CALLED = called))
+  writeLines(c(
+    "#!/bin/sh",
+    "echo status-warning >&2",
+    "echo RUNNING"
+  ), status)
+  writeLines(c(
+    "#!/bin/sh",
+    "touch \"$DSHPC_EXTERNAL_CONTRACT_CALLED\""
+  ), cancel)
+  Sys.chmod(c(status, cancel), "0755")
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.external_status_cmd = status,
+    dshpc.external_cancel_cmd = cancel
+  ))
+
+  state <- dsHPC:::.backend_status_external("ext-123", home)
+  expect_equal(state$state, "running")
+  expect_equal(state$external_state, "RUNNING")
+
+  writeLines(c("#!/bin/sh", "echo RUNNING", "echo FAILED 1"), status)
+  Sys.chmod(status, "0755")
+  state <- dsHPC:::.backend_status_external("ext-123", home)
+  expect_equal(state$external_state, "STATUS_UNKNOWN")
+  expect_equal(state$reason, "external_status_invalid")
+
+  marker_dir <- file.path(home, "artifacts", "job_marker", "step_001")
+  dir.create(marker_dir, recursive = TRUE)
+  dsHPC:::.backend_write_external_marker(marker_dir, "external", "bad;touch")
+  expect_null(dsHPC:::.backend_read_external_marker(marker_dir))
+  writeLines('{"backend":"external","external_id":["ext-1","ext-2"]}',
+    file.path(marker_dir, "external_backend.json"))
+  expect_null(dsHPC:::.backend_read_external_marker(marker_dir))
+
+  writeLines(c(
+    "#!/bin/sh",
+    "touch \"$DSHPC_EXTERNAL_CONTRACT_CALLED\"",
+    "echo RUNNING"
+  ), status)
+  Sys.chmod(status, "0755")
+  unlink(called)
+  invalid <- dsHPC:::.backend_status_external("bad;touch", home)
+  expect_equal(invalid$external_state, "STATUS_UNKNOWN")
+  expect_equal(invalid$reason, "invalid_external_id")
+  expect_false(dsHPC:::.backend_cancel_step("external", "bad;touch"))
+  expect_false(file.exists(called))
+})
+
 test_that("kubernetes backend submits job manifest and reaps completion", {
   home <- setup_test_home()
   backend_home <- file.path(tempdir(), paste0("dshpc_k8s_backend_view_",
@@ -299,6 +391,12 @@ test_that("external status command failures do not create duplicate retries", {
   expect_equal(state$state, "running")
   expect_equal(state$external_state, "STATUS_UNKNOWN")
   expect_true(is.na(state$exit_code))
+
+  withr::local_options(list(dshpc.external_status_cmd = ""))
+  missing <- dsHPC:::.backend_status_external("ext-unknown",
+    file.path(home, "artifacts", "job_x", "step_001"))
+  expect_equal(missing$state, "running")
+  expect_equal(missing$external_state, "STATUS_UNKNOWN")
 })
 
 test_that("backend step scripts write exit_code atomically", {
@@ -316,9 +414,12 @@ test_that("backend step scripts write exit_code atomically", {
     runner_config = list())
   dsHPC:::.backend_write_step_script(script, prepared)
   lines <- readLines(script, warn = FALSE)
+  expect_identical(lines[[1L]], "#!/bin/sh")
   expect_true(any(grepl("exit_code.tmp", lines, fixed = TRUE)))
   expect_true(any(grepl("mv exit_code.tmp exit_code", lines, fixed = TRUE)))
   expect_true(any(grepl("/usr/bin/env -i", lines, fixed = TRUE)))
+  expect_true(any(grepl("/bin/sh \"$0\" \"$@\"", lines, fixed = TRUE)))
+  expect_false(any(grepl("bash", lines, fixed = TRUE)))
 })
 
 test_that("backend runner scripts clear the submitting environment", {
@@ -664,6 +765,10 @@ test_that("slurm status falls back to local exit_code file when sacct is missing
   withr::local_options(list(dshpc.slurm_squeue = squeue_running))
   st <- dsHPC:::.backend_status_slurm("99001", step_dir)
   expect_equal(st$state, "running")
+
+  cancelled <- dsHPC:::.backend_parse_slurm_sacct("CANCELLED|0:0")
+  expect_equal(cancelled$state, "failed")
+  expect_equal(cancelled$exit_code, 1L)
 })
 
 test_that("optional backend GPUs are requested independently of Rock GPUs", {
@@ -827,6 +932,297 @@ test_that("external capabilities command drives optional GPU requests", {
   expect_equal(readLines(file.path(step_dir, "gpu_source.txt"), warn = FALSE),
     "external_capabilities_cmd")
   expect_equal(dsHPC:::.executor_backend_status()$capabilities$gpus, 2L)
+})
+
+test_that("slurm parses only parsable stdout and derives a default time limit", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  sbatch <- file.path(bin, "sbatch")
+  args_file <- file.path(home, "sbatch_args.txt")
+  withr::local_envvar(c(DSHPC_TEST_SBATCH_ARGS = args_file))
+  writeLines(c(
+    "#!/bin/sh",
+    "printf '%s\\n' \"$@\" > \"$DSHPC_TEST_SBATCH_ARGS\"",
+    "echo 'sbatch: warning: fallback account' >&2",
+    "echo '12345;cluster-a'"
+  ), sbatch)
+  Sys.chmod(sbatch, "0755")
+  writeLines(c(
+    "name: slurm_parse",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'true']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1"
+  ), file.path(home, "runners", "slurm_parse.yml"))
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.executor_backend = "slurm",
+    dshpc.slurm_sbatch = sbatch,
+    dshpc.slurm_time = "",
+    dshpc.default_timeout_secs = 90
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "slurm_parse", config = list())))
+  dsHPC:::.store_create_job(db, "job_slurm_parse", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_slurm_parse",
+    state = "RUNNING", step_index = 1L)
+  dsHPC:::.executor_run_step(db, "job_slurm_parse", 1L, spec)
+
+  step <- DBI::dbGetQuery(db,
+    "SELECT external_id FROM steps WHERE job_id = 'job_slurm_parse'")
+  expect_equal(step$external_id, "12345")
+  expect_true("--time=00:01:30" %in% readLines(args_file, warn = FALSE))
+
+  writeLines(c("#!/bin/sh", "echo not-a-job-id"), sbatch)
+  Sys.chmod(sbatch, "0755")
+  dsHPC:::.store_create_job(db, "job_slurm_bad_id", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_slurm_bad_id",
+    state = "RUNNING", step_index = 1L)
+  expect_error(
+    dsHPC:::.executor_run_step(db, "job_slurm_bad_id", 1L, spec),
+    "valid parsable job id")
+})
+
+test_that("artifact retries discard stale backend state and output", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  sbatch <- file.path(bin, "sbatch")
+  squeue <- file.path(bin, "squeue")
+  writeLines(c("#!/bin/sh", "echo 22222"), sbatch)
+  writeLines(c("#!/bin/sh", "echo RUNNING"), squeue)
+  Sys.chmod(c(sbatch, squeue), "0755")
+  writeLines(c(
+    "name: retry_clean",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'true']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1"
+  ), file.path(home, "runners", "retry_clean.yml"))
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.executor_backend = "slurm",
+    dshpc.slurm_sbatch = sbatch,
+    dshpc.slurm_squeue = squeue,
+    dshpc.slurm_sacct = "/definitely/not/sacct",
+    dshpc.default_timeout_secs = 3600
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "retry_clean", config = list())))
+  dsHPC:::.store_create_job(db, "job_retry_clean", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_retry_clean",
+    state = "RUNNING", step_index = 1L, retry_count = 1L)
+  step_dir <- dsHPC:::.ensure_step_dir("job_retry_clean", 1L)
+  stale_output <- file.path(step_dir, "output", "stale.txt")
+  writeLines("stale", stale_output)
+  writeLines("9", file.path(step_dir, "exit_code"))
+  dsHPC:::.backend_write_external_marker(step_dir, "slurm", "11111")
+  dsHPC:::.db_register_output(db, "job_retry_clean", 1L, "stale.txt",
+    "artifact_file", stale_output, safe_for_client = FALSE)
+  dsHPC:::.store_update_step(db, "job_retry_clean", 1L,
+    state = "failed", exit_code = 9L, output_ref = file.path("artifacts",
+      "job_retry_clean", "step_001", "output"),
+    external_backend = "slurm", external_id = "11111",
+    external_status = "FAILED")
+
+  dsHPC:::.executor_run_step(db, "job_retry_clean", 1L, spec)
+  step <- DBI::dbGetQuery(db,
+    "SELECT state, exit_code, external_id, external_status
+     FROM steps WHERE job_id = 'job_retry_clean' AND step_index = 1")
+  expect_equal(step$state, "running")
+  expect_true(is.na(step$exit_code))
+  expect_equal(step$external_id, "22222")
+  expect_equal(step$external_status, "submitted")
+  expect_false(file.exists(file.path(step_dir, "exit_code")))
+  expect_false(file.exists(stale_output))
+  expect_equal(DBI::dbGetQuery(db,
+    "SELECT COUNT(*) AS n FROM outputs WHERE job_id = 'job_retry_clean'")$n, 0L)
+
+  dsHPC:::.worker_reap(db)
+  expect_equal(dsHPC:::.store_get_job(db, "job_retry_clean")$state, "RUNNING")
+})
+
+test_that("retry cleanup failure leaves durable attempt state retryable", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  outside <- tempfile("dshpc_retry_outside_")
+  dir.create(outside)
+  on.exit(unlink(outside, recursive = TRUE), add = TRUE)
+  withr::local_options(list(dshpc.home = home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "unused", config = list())))
+  dsHPC:::.store_create_job(db, "job_retry_blocked", "user", spec, 1L)
+  dsHPC:::.store_update_step(db, "job_retry_blocked", 1L,
+    state = "failed", exit_code = 9L, external_backend = "slurm",
+    external_id = "11111", external_status = "FAILED")
+  job_dir <- file.path(home, "artifacts", "job_retry_blocked")
+  dir.create(job_dir, recursive = TRUE)
+  step_dir <- file.path(job_dir, "step_001")
+  if (!file.symlink(outside, step_dir)) skip("filesystem does not support symlinks")
+
+  expect_error(
+    dsHPC:::.reset_failed_step_attempt(db, "job_retry_blocked", 1L),
+    "storage is unavailable")
+  step <- DBI::dbGetQuery(db,
+    "SELECT state, exit_code, external_id, external_status
+     FROM steps WHERE job_id = 'job_retry_blocked'")
+  expect_equal(step$state, "failed")
+  expect_equal(step$exit_code, 9L)
+  expect_equal(step$external_id, "11111")
+  expect_equal(step$external_status, "FAILED")
+})
+
+test_that("running timeout waits for accepted external cancellation", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  submit <- file.path(bin, "submit")
+  status <- file.path(bin, "status")
+  cancel <- file.path(bin, "cancel")
+  cancel_mode <- file.path(home, "cancel_mode")
+  cancel_called <- file.path(home, "cancel_called")
+  withr::local_envvar(c(
+    DSHPC_TEST_CANCEL_MODE = cancel_mode,
+    DSHPC_TEST_CANCEL_CALLED = cancel_called
+  ))
+  writeLines(c("#!/bin/sh", "echo ext-timeout"), submit)
+  writeLines(c("#!/bin/sh", "echo RUNNING"), status)
+  writeLines(c(
+    "#!/bin/sh",
+    "if [ \"$(cat \"$DSHPC_TEST_CANCEL_MODE\")\" = fail ]; then exit 42; fi",
+    "echo \"$DSHPC_EXTERNAL_ID\" >> \"$DSHPC_TEST_CANCEL_CALLED\"",
+    "exit 0"
+  ), cancel)
+  Sys.chmod(c(submit, status, cancel), "0755")
+  writeLines(c(
+    "name: timeout_runner",
+    "plane: artifact",
+    "command: /bin/sh",
+    "args_template: ['-c', 'true']",
+    "resources:",
+    "  memory_mb: 64",
+    "  cpu_slots: 1"
+  ), file.path(home, "runners", "timeout_runner.yml"))
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.executor_backend = "external",
+    dshpc.external_submit_cmd = submit,
+    dshpc.external_status_cmd = status,
+    dshpc.external_cancel_cmd = cancel,
+    dshpc.default_timeout_secs = 1,
+    dshpc.max_retries = 0
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "timeout_runner", config = list())))
+  dsHPC:::.store_create_job(db, "job_timeout", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_timeout",
+    state = "RUNNING", step_index = 1L)
+  dsHPC:::.executor_run_step(db, "job_timeout", 1L, spec)
+  dsHPC:::.store_update_step(db, "job_timeout", 1L,
+    started_at = format(Sys.time() - 60, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+
+  writeLines("fail", cancel_mode)
+  dsHPC:::.worker_reap(db)
+  expect_equal(dsHPC:::.store_get_job(db, "job_timeout")$state, "RUNNING")
+  step <- DBI::dbGetQuery(db,
+    "SELECT external_status FROM steps WHERE job_id = 'job_timeout'")
+  expect_equal(step$external_status, "TIMEOUT_CANCEL_FAILED")
+
+  writeLines("succeed", cancel_mode)
+  dsHPC:::.worker_reap(db)
+  expect_equal(readLines(cancel_called, warn = FALSE), "ext-timeout")
+  expect_equal(dsHPC:::.store_get_job(db, "job_timeout")$state, "RUNNING")
+  step <- DBI::dbGetQuery(db,
+    "SELECT exit_code, external_status FROM steps WHERE job_id = 'job_timeout'")
+  expect_true(is.na(step$exit_code))
+  expect_equal(step$external_status, "TIMEOUT_CANCEL_REQUESTED")
+  expect_equal(dsHPC:::.store_get_job(db, "job_timeout")$retry_count, 0L)
+
+  dsHPC:::.worker_reap(db)
+  expect_equal(length(readLines(cancel_called, warn = FALSE)), 1L)
+  step <- DBI::dbGetQuery(db,
+    "SELECT external_status FROM steps WHERE job_id = 'job_timeout'")
+  expect_equal(step$external_status, "TIMEOUT_CANCEL_REQUESTED")
+
+  writeLines(c("#!/bin/sh", "echo CANCELLED 143"), status)
+  Sys.chmod(status, "0755")
+  dsHPC:::.worker_reap(db)
+  expect_equal(dsHPC:::.store_get_job(db, "job_timeout")$state, "FAILED")
+  step <- DBI::dbGetQuery(db,
+    "SELECT exit_code, external_status FROM steps WHERE job_id = 'job_timeout'")
+  expect_equal(step$exit_code, 124L)
+  expect_equal(step$external_status, "TIMEOUT")
+})
+
+test_that("admin cancellation does not confirm a rejected backend request", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  bin <- file.path(home, "bin")
+  dir.create(bin, showWarnings = FALSE)
+  scancel <- file.path(bin, "scancel")
+  squeue <- file.path(bin, "squeue")
+  sacct <- file.path(bin, "sacct")
+  writeLines(c("#!/bin/sh", "exit 42"), scancel)
+  writeLines(c("#!/bin/sh", "exit 0"), squeue)
+  writeLines(c("#!/bin/sh", "echo CANCELLED\\|0:0"), sacct)
+  Sys.chmod(c(scancel, squeue, sacct), "0755")
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.admin_key = "secret",
+    dshpc.slurm_scancel = scancel,
+    dshpc.slurm_squeue = squeue,
+    dshpc.slurm_sacct = sacct
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  spec <- list(steps = list(list(type = "run", plane = "artifact",
+    runner = "unused", config = list())))
+  dsHPC:::.store_create_job(db, "job_cancel_rejected", "user", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_cancel_rejected",
+    state = "RUNNING", step_index = 1L)
+  dsHPC:::.store_update_step(db, "job_cancel_rejected", 1L,
+    state = "running", external_backend = "slurm", external_id = "33333")
+
+  expect_error(hpcAdminCancelDS("job_cancel_rejected", "secret"),
+    "not accepted")
+  expect_equal(dsHPC:::.store_get_job(db, "job_cancel_rejected")$state,
+    "RUNNING")
+
+  writeLines(c("#!/bin/sh", "exit 0"), scancel)
+  Sys.chmod(scancel, "0755")
+  cancelled <- hpcAdminCancelDS("job_cancel_rejected", "secret")
+  expect_equal(cancelled$state, "RUNNING")
+  expect_equal(cancelled$cancellation, "REQUESTED")
+  expect_equal(dsHPC:::.store_get_job(db, "job_cancel_rejected")$state,
+    "RUNNING")
+  step <- DBI::dbGetQuery(db,
+    "SELECT external_status FROM steps WHERE job_id = 'job_cancel_rejected'")
+  expect_equal(step$external_status, "CANCEL_REQUESTED")
+
+  dsHPC:::.worker_reap(db)
+  expect_equal(dsHPC:::.store_get_job(db, "job_cancel_rejected")$state,
+    "CANCELLED")
 })
 
 options(
