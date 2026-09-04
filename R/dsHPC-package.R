@@ -61,6 +61,14 @@
 #'   runner lookup. Defaults to `TRUE`.
 #' - `dshpc.runner_registry_sync_secs`: minimum seconds between automatic
 #'   registry sync attempts. Defaults to 30.
+#' - `dshpc.units_file`: administrator-owned YAML catalogue for selectable
+#'   execution units. Production Rock and worker processes should receive the
+#'   same path through `DSHPC_UNITS_FILE`. Unit Resources contain no executor
+#'   credentials; SSH keys and cloud identities stay in worker mounts, agents,
+#'   or workload identity.
+#' - `dshpc.site_default_pool_id`: physical scheduler-pool identifier for the
+#'   site default. Set the same `resource_pool_id` on a selectable alias that
+#'   reaches that physical executor. Defaults to `"site-default"`.
 #'
 #' @section Executor backends:
 #' - `dshpc.executor_backend`: one of `"embedded"`, `"slurm"`, `"external"`,
@@ -76,9 +84,12 @@
 #' - `dshpc.slurm_sbatch`, `dshpc.slurm_squeue`, `dshpc.slurm_sacct`,
 #'   `dshpc.slurm_scancel`, `dshpc.slurm_sinfo`: command paths or names.
 #'   Environment fallbacks use `DSHPC_SLURM_*`.
-#' - `dshpc.slurm_partition`, `dshpc.slurm_account`, `dshpc.slurm_qos`,
-#'   `dshpc.slurm_time`, `dshpc.slurm_extra_args`: optional submit settings. If
+#' - `dshpc.slurm_partition`, `dshpc.slurm_account`, `dshpc.slurm_qos`, and
+#'   `dshpc.slurm_time`: optional submit settings. If
 #'   `dshpc.slurm_time` is empty, it is derived from `default_timeout_secs`.
+#' - `dshpc.slurm_extra_args` is retained only for pre-0.2.5 jobs without a
+#'   unit snapshot. New durable submissions reject it; put fixed site flags in
+#'   an administrator-controlled `sbatch` wrapper instead.
 #'
 #' @section Kubernetes backend:
 #' - `dshpc.kubernetes_kubectl`: `kubectl` path/name. Environment fallback:
@@ -113,8 +124,9 @@
 #'   `"apptainer"`, `"singularity"`, or `"none"`.
 #' - `dshpc.container_pull`: `"missing"`, `"always"`, or `"never"`.
 #' - `dshpc.container_network`: network mode for Docker/Podman runners.
-#' - `dshpc.container_extra_args`: extra runtime arguments controlled by the
-#'   site admin.
+#' - `dshpc.container_extra_args` is retained only for pre-0.2.5 jobs without a
+#'   unit snapshot. New durable submissions reject it; put fixed runtime flags
+#'   in an administrator-controlled runner definition instead.
 #' - `dshpc.container_run_as_current_user`: run Docker/Podman containers with
 #'   the current UID/GID.
 #'

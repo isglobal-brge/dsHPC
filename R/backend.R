@@ -484,8 +484,8 @@
 #' @keywords internal
 .backend_submit_artifact_step <- function(db, job_id, step_index, step,
                                           step_dir, input_dir,
-                                          prepared = NULL) {
-  settings <- .dshpc_settings()
+                                          prepared = NULL,
+                                          settings = .dshpc_settings()) {
   backend <- .executor_backend_name(settings)
   if (identical(backend, "embedded"))
     stop("Internal error: embedded backend should use processx.", call. = FALSE)
@@ -604,7 +604,7 @@
   if (!nzchar(sbatch)) stop("sbatch not found.", call. = FALSE)
 
   script <- file.path(step_dir, "run_step.sh")
-  .backend_write_step_script(script, prepared)
+  .backend_write_step_script(script, prepared, settings = settings)
 
   profile <- .scheduler_runner_profile(step$runner, settings)
   job_name <- paste0("dshpc_", substr(gsub("[^A-Za-z0-9]", "", job_id), 1, 16),
@@ -666,7 +666,7 @@
     stop("External submit command is not configured.", call. = FALSE)
 
   script <- file.path(step_dir, "run_step.sh")
-  .backend_write_step_script(script, prepared)
+  .backend_write_step_script(script, prepared, settings = settings)
   profile <- .scheduler_runner_profile(step$runner, settings)
   gpu_request <- .backend_gpu_request(profile, settings)
   env <- c(

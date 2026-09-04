@@ -4,10 +4,10 @@
 \alias{.executor_kill}
 \title{Kill a worker process}
 \usage{
-.executor_kill(db, job_id)
+.executor_kill(db, job_id, settings = NULL)
 }
 \value{
-Invisibly, \code{"terminated"}, \code{"requested"}, or \code{"failed"}.
+Invisibly, `"terminated"`, `"requested"`, or `"failed"`.
 }
 \description{
 Kill a worker process

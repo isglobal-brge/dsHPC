@@ -13,6 +13,8 @@
 #' Execute the current step of a job
 #' @keywords internal
 .executor_run_step <- function(db, job_id, step_index, spec) {
+  .dshpc_assert_unit_dispatchable(spec)
+  settings <- .dshpc_settings_for_spec(spec)
   step <- spec$steps[[step_index]]
   if (identical(step$plane, "artifact")) {
     .reset_failed_step_attempt(db, job_id, step_index)
@@ -22,7 +24,8 @@
 
   step_hash <- NA_character_
   if (.step_cache_enabled_for_job(db, job_id, step)) {
-    step_hash <- .step_cache_hash(step, input_dir)
+    step_hash <- .step_cache_hash(step, input_dir,
+      execution_unit = spec$.dshpc_unit %||% NULL)
     cached <- .step_cache_find(db, step_hash, current_job_id = job_id)
     if (!is.null(cached) &&
         .step_cache_apply(db, job_id, step_index, step_hash, cached, step_dir)) {
@@ -49,7 +52,8 @@
   if (identical(step$plane, "session")) {
     .run_session_step(db, job_id, step_index, step, step_dir, input_dir)
   } else {
-    .run_artifact_step(db, job_id, step_index, step, step_dir, input_dir)
+    .run_artifact_step(db, job_id, step_index, step, step_dir, input_dir,
+      settings = settings)
   }
 }
 
@@ -71,16 +75,39 @@
   }
 
   next_idx <- current + 1L
-  .store_update_job(db, job_id, step_index = next_idx)
   spec <- .store_get_spec(db, job_id)
+  continued <- tryCatch({
+    .dshpc_assert_unit_dispatchable(spec)
+    TRUE
+  }, dshpc_unit_unavailable = function(e) FALSE)
+  if (!isTRUE(continued)) {
+    .executor_fail_unavailable_unit(db, job_id)
+    return(invisible(FALSE))
+  }
+  .store_update_job(db, job_id, step_index = next_idx)
   .executor_run_step(db, job_id, next_idx, spec)
+}
+
+.executor_fail_unavailable_unit <- function(db, job_id) {
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  tryCatch(.scheduler_release_leases(db, job_id), error = function(e) NULL)
+  .store_update_job(db, job_id, state = "FAILED",
+    error_message = "Execution unit became unavailable",
+    worker_pid = NA_integer_, finished_at = now)
+  .db_log_event(db, job_id, "execution_unit_unavailable")
+  invisible(FALSE)
 }
 
 #' Kill a worker process
 #' @return Invisibly, `"terminated"`, `"requested"`, or `"failed"`.
 #' @keywords internal
-.executor_kill <- function(db, job_id) {
+.executor_kill <- function(db, job_id, settings = NULL) {
   job <- .store_get_job(db, job_id)
+  if (is.null(settings)) {
+    spec <- .store_get_spec(db, job_id)
+    settings <- if (is.null(spec)) .dshpc_settings() else
+      .dshpc_settings_for_spec(spec)
+  }
   if (!is.null(job)) {
     step <- DBI::dbGetQuery(db,
       "SELECT external_backend, external_id FROM steps
@@ -89,7 +116,7 @@
     if (nrow(step) > 0 && !is.na(step$external_id[1]) &&
         nzchar(step$external_id[1])) {
       accepted <- .backend_cancel_step(step$external_backend[1],
-        step$external_id[1])
+        step$external_id[1], settings = settings)
       if (!isTRUE(accepted)) return(invisible("failed"))
       .store_update_step(db, job_id, as.integer(job$step_index),
         external_status = "CANCEL_REQUESTED")

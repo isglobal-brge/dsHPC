@@ -61,7 +61,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.2.4.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.2.5.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -88,6 +88,7 @@ Configure dsHPC with R options on the server. Site-wide defaults can use either
 options(
   dshpc.home = "/srv/dshpc",
   dshpc.scheduler = "adaptive",
+  dshpc.site_default_pool_id = "site-default",
   dshpc.node_memory_mb = "auto",
   dshpc.memory_reserve_mb = 2048,
   dshpc.cpu_slots = "auto",
@@ -159,6 +160,101 @@ If `cell_id = "auto"`, dsHPC derives the cell id from `dshpc.home`. That is
 enough when the path is truly shared. For independent Rocks that happen to use
 the same container path, set distinct `cell_id` values if you want observability
 to make the separation explicit.
+
+## Selectable execution units
+
+No Resource is required for a normal installation: jobs use the configured
+site default, which is embedded/local unless the operator selects another
+backend. The effective default is sealed into every new job so later option
+changes do not change work already queued.
+
+To offer more than one unit, the server operator creates an admin-owned YAML
+catalogue and sets `dshpc.units_file` (or `DSHPC_UNITS_FILE`). Start from
+`inst/examples/units.yml`:
+
+```yaml
+schema_version: 1
+units:
+  cluster_a:
+    type: external
+    enabled: true
+    resource_pool_id: shared_cluster
+    allowed_labels: [dsImaging]
+    allowed_runners: []
+    config:
+      external_submit_cmd: /usr/local/libexec/dshpc/cluster-a-submit
+      external_status_cmd: /usr/local/libexec/dshpc/cluster-a-status
+      external_cancel_cmd: /usr/local/libexec/dshpc/cluster-a-cancel
+```
+
+`resource_pool_id` makes aliases for the same physical cluster share one local
+scheduler budget. Omit it when the unit has its own capacity. Catalogue command
+paths must be absolute executable files. Keep the catalogue and wrappers
+non-writable by analysts and runners.
+
+The Resource is only an authorized selector. It never contains SSH keys,
+tokens, cloud credentials, or executable arguments. Put credentials in a
+server-managed wrapper, SSH agent, secret mount, or workload identity. Generic
+`slurm_extra_args` and `container_extra_args` are deliberately not accepted in
+durable unit snapshots; fixed site flags belong in the wrapper or the
+admin-owned runner definition.
+
+Use the Resource authorization supplied by the DataSHIELD deployment so only
+operators can create or modify unit selectors and analysts can resolve only
+the selectors granted to their project. This applies equally to Opal and
+Armadillo. dsHPC validates the selected catalogue entry, label and runner set;
+it does not treat a guessable Resource name as authorization. Do not expose the
+physical site-default executor again as a selectable alias unless both paths
+use the same pool identifier: set `dshpc.site_default_pool_id` and the alias's
+`resource_pool_id` to the same value so they share one scheduler budget.
+
+### Opal registration
+
+When dsHPC is installed, `inst/resources/resource.js` supplies Opal's Resource
+UI for Slurm, external and Kubernetes selectors. An external unit with ID
+`cluster_a` produces this non-secret descriptor:
+
+```text
+dshpc+unit://external/cluster_a
+```
+
+### Armadillo registration
+
+Armadillo stores Resources under `project/folder/name` and current servers
+rewrite their backing URL while adding a short-lived access JWT. Therefore the
+unit locator is carried in `format`, and the backing object is an inert marker:
+
+```r
+marker <- data.frame(selector = TRUE)
+MolgenisArmadillo::armadillo.upload_table(
+  project = "hpcunits", folder = "markers", table = marker,
+  name = "unit_alpha_marker")
+
+unit_alpha <- resourcer::newResource(
+  name = "unit_alpha",
+  url = paste0(
+    armadillo_url,
+    "/storage/projects/hpcunits/objects/",
+    "markers%2Funit_alpha_marker.parquet"
+  ),
+  format = "dshpc-unit:external/unit_alpha"
+)
+MolgenisArmadillo::armadillo.upload_resource(
+  project = "hpcunits", folder = "resources",
+  resource = unit_alpha, name = "unit_alpha")
+```
+
+The marker contents and URL are never opened by dsHPC. The resolver derives
+the selection only from the strict format locator, discards any transport JWT,
+and retains a canonical credential-free Resource. `dsHPCClient` also removes
+and verifies Armadillo's transient `R` and `rds` symbols. The resulting DSI
+Resource name is `hpcunits/resources/unit_alpha`; Opal and Armadillo names are
+both treated as opaque client-side identifiers.
+
+Changing, disabling, or removing a catalogue entry prevents its saved
+selection from starting another job or pipeline step. Already launched remote
+work retains the old non-secret snapshot so status and cancellation can still
+be reconciled.
 
 ## Recovery guarantees
 

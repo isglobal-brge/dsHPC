@@ -281,7 +281,8 @@
 }
 
 #' @keywords internal
-.scheduler_running_usage <- function(db, settings = .dshpc_settings()) {
+.scheduler_running_usage <- function(db, settings = .dshpc_settings(),
+                                     unit_key = NULL) {
   running <- DBI::dbGetQuery(db,
     "SELECT job_id, spec_json FROM jobs WHERE state = 'RUNNING'")
   memory_mb <- 0
@@ -290,12 +291,17 @@
   gpu_memory_mb <- 0
   runner_counts <- integer(0)
   group_counts <- integer(0)
+  running_jobs <- 0L
   if (nrow(running) > 0) {
     for (i in seq_len(nrow(running))) {
       spec <- tryCatch(jsonlite::fromJSON(running$spec_json[i], simplifyVector = FALSE),
                        error = function(e) NULL)
       if (is.null(spec)) next
-      plan <- .scheduler_job_plan(spec, settings)
+      job_settings <- .dshpc_settings_for_spec(spec, base_settings = settings)
+      current_key <- .dshpc_unit_key(spec, settings = job_settings)
+      if (!is.null(unit_key) && !identical(current_key, unit_key)) next
+      plan <- .scheduler_job_plan(spec, job_settings)
+      running_jobs <- running_jobs + 1L
       memory_mb <- memory_mb + plan$memory_mb
       cpu_slots <- cpu_slots + plan$cpu_slots
       lease <- .scheduler_job_gpu_devices(db, running$job_id[i])
@@ -312,26 +318,27 @@
   list(memory_mb = memory_mb, cpu_slots = cpu_slots,
        gpus = gpus, gpu_memory_mb = gpu_memory_mb,
        runners = runner_counts, groups = group_counts,
-       running_jobs = nrow(running))
+       running_jobs = running_jobs)
 }
 
 #' @keywords internal
 .scheduler_can_start_job <- function(db, job_id, spec, settings = .dshpc_settings()) {
   plan <- .scheduler_job_plan(spec, settings)
-  usage <- .scheduler_running_usage(db, settings)
+  usage <- .scheduler_running_usage(db, .dshpc_settings(),
+    unit_key = .dshpc_unit_key(spec, settings = settings))
   budget <- .scheduler_node_budget(settings)
   delegated <- .executor_delegates_resources(settings)
   enforce_runner_concurrency <- .executor_enforces_runner_concurrency(settings)
+  global_running <- DBI::dbGetQuery(db,
+    "SELECT COUNT(*) AS n FROM jobs WHERE state = 'RUNNING'")$n
 
   if (!identical(settings$scheduler, "adaptive")) {
-    running_n <- DBI::dbGetQuery(db,
-      "SELECT COUNT(*) AS n FROM jobs WHERE state = 'RUNNING'")$n
-    return(list(ok = running_n < settings$max_jobs_global,
-                reason = if (running_n < settings$max_jobs_global) "ok" else "max_jobs_global",
+    return(list(ok = global_running < settings$max_jobs_global,
+                reason = if (global_running < settings$max_jobs_global) "ok" else "max_jobs_global",
                 plan = plan, usage = usage, budget = budget))
   }
 
-  if (usage$running_jobs >= settings$max_jobs_global)
+  if (global_running >= settings$max_jobs_global)
     return(list(ok = FALSE, reason = "max_jobs_global", plan = plan,
                 usage = usage, budget = budget))
   if (!delegated && usage$memory_mb + plan$memory_mb > budget$memory_mb)
@@ -516,10 +523,11 @@
 }
 
 #' @keywords internal
-.scheduler_record_runner_failure <- function(db, runner_name, exit_code, reason = NULL) {
+.scheduler_record_runner_failure <- function(db, runner_name, exit_code,
+                                             reason = NULL,
+                                             settings = .dshpc_settings()) {
   if (is.null(runner_name) || is.na(runner_name) || !nzchar(runner_name))
     return(invisible(FALSE))
-  settings <- .dshpc_settings()
   profile <- .scheduler_runner_profile(runner_name, settings)
   oom <- .scheduler_is_oom_exit(exit_code)
   if (!oom) return(invisible(FALSE))

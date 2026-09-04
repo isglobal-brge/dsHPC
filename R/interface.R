@@ -382,17 +382,45 @@ hpcSubmitDS <- function(spec_encoded) {
 #'
 #' @param spec_encoded Job specification as a list, JSON string, or `B64:`
 #'   encoded JSON string.
+#' @param session_env Optional DataSHIELD session environment supplied by the
+#'   trusted domain package. Its active HPC-unit Resource selection is sealed
+#'   into the job before durable storage.
+#' @param unit_selection Optional sealed, non-secret unit selection previously
+#'   returned by [hpcUnitSelectionInternal()]. This is for durable domain
+#'   orchestrators that submit follow-up jobs after the original session call.
 #' @return Server-session handle containing `job_id`, a per-job bearer
 #'   capability, resolved `name`, `state`, and `submitted_at`. The capability
 #'   is stored durably only as a SHA-256 hash.
 #' @export
-hpcSubmitInternal <- function(spec_encoded) {
+hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
+                              unit_selection = NULL) {
   .dshpc_require_trusted_server_caller()
   spec <- .ds_arg(spec_encoded)
+  if (!is.list(spec) || ".dshpc_unit" %in% names(spec)) {
+    stop("Job specification contains a reserved field.", call. = FALSE)
+  }
   spec <- .validate_job_spec(spec)
   .dshpc_require_label_value(spec$label,
     "dsHPC submission requires a domain label (spec$label). Every job must declare the server-side package that submitted it. This is a hard requirement; there is no opt-out.")
   .dshpc_require_trusted_server_caller(spec$label)
+  if (!is.null(session_env) && !is.null(unit_selection)) {
+    stop("Provide only one HPC unit selection source.", call. = FALSE)
+  }
+  selected_unit <- if (!is.null(session_env)) {
+    .dshpc_unit_selection_from_session(session_env)
+  } else if (!is.null(unit_selection)) {
+    .dshpc_validate_unit_snapshot(unit_selection, spec = spec)
+  } else {
+    NULL
+  }
+  if (is.null(selected_unit)) {
+    selected_unit <- .dshpc_site_default_snapshot(spec$label)
+  }
+  if (!is.null(selected_unit)) {
+    selected_unit <- .dshpc_validate_unit_snapshot(selected_unit, spec = spec)
+    spec$.dshpc_unit <- selected_unit
+  }
+  .dshpc_assert_unit_dispatchable(spec)
   owner_id <- .get_owner_id(spec$.owner)
   # Job identifiers are server-generated. Caller-selected identifiers enable
   # collision/oracle behaviour and are not part of the domain API contract.
@@ -704,15 +732,39 @@ hpcStatusDS <- function(job_id_or_symbol) {
   db <- .db_connect()
   on.exit(.db_close(db))
   access <- .require_job_access(db, job_id_or_symbol)
-  job <- access$job
+  .hpc_status_payload(access$job)
+}
 
-  safe_error <- .safe_job_error(job$error_message)
-
+.hpc_status_payload <- function(job) {
   list(
     state = job$state,
     is_done = job$state %in% c("FINISHED", "PUBLISHED", "FAILED", "CANCELLED"),
-    error = safe_error
+    error = .safe_job_error(job$error_message)
   )
+}
+
+#' Read Job Status from Trusted Server Code
+#'
+#' Domain packages use this unregistered server-to-server API when their
+#' private workflow object already contains a dsHPC bearer. The mandatory
+#' label is an additional exact domain-boundary check.
+#'
+#' @param job_id_or_symbol Server-side handle or B64 bearer.
+#' @param required_label Mandatory exact job label for the calling domain.
+#' @return The same disclosure-safe status payload as [hpcStatusDS()].
+#' @export
+hpcStatusInternal <- function(job_id_or_symbol, required_label = NULL) {
+  .dshpc_require_trusted_server_caller()
+  required_label <- .dshpc_require_label_value(required_label,
+    "dsHPC status operation requires a domain label.")
+  .dshpc_require_trusted_server_caller(required_label)
+  db <- .db_connect()
+  on.exit(.db_close(db))
+  access <- .require_job_access(db, job_id_or_symbol)
+  if (!identical(access$job$label %||% "", required_label)) {
+    stop("Job does not belong to the required domain.", call. = FALSE)
+  }
+  .hpc_status_payload(access$job)
 }
 
 #' Get Job Result
@@ -859,6 +911,7 @@ hpcCapabilitiesDS <- function() {
     status = "available",
     submission = "domain_methods_only",
     job_access = "capability",
+    execution_units = "resource_selection",
     admin_enabled = .admin_is_configured()
   )
 }

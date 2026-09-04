@@ -411,6 +411,7 @@
 
   for (jid in pending$job_id) {
     spec <- NULL
+    job_settings <- NULL
     decision <- NULL
     claimed <- FALSE
 
@@ -420,11 +421,13 @@
       if (!is.null(job) && identical(job$state, "PENDING")) {
         spec <- .store_get_spec(db, jid)
         if (!is.null(spec)) {
+          job_settings <- .dshpc_settings_for_spec(spec,
+            base_settings = settings)
           start_idx <- as.integer(job$step_index %||% 0L)
           if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
             start_idx <- 1L
           if (!.step_cache_waiting_active(db, jid, start_idx)) {
-            decision <- .scheduler_can_start_job(db, jid, spec, settings)
+            decision <- .scheduler_can_start_job(db, jid, spec, job_settings)
             if (isTRUE(decision$ok)) {
               .scheduler_acquire_leases(db, jid, decision)
               .store_update_job(db, jid, state = "RUNNING",
@@ -432,7 +435,7 @@
                 started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
                                      tz = "UTC"))
               .db_log_event(db, jid, "started",
-                list(scheduler = settings$scheduler,
+                list(scheduler = job_settings$scheduler,
                      memory_mb = decision$plan$memory_mb %||% 0L,
                      cpu_slots = decision$plan$cpu_slots %||% 0L,
                      gpus = decision$plan$gpus %||% 0L,
@@ -499,7 +502,16 @@
     external_id <- running$external_id[i]
     external_backend <- running$external_backend[i]
     previous_external_status <- running$step_external_status[i]
-    timed_out <- .worker_step_timed_out(running$step_started_at[i])
+    spec <- tryCatch(.store_get_spec(db, jid), error = function(e) NULL)
+    job_settings <- tryCatch(
+      if (is.null(spec)) NULL else .dshpc_settings_for_spec(spec),
+      error = function(e) NULL)
+    if (is.null(job_settings)) {
+      .worker_log("Execution unit unavailable for running job ", jid)
+      next
+    }
+    timed_out <- .worker_step_timed_out(running$step_started_at[i],
+      settings = job_settings)
     step_dir <- file.path(.dshpc_home(), "artifacts", jid,
                            sprintf("step_%03d", sidx))
 
@@ -527,7 +539,8 @@
     }
 
     if (!is.na(external_id) && nzchar(external_id)) {
-      status <- .backend_step_status(external_backend, external_id, step_dir)
+      status <- .backend_step_status(external_backend, external_id, step_dir,
+        settings = job_settings)
       cancel_requested <- identical(previous_external_status,
         "CANCEL_REQUESTED")
       timeout_cancel_requested <- identical(previous_external_status,
@@ -541,7 +554,8 @@
       if (identical(status$state, "running")) {
         if (cancel_requested || timeout_cancel_requested) next
         if (isTRUE(timed_out)) {
-          cancelled <- .backend_cancel_step(external_backend, external_id)
+          cancelled <- .backend_cancel_step(external_backend, external_id,
+            settings = job_settings)
           if (isTRUE(cancelled)) {
             .store_update_step(db, jid, sidx,
               external_status = "TIMEOUT_CANCEL_REQUESTED")
@@ -573,18 +587,20 @@
       if (timeout_cancel_requested &&
           !identical(status$state, "succeeded")) {
         .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
-          external_status = "TIMEOUT")
+          external_status = "TIMEOUT", settings = job_settings)
         next
       }
       exit_code <- as.integer(status$exit_code %||% 1L)
       .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code,
-        external_status = status$external_state %||% status$state)
+        external_status = status$external_state %||% status$state,
+        settings = job_settings)
       next
     }
 
     if (is.na(running$worker_pid[i])) {
       .worker_requeue_interrupted_step(db, jid, sidx,
-        "Running job has no live worker or external backend id")
+        "Running job has no live worker or external backend id",
+        settings = job_settings)
       next
     }
     pid <- as.integer(running$worker_pid[i])
@@ -594,10 +610,10 @@
     if (!still_alive) still_alive <- .pid_is_alive(pid)
 
     if (still_alive && isTRUE(timed_out)) {
-      cancelled <- .executor_kill(db, jid)
+      cancelled <- .executor_kill(db, jid, settings = job_settings)
       if (identical(cancelled, "terminated")) {
         .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
-          external_status = "TIMEOUT")
+          external_status = "TIMEOUT", settings = job_settings)
       } else {
         .store_update_step(db, jid, sidx,
           external_status = "TIMEOUT_CANCEL_FAILED")
@@ -616,9 +632,11 @@
       exit_code <- if (!is.na(proc_exit)) proc_exit else .read_exit_code(step_dir)
       if (is.na(exit_code)) {
         .worker_requeue_interrupted_step(db, jid, sidx,
-          "Artifact process disappeared without exit_code")
+          "Artifact process disappeared without exit_code",
+          settings = job_settings)
       } else {
-        .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code)
+        .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code,
+          settings = job_settings)
       }
     }
   }
@@ -675,10 +693,10 @@
 
 #' Requeue or fail a running step whose process disappeared
 #' @keywords internal
-.worker_requeue_interrupted_step <- function(db, jid, sidx, reason) {
+.worker_requeue_interrupted_step <- function(db, jid, sidx, reason,
+                                             settings = .dshpc_settings()) {
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
-    settings <- .dshpc_settings()
     job <- .store_get_job(db, jid)
     retries <- as.integer(job$retry_count %||% 0L)
     now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
@@ -714,7 +732,8 @@
 #' @keywords internal
 .worker_finalize_artifact_step <- function(db, jid, sidx, runner_name,
                                            exit_code,
-                                           external_status = NULL) {
+                                           external_status = NULL,
+                                           settings = .dshpc_settings()) {
   output_validation_failed <- FALSE
   if (identical(as.integer(exit_code), 0L)) {
     output_ref <- file.path("artifacts", jid,
@@ -758,7 +777,6 @@
       .db_log_event(db, jid, "step_done", list(step_index = sidx))
       advance_after_commit <- TRUE
     } else {
-      settings <- .dshpc_settings()
       job <- .store_get_job(db, jid)
       retries <- as.integer(job$retry_count %||% 0L)
       failure_reason <- if (isTRUE(output_validation_failed)) {
@@ -767,7 +785,7 @@
         "artifact_step_failed"
       }
       .scheduler_record_runner_failure(db, runner_name, exit_code,
-        reason = failure_reason)
+        reason = failure_reason, settings = settings)
       updates <- list(state = "failed",
         exit_code = as.integer(exit_code),
         error_message = if (isTRUE(output_validation_failed)) {

@@ -11,6 +11,7 @@
 
 #' @keywords internal
 .onLoad <- function(libname, pkgname) {
+  resourcer::registerResourceResolver(DsHpcUnitResourceResolver$new())
   # Ensure DSHPC_HOME exists with required subdirectories.
   # The configure script should create these during R CMD INSTALL,
   # but Opal/Rock API installs may skip configure scripts entirely.
@@ -50,6 +51,18 @@
     tryCatch(.dshpc_worker_start(), error = function(e) NULL)
   }
   invisible(NULL)
+}
+
+#' @keywords internal
+.onAttach <- function(libname, pkgname) {
+  resourcer::registerResourceResolver(DsHpcUnitResourceResolver$new())
+}
+
+#' @keywords internal
+.onUnload <- function(libpath) {
+  tryCatch(
+    resourcer::unregisterResourceResolver("DsHpcUnitResourceResolver"),
+    error = function(e) NULL)
 }
 
 #' @keywords internal

@@ -172,6 +172,48 @@ test_that("external submit accepts only one bounded safe stdout id", {
     "valid job id")
 })
 
+test_that("delegated submission scripts use the job settings snapshot", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home))
+  external <- file.path(home, "external-submit")
+  sbatch <- file.path(home, "sbatch")
+  writeLines(c("#!/bin/sh", "echo ext-123"), external)
+  writeLines(c("#!/bin/sh", "echo 12345"), sbatch)
+  Sys.chmod(c(external, sbatch), "0755")
+  step_dir <- file.path(home, "artifacts", "job_snapshot", "step_001")
+  dir.create(step_dir, recursive = TRUE)
+  prepared <- list(
+    env_vars = character(0), command = "/bin/sh", args = c("-c", "true"),
+    step_dir = step_dir, output_dir = file.path(step_dir, "output"),
+    script_path = file.path(step_dir, "run_step.sh"),
+    local_step_dir = step_dir,
+    local_output_dir = file.path(step_dir, "output"),
+    local_script_path = file.path(step_dir, "run_step.sh"),
+    runner_config = list())
+  captured <- character(0)
+  testthat::local_mocked_bindings(
+    .backend_write_step_script = function(path, prepared,
+                                          settings = .dshpc_settings()) {
+      captured <<- c(captured, settings$container_network)
+      writeLines(c("#!/bin/sh", "exit 0"), path)
+      path
+    },
+    .package = "dsHPC")
+  withr::local_options(list(dshpc.container_network = "global-network"))
+  settings <- dsHPC:::.dshpc_settings()
+  settings$container_network <- "snapshot-network"
+  settings$external_submit_cmd <- external
+  settings$slurm_sbatch <- sbatch
+
+  expect_identical(dsHPC:::.backend_submit_external(
+    "job_snapshot", 1L, list(runner = NULL), step_dir, prepared, settings),
+    "ext-123")
+  expect_identical(dsHPC:::.backend_submit_slurm(
+    "job_snapshot", 1L, list(runner = NULL), step_dir, prepared, settings),
+    "12345")
+  expect_identical(captured, rep("snapshot-network", 2L))
+})
+
 test_that("external status and recovery validate their backend id contracts", {
   home <- setup_test_home()
   on.exit(cleanup_test_home(home))

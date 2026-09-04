@@ -36,6 +36,8 @@
     worker_leader_ttl_secs = as.numeric(.dshpc_option("worker_leader_ttl_secs", 30)),
     scheduler = as.character(.dshpc_option("scheduler", "adaptive")),
     executor_backend = as.character(.dshpc_option("executor_backend", "embedded")),
+    site_default_pool_id = as.character(
+      .dshpc_option("site_default_pool_id", "site-default")),
     external_enforce_local_resources = isTRUE(.dshpc_option("external_enforce_local_resources", FALSE)),
     external_enforce_runner_concurrency = isTRUE(.dshpc_option("external_enforce_runner_concurrency", FALSE)),
     cell_id = as.character(.dshpc_option("cell_id", "auto")),

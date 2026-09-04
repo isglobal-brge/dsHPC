@@ -4,7 +4,13 @@
 \alias{.worker_requeue_interrupted_step}
 \title{Requeue or fail a running step whose process disappeared}
 \usage{
-.worker_requeue_interrupted_step(db, jid, sidx, reason)
+.worker_requeue_interrupted_step(
+  db,
+  jid,
+  sidx,
+  reason,
+  settings = .dshpc_settings()
+)
 }
 \description{
 Requeue or fail a running step whose process disappeared

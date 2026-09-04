@@ -4,11 +4,19 @@
 \alias{hpcSubmitInternal}
 \title{Submit a Job from Trusted Server Code}
 \usage{
-hpcSubmitInternal(spec_encoded)
+hpcSubmitInternal(spec_encoded, session_env = NULL, unit_selection = NULL)
 }
 \arguments{
 \item{spec_encoded}{Job specification as a list, JSON string, or `B64:`
 encoded JSON string.}
+
+\item{session_env}{Optional DataSHIELD session environment supplied by the
+trusted domain package. Its active HPC-unit Resource selection is sealed
+into the job before durable storage.}
+
+\item{unit_selection}{Optional sealed, non-secret unit selection previously
+returned by [hpcUnitSelectionInternal()]. This is for durable domain
+orchestrators that submit follow-up jobs after the original session call.}
 }
 \value{
 Server-session handle containing `job_id`, a per-job bearer

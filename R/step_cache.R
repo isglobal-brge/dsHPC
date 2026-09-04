@@ -23,7 +23,7 @@
 }
 
 #' @keywords internal
-.step_cache_hash <- function(step, input_dir = NULL) {
+.step_cache_hash <- function(step, input_dir = NULL, execution_unit = NULL) {
   step_for_hash <- step[setdiff(names(step),
     c("inputs", "node_id", "cache", "cacheable"))]
   step_for_hash <- .canonicalise_spec(step_for_hash)
@@ -38,10 +38,11 @@
     }
   }
   payload <- list(
-    version = 1L,
+    version = 2L,
     input_hash = .step_cache_hash_path(input_dir),
     step = step_for_hash,
-    runner_config_hash = runner_config_hash
+    runner_config_hash = runner_config_hash,
+    execution_unit = execution_unit
   )
   digest::digest(jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null"),
     algo = "sha256", serialize = FALSE)

@@ -6,12 +6,13 @@
 .proc_registry <- new.env(parent = emptyenv())
 
 #' @keywords internal
-.run_artifact_step <- function(db, job_id, step_index, step, step_dir, input_dir) {
+.run_artifact_step <- function(db, job_id, step_index, step, step_dir, input_dir,
+                               settings = .dshpc_settings()) {
   prepared <- .prepare_artifact_command(db, job_id, step_index, step, step_dir, input_dir)
-  backend <- .executor_backend_name()
+  backend <- .executor_backend_name(settings)
   if (!identical(backend, "embedded")) {
     .backend_submit_artifact_step(db, job_id, step_index, step, step_dir,
-      input_dir, prepared = prepared)
+      input_dir, prepared = prepared, settings = settings)
     return(invisible(TRUE))
   }
 

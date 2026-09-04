@@ -34,12 +34,31 @@ test_that("get_job_output_ref always requires a domain label", {
   )
 })
 
+test_that("hpcStatusInternal requires a trusted caller and exact label", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  on.exit(cleanup_test_home(home), add = TRUE)
+  handle <- trusted_hpc_call(hpcSubmitInternal, list(
+    .owner = "alice", label = "dsHPC_test", visibility = "private",
+    steps = list(list(type = "emit", plane = "session",
+      output_name = "values", value = 1:5))))
+
+  expect_identical(trusted_hpc_call(hpcStatusInternal, handle,
+    required_label = "dsHPC_test")$state, "FINISHED")
+  expect_error(trusted_hpc_call(hpcStatusInternal, handle,
+    required_label = "dsHPC"), "required domain", fixed = TRUE)
+  expect_error(hpcStatusInternal(handle, required_label = "dsHPC_test"),
+    "trusted server packages", fixed = TRUE)
+})
+
 test_that("server-only APIs reject direct non-package callers", {
   valid <- list(
     .owner = "alice", label = "dsHPC_test", visibility = "private",
     steps = list(list(type = "emit", plane = "session",
       output_name = "out", value = 1:5)))
   expect_error(hpcSubmitInternal(valid), "trusted server packages")
+  expect_error(hpcStatusInternal(list(), required_label = "dsHPC_test"),
+    "trusted server packages")
   expect_error(hpcLoadOutputInternal("job_missing", "output",
     required_label = "dsHPC_test"), "trusted server packages")
   expect_error(get_job_output_ref("job_missing", "output",

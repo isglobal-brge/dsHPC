@@ -1,3 +1,34 @@
+# dsHPC 0.2.5
+
+* Added backend-neutral DataSHIELD Resource selection for administrator-managed
+  Slurm, external, and Kubernetes execution units. New jobs persist a sealed,
+  credential-free unit snapshot; the local/site default is sealed as well.
+* Added Resource contracts for both Opal and Armadillo. Armadillo transport JWTs
+  are accepted only as transient platform metadata and are discarded before
+  the Resource client or durable job retains the selector.
+* Unit changes and revocation are checked before every new submission or step,
+  while old snapshots remain usable for status and cancellation of work already
+  launched. Command integrity is now independent of current file availability.
+* Added explicit physical resource pools for unit aliases and included unit
+  identity in scheduler and step-cache isolation.
+* Durable unit snapshots reject generic Slurm/container extra arguments, which
+  could otherwise persist credentials or privileged flags. Such configuration
+  belongs in admin-controlled wrappers or runner definitions.
+* Added a trusted, exact-label `hpcStatusInternal()` API for domain packages;
+  it is not registered as an analyst-callable DataSHIELD method.
+* Delegated scripts, runner admission, failure accounting, and scheduler
+  budgets now consistently use the unit settings sealed into each job. Legacy
+  and current site-default jobs also share one scheduler pool after upgrade.
+* Selected units are revalidated against each domain label, and revocation is
+  covered across queued and continuing jobs while completed status remains
+  readable.
+* Added `dshpc.site_default_pool_id` so a selectable alias of the physical
+  default executor can share the same scheduler budget without double-counting
+  capacity.
+* Unit initialization now accepts only a platform-resolved Resource client;
+  an in-session raw descriptor cannot bypass Opal or Armadillo Resource
+  authorization.
+
 # dsHPC 0.2.4
 
 * Queue admission now checks per-owner and global quotas inside the same
