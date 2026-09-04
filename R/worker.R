@@ -387,6 +387,39 @@
   }
 }
 
+.worker_invalid_durable_spec_error <- function(error) {
+  inherits(error, c("dshpc_invalid_durable_spec", "dshpc_unit_unavailable"))
+}
+
+#' @keywords internal
+.worker_fail_invalid_durable_spec <- function(db, job_id) {
+  transaction_open <- FALSE
+  failure <- tryCatch({
+    DBI::dbExecute(db, "BEGIN IMMEDIATE")
+    transaction_open <- TRUE
+    job <- .store_get_job(db, job_id)
+    if (!is.null(job) && job$state %in% c("PENDING", "RUNNING")) {
+      .scheduler_release_leases(db, job_id)
+      .store_update_job(db, job_id, state = "FAILED",
+        error_message = "Durable job specification is invalid",
+        worker_pid = NA_integer_,
+        finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+      .db_log_event(db, job_id, "durable_spec_invalid")
+    }
+    DBI::dbExecute(db, "COMMIT")
+    transaction_open <- FALSE
+    NULL
+  }, error = identity)
+  if (!is.null(failure)) {
+    if (isTRUE(transaction_open)) {
+      tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e) NULL)
+    }
+    .worker_log("Could not terminalize invalid durable spec for ", job_id)
+    return(invisible(FALSE))
+  }
+  invisible(TRUE)
+}
+
 #' @keywords internal
 .worker_dispatch <- function(db) {
   settings <- .dshpc_settings()
@@ -420,30 +453,29 @@
       job <- .store_get_job(db, jid)
       if (!is.null(job) && identical(job$state, "PENDING")) {
         spec <- .store_get_spec(db, jid)
-        if (!is.null(spec)) {
-          job_settings <- .dshpc_settings_for_spec(spec,
-            base_settings = settings)
-          start_idx <- as.integer(job$step_index %||% 0L)
-          if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
-            start_idx <- 1L
-          if (!.step_cache_waiting_active(db, jid, start_idx)) {
-            decision <- .scheduler_can_start_job(db, jid, spec, job_settings)
-            if (isTRUE(decision$ok)) {
-              .scheduler_acquire_leases(db, jid, decision)
-              .store_update_job(db, jid, state = "RUNNING",
-                step_index = start_idx, error_message = NA_character_,
-                started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
-                                     tz = "UTC"))
-              .db_log_event(db, jid, "started",
-                list(scheduler = job_settings$scheduler,
-                     memory_mb = decision$plan$memory_mb %||% 0L,
-                     cpu_slots = decision$plan$cpu_slots %||% 0L,
-                     gpus = decision$plan$gpus %||% 0L,
-                     optional_gpus = decision$plan$optional_gpus %||% 0L,
-                     assigned_gpu_devices = decision$gpu_devices %||% character(0),
-                     gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
-              claimed <- TRUE
-            }
+        if (is.null(spec)) .dshpc_invalid_durable_spec()
+        job_settings <- .dshpc_settings_for_spec(spec,
+          base_settings = settings)
+        start_idx <- as.integer(job$step_index %||% 0L)
+        if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
+          start_idx <- 1L
+        if (!.step_cache_waiting_active(db, jid, start_idx)) {
+          decision <- .scheduler_can_start_job(db, jid, spec, job_settings)
+          if (isTRUE(decision$ok)) {
+            .scheduler_acquire_leases(db, jid, decision)
+            .store_update_job(db, jid, state = "RUNNING",
+              step_index = start_idx, error_message = NA_character_,
+              started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
+                                   tz = "UTC"))
+            .db_log_event(db, jid, "started",
+              list(scheduler = job_settings$scheduler,
+                   memory_mb = decision$plan$memory_mb %||% 0L,
+                   cpu_slots = decision$plan$cpu_slots %||% 0L,
+                   gpus = decision$plan$gpus %||% 0L,
+                   optional_gpus = decision$plan$optional_gpus %||% 0L,
+                   assigned_gpu_devices = decision$gpu_devices %||% character(0),
+                   gpu_memory_mb = decision$plan$gpu_memory_mb %||% 0L))
+            claimed <- TRUE
           }
         }
       }
@@ -452,8 +484,12 @@
 
     if (inherits(tx_error, "error")) {
       tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
-      .worker_log("Dispatch claim error for ", jid, ": ",
-                  conditionMessage(tx_error))
+      if (.worker_invalid_durable_spec_error(tx_error)) {
+        .worker_fail_invalid_durable_spec(db, jid)
+      } else {
+        .worker_log("Dispatch claim error for ", jid, ": ",
+                    conditionMessage(tx_error))
+      }
       next
     }
     DBI::dbExecute(db, "COMMIT")
@@ -502,14 +538,26 @@
     external_id <- running$external_id[i]
     external_backend <- running$external_backend[i]
     previous_external_status <- running$step_external_status[i]
-    spec <- tryCatch(.store_get_spec(db, jid), error = function(e) NULL)
-    job_settings <- tryCatch(
-      if (is.null(spec)) NULL else .dshpc_settings_for_spec(spec),
-      error = function(e) NULL)
-    if (is.null(job_settings)) {
-      .worker_log("Execution unit unavailable for running job ", jid)
+    load_error <- NULL
+    context <- tryCatch({
+      spec <- .store_get_spec(db, jid)
+      if (is.null(spec)) .dshpc_invalid_durable_spec()
+      list(spec = spec, settings = .dshpc_settings_for_spec(spec))
+    }, error = function(e) {
+      load_error <<- e
+      NULL
+    })
+    if (!is.null(load_error)) {
+      if (.worker_invalid_durable_spec_error(load_error)) {
+        .worker_fail_invalid_durable_spec(db, jid)
+      } else {
+        .worker_log("Could not read durable execution settings for ", jid,
+          "; retrying")
+      }
       next
     }
+    spec <- context$spec
+    job_settings <- context$settings
     timed_out <- .worker_step_timed_out(running$step_started_at[i],
       settings = job_settings)
     step_dir <- file.path(.dshpc_home(), "artifacts", jid,

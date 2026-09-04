@@ -28,6 +28,11 @@
 * Unit initialization now accepts only a platform-resolved Resource client;
   an in-session raw descriptor cannot bypass Opal or Armadillo Resource
   authorization.
+* Workers now terminalize unreadable durable job specifications and invalid
+  execution-unit snapshots instead of leaving jobs permanently pending or
+  running. The transition is transactional, releases stale scheduler leases,
+  and records a detail-free audit event; transient database failures remain
+  retryable.
 
 # dsHPC 0.2.4
 

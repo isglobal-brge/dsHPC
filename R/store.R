@@ -70,11 +70,23 @@
 }
 
 #' @keywords internal
+.dshpc_invalid_durable_spec <- function() {
+  condition <- structure(
+    list(message = "Durable job specification is invalid.", call = NULL),
+    class = c("dshpc_invalid_durable_spec", "error", "condition"))
+  stop(condition)
+}
+
+#' @keywords internal
 .store_get_spec <- function(db, job_id) {
   row <- DBI::dbGetQuery(db, "SELECT spec_json FROM jobs WHERE job_id = ?",
     params = list(job_id))
   if (nrow(row) == 0) return(NULL)
-  jsonlite::fromJSON(row$spec_json[1], simplifyVector = FALSE)
+  spec <- tryCatch(
+    jsonlite::fromJSON(row$spec_json[1], simplifyVector = FALSE),
+    error = function(e) .dshpc_invalid_durable_spec())
+  if (!is.list(spec)) .dshpc_invalid_durable_spec()
+  spec
 }
 
 #' @keywords internal

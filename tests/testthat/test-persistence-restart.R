@@ -22,6 +22,107 @@ forget_in_memory_runner_state <- function() {
   invisible(TRUE)
 }
 
+test_that("unreadable pending specs fail with a safe durable event", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home), add = TRUE)
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.worker_autostart = FALSE
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_unreadable_pending", "owner",
+    make_test_spec(), 1L)
+  DBI::dbExecute(db,
+    "UPDATE jobs SET spec_json = '{invalid json' WHERE job_id = ?",
+    params = list("job_unreadable_pending"))
+
+  dsHPC:::.worker_dispatch(db)
+
+  job <- dsHPC:::.store_get_job(db, "job_unreadable_pending")
+  leases <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM resource_leases WHERE job_id = ?",
+    params = list("job_unreadable_pending"))
+  event <- DBI::dbGetQuery(db,
+    "SELECT event, details_json FROM events
+     WHERE job_id = ? AND event = 'durable_spec_invalid'",
+    params = list("job_unreadable_pending"))
+  expect_identical(job$state, "FAILED")
+  expect_identical(job$error_message,
+    "Durable job specification is invalid")
+  expect_equal(nrow(leases), 0L)
+  expect_identical(event$event, "durable_spec_invalid")
+  expect_true(is.na(event$details_json))
+})
+
+test_that("invalid running unit snapshots fail and release leases", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home), add = TRUE)
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.worker_autostart = FALSE
+  ))
+
+  spec <- make_test_spec()
+  spec$.dshpc_unit <- dsHPC:::.dshpc_site_default_snapshot("dsHPC_test")
+  spec$.dshpc_unit$config_seal <- strrep("0", 64L)
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_invalid_running", "owner", spec, 1L)
+  dsHPC:::.store_update_job(db, "job_invalid_running", state = "RUNNING",
+    step_index = 1L, worker_pid = NA_integer_)
+  dsHPC:::.store_update_step(db, "job_invalid_running", 1L,
+    state = "running")
+  dsHPC:::.scheduler_acquire_leases(db, "job_invalid_running", list(
+    plan = list(memory_mb = 1L, cpu_slots = 1L),
+    gpu_devices = character(0)))
+
+  dsHPC:::.worker_reap(db)
+
+  job <- dsHPC:::.store_get_job(db, "job_invalid_running")
+  leases <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM resource_leases WHERE job_id = ?",
+    params = list("job_invalid_running"))
+  event <- DBI::dbGetQuery(db,
+    "SELECT event, details_json FROM events
+     WHERE job_id = ? AND event = 'durable_spec_invalid'",
+    params = list("job_invalid_running"))
+  expect_identical(job$state, "FAILED")
+  expect_identical(job$error_message,
+    "Durable job specification is invalid")
+  expect_equal(nrow(leases), 0L)
+  expect_identical(event$event, "durable_spec_invalid")
+  expect_true(is.na(event$details_json))
+})
+
+test_that("transient spec reads leave pending jobs retryable", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home), add = TRUE)
+  withr::local_options(list(
+    dshpc.home = home,
+    dshpc.worker_autostart = FALSE
+  ))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_transient_spec_read", "owner",
+    make_test_spec(), 1L)
+  testthat::local_mocked_bindings(
+    .store_get_spec = function(...) stop("database is locked", call. = FALSE),
+    .package = "dsHPC")
+
+  dsHPC:::.worker_dispatch(db)
+
+  job <- dsHPC:::.store_get_job(db, "job_transient_spec_read")
+  event <- DBI::dbGetQuery(db,
+    "SELECT event FROM events
+     WHERE job_id = ? AND event = 'durable_spec_invalid'",
+    params = list("job_transient_spec_read"))
+  expect_identical(job$state, "PENDING")
+  expect_equal(nrow(event), 0L)
+})
+
 test_that("private multi-step DAG survives worker and database restarts", {
   skip_on_os("windows")
   home <- setup_test_home()

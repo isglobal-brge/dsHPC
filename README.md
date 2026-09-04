@@ -251,6 +251,12 @@ and verifies Armadillo's transient `R` and `rds` symbols. The resulting DSI
 Resource name is `hpcunits/resources/unit_alpha`; Opal and Armadillo names are
 both treated as opaque client-side identifiers.
 
+Current Armadillo servers parse the backing marker URL more narrowly than the
+storage API itself. Use only letters, digits, and underscores for the marker's
+project, folder, and object name, as in the example above. This restriction
+does not apply to the dsHPC `unit_id`, which travels in `format` and may also
+contain dots and hyphens.
+
 Changing, disabling, or removing a catalogue entry prevents its saved
 selection from starting another job or pipeline step. Already launched remote
 work retains the old non-secret snapshot so status and cancellation can still
@@ -283,6 +289,10 @@ Guardrails:
   DB so a new worker can recover the backend job id and continue polling.
 - Transient external status failures return `STATUS_UNKNOWN` and keep the job
   running instead of creating duplicate retries.
+- Unreadable persisted specifications and invalid execution-unit snapshots are
+  moved to `FAILED` transactionally and release stale scheduler leases instead
+  of remaining indefinitely `PENDING` or `RUNNING`; transient database read
+  errors are retried.
 - OOM-like exits (`-9`, `137`) put the runner/concurrency group into cooldown
   before retrying. After cooldown, recent OOMs also throttle that runner to
   `dshpc.oom_throttle_max_concurrent` for `dshpc.oom_throttle_hours`, so the
