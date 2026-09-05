@@ -420,6 +420,25 @@
   invisible(TRUE)
 }
 
+#' Fail a job that cannot durably advance to its next step
+#' @keywords internal
+.worker_fail_advance <- function(db, job_id) {
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    .scheduler_release_leases(db, job_id)
+    .store_update_job(db, job_id, state = "FAILED",
+      error_message = "Job could not advance under its sealed runtime contract.",
+      worker_pid = NA_integer_,
+      finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+    .db_log_event(db, job_id, "advance_failed")
+    DBI::dbExecute(db, "COMMIT")
+    invisible(FALSE)
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    stop(e)
+  })
+}
+
 #' @keywords internal
 .worker_dispatch <- function(db) {
   settings <- .dshpc_settings()
@@ -565,8 +584,11 @@
 
     if (!is.na(step_state) && identical(step_state, "done")) {
       tryCatch(.executor_advance(db, jid),
-        error = function(e) .worker_log("Advance recovery error for ", jid,
-          ": ", conditionMessage(e)))
+        error = function(e) {
+          .worker_log("Advance recovery error for ", jid, ": ",
+            conditionMessage(e))
+          .worker_fail_advance(db, jid)
+        })
       next
     }
 
@@ -870,8 +892,10 @@
   })
   if (isTRUE(committed) && isTRUE(advance_after_commit)) {
     tryCatch(.executor_advance(db, jid),
-      error = function(e) .worker_log("Advance error for ", jid, ": ",
-        conditionMessage(e)))
+      error = function(e) {
+        .worker_log("Advance error for ", jid, ": ", conditionMessage(e))
+        .worker_fail_advance(db, jid)
+      })
   }
 }
 
@@ -916,21 +940,86 @@
 .worker_gc <- function(db) {
   settings <- .dshpc_settings()
   cutoff <- format(Sys.time() - settings$job_expiry_hours * 3600,
-                    "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
-  expired <- DBI::dbGetQuery(db,
-    "SELECT job_id FROM jobs
-     WHERE state IN ('FINISHED','PUBLISHED','FAILED','CANCELLED')
-       AND finished_at IS NOT NULL AND finished_at < ?",
-    params = list(cutoff))
-  for (jid in expired$job_id) {
-    DBI::dbExecute(db, "DELETE FROM outputs WHERE job_id = ?", params = list(jid))
-    DBI::dbExecute(db, "DELETE FROM events WHERE job_id = ?", params = list(jid))
-    DBI::dbExecute(db, "DELETE FROM steps WHERE job_id = ?", params = list(jid))
-    DBI::dbExecute(db, "DELETE FROM jobs WHERE job_id = ?", params = list(jid))
+                   "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+  # Serialise the protection snapshot and database deletion with output
+  # publication. Artifacts are removed only after the database commit.
+  expired_ids <- .tracking_write(db, function() {
+    # A process may stop after reserving an implicit root but before the atomic
+    # job attachment. Such roots are hidden and safe to expire after retention.
+    DBI::dbExecute(db,
+      "DELETE FROM tracking_roots
+        WHERE lifecycle = 'CREATING' AND created_at < ?
+          AND NOT EXISTS (SELECT 1 FROM tracking_jobs tj
+            WHERE tj.tracking_id = tracking_roots.tracking_id)
+          AND NOT EXISTS (SELECT 1 FROM tracking_outputs out
+            WHERE out.tracking_id = tracking_roots.tracking_id)",
+      params = list(cutoff))
+
+    # Preserve terminal tracking metadata even when a failed execution is old
+    # enough for its private job row and artifacts to be collected.
+    .tracking_reconcile_implicit(db)
+    .tracking_reconcile_primary(db)
+    DBI::dbExecute(db,
+      "UPDATE tracking_roots
+          SET lifecycle = 'SEALED', success = 0, finished_at = ?
+        WHERE lifecycle = 'OPEN' AND implicit = 0
+          AND execution_mode = 'primary'
+          AND EXISTS(SELECT 1 FROM tracking_jobs tj
+            WHERE tj.tracking_id = tracking_roots.tracking_id
+              AND tj.role = 'primary')
+          AND NOT EXISTS(SELECT 1 FROM tracking_jobs tj JOIN jobs j
+            ON j.job_id = tj.job_id
+            WHERE tj.tracking_id = tracking_roots.tracking_id
+              AND tj.role = 'primary'
+              AND (j.state NOT IN ('FINISHED','PUBLISHED','FAILED','CANCELLED')
+                OR j.finished_at IS NULL OR j.finished_at >= ?))",
+      params = list(format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"),
+        cutoff))
+    expired <- DBI::dbGetQuery(db,
+      "SELECT job_id FROM jobs
+       WHERE state IN ('FINISHED','PUBLISHED','FAILED','CANCELLED')
+         AND finished_at IS NOT NULL AND finished_at < ?",
+      params = list(cutoff))
+    if (nrow(expired) > 0L) {
+      # Retain only executions that still back catalogue knowledge.
+      protected <- DBI::dbGetQuery(db,
+        "SELECT source_job_id AS job_id FROM tracking_outputs
+           WHERE source_job_id IS NOT NULL
+         UNION
+         SELECT tj.job_id FROM tracking_jobs tj
+           JOIN tracking_roots tr ON tr.tracking_id = tj.tracking_id
+           JOIN jobs j ON j.job_id = tj.job_id
+          WHERE tj.role = 'primary' AND tr.implicit = 1
+            AND j.state IN ('FINISHED','PUBLISHED')
+            AND EXISTS(SELECT 1 FROM outputs o WHERE o.job_id = j.job_id
+              AND o.reuse_class IN ('server_reusable','client_safe'))")$job_id
+      expired <- expired[!expired$job_id %in% protected, , drop = FALSE]
+    }
+    for (jid in expired$job_id) {
+      DBI::dbExecute(db, "DELETE FROM tracking_outputs WHERE source_job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM tracking_jobs WHERE job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM outputs WHERE job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM events WHERE job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM resource_leases WHERE job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM steps WHERE job_id = ?",
+        params = list(jid))
+      DBI::dbExecute(db, "DELETE FROM jobs WHERE job_id = ?",
+        params = list(jid))
+    }
+    expired$job_id
+  })
+  for (jid in expired_ids) {
     ad <- file.path(.dshpc_home(), "artifacts", jid)
     if (dir.exists(ad)) unlink(ad, recursive = TRUE)
   }
-  if (nrow(expired) > 0) .worker_log("GC removed ", nrow(expired), " jobs")
+  if (length(expired_ids) > 0L) {
+    .worker_log("GC removed ", length(expired_ids), " jobs")
+  }
 
   # Expire jobs stuck in PENDING too long
   pending_cutoff <- format(

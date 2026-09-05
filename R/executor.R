@@ -6,13 +6,14 @@
   "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP",
   "BASH_ENV", "ENV", "CDPATH", "IFS")
 
-# Output kinds that are safe to return to the client via hpcResultDS.
-# Everything else stays server-side (loadable via hpcLoadOutputInternal).
-.CLIENT_SAFE_KINDS <- c("summary", "aggregate_result", "job_metadata")
+# The generic dsHPC client boundary has one closed count-only schema. Domain
+# packages expose any richer aggregates through their own disclosure methods.
+.CLIENT_SAFE_KINDS <- "summary"
 
 #' Execute the current step of a job
 #' @keywords internal
 .executor_run_step <- function(db, job_id, step_index, spec) {
+  .dshpc_assert_runtime_identity(spec)
   .dshpc_assert_unit_dispatchable(spec)
   settings <- .dshpc_settings_for_spec(spec)
   step <- spec$steps[[step_index]]
@@ -25,7 +26,8 @@
   step_hash <- NA_character_
   if (.step_cache_enabled_for_job(db, job_id, step)) {
     step_hash <- .step_cache_hash(step, input_dir,
-      execution_unit = spec$.dshpc_unit %||% NULL)
+      execution_unit = spec$.dshpc_unit %||% NULL,
+      reuse_fingerprint = spec$reuse_fingerprint %||% NULL)
     cached <- .step_cache_find(db, step_hash, current_job_id = job_id)
     if (!is.null(cached) &&
         .step_cache_apply(db, job_id, step_index, step_hash, cached, step_dir)) {
@@ -145,9 +147,9 @@
 
 #' Build the final result object for a completed job
 #'
-#' DISCLOSURE RULE: Only outputs of kind "summary", "aggregate_result",
-#' or "job_metadata" can have their values returned to the client via
-#' hpcResultDS(). All other outputs (emit_value, artifact_file, etc.)
+#' DISCLOSURE RULE: Only outputs of kind "summary" can have their values
+#' returned to the client via hpcResultDS(). All other outputs (emit_value,
+#' artifact_file, domain aggregates, etc.)
 #' are listed by name/kind only -- their values stay server-side and
 #' must be loaded via hpcLoadOutputInternal() or published as assets.
 #'
@@ -169,12 +171,12 @@
 
   safe_result <- list(ready = TRUE)
 
-  # Only summary/aggregate_result outputs cross the wire with values
+  # Only the closed count-summary schema crosses this generic boundary.
   safe_outputs <- DBI::dbGetQuery(db,
     "SELECT name, kind, path_or_ref FROM outputs
      WHERE job_id = ?
        AND safe_for_client = 1
-       AND kind IN ('summary', 'aggregate_result', 'job_metadata')",
+       AND kind = 'summary'",
     params = list(job_id))
 
   if (nrow(safe_outputs) > 0) {

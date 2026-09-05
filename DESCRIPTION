@@ -1,7 +1,7 @@
 Package: dsHPC
 Type: Package
 Title: DataSHIELD Durable Federated Job Runtime
-Version: 0.2.5
+Version: 0.3.0
 Authors@R: c(
     person("David", "Sarrat González", role = c("aut", "cre"), email = "david.sarrat@isglobal.org"),
     person("Juan R", "González", role = "aut", email = "juanr.gonzalez@isglobal.org"))
@@ -13,8 +13,8 @@ Description: Server-side DataSHIELD package for durable federated job execution.
     assign/aggregate) and artifact-plane steps (processx-launched subprocesses
     with allowlisted runners). Jobs persist in a local SQLite database, survive
     session restarts, and are dispatched by a dedicated worker daemon. Includes
-    per-user ownership, transactional state, quota enforcement, audit trail,
-    and disclosure-safe result publication.
+    transactional state, quota enforcement, audit trail, shared logical job
+    tracking, server-side output reuse, and disclosure-safe result publication.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
@@ -45,10 +45,15 @@ AggregateMethods:
     hpcOutputsDS,
     hpcLogsDS,
     hpcCapabilitiesDS,
+    hpcTrackingListDS,
+    hpcTrackingStatusDS,
+    hpcTrackingResultDS,
+    hpcTrackingOutputsDS,
     hpcAdminListDS,
     hpcAdminCancelDS
 AssignMethods:
     hpcUnitInitDS,
-    hpcUnitDestroyDS
+    hpcUnitDestroyDS,
+    hpcTrackingAssignOutputDS
 Config/testthat/edition: 3
 RoxygenNote: 7.3.3

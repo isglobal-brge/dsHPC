@@ -69,7 +69,9 @@ test_that("client-safe results enforce cardinality and the closed summary schema
   withr::local_options(list(nfilter.subset = 3))
 
   expect_false(dsHPC:::.dshpc_client_safe_value(1:2, "aggregate_result"))
-  expect_true(dsHPC:::.dshpc_client_safe_value(1:3, "aggregate_result"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(1:3, "aggregate_result"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(
+    data.frame(patient = c("alice", "bob", "carol")), "job_metadata"))
   expect_false(dsHPC:::.dshpc_client_safe_value(
     list(message = "record-level value"), "summary"))
   expect_false(dsHPC:::.dshpc_client_safe_value(
@@ -81,4 +83,14 @@ test_that("client-safe results enforce cardinality and the closed summary schema
     list(n_samples = NaN), "summary"))
   expect_true(dsHPC:::.dshpc_client_safe_value(
     list(n_samples = 4L, n_output_files = NA_integer_), "summary"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(
+    structure(list(n_samples = 4L), cohort = "sensitive"), "summary"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(
+    list(n_samples = structure(4L, patient = "sensitive")), "summary"))
+  attributed_names <- list(4L)
+  attributes(attributed_names) <- list(names = structure("n_samples",
+    patient = "sensitive"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(attributed_names, "summary"))
+  expect_false(dsHPC:::.dshpc_client_safe_value(
+    stats::setNames(1:3, paste0("patient_", 1:3)), "summary"))
 })

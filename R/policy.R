@@ -112,27 +112,31 @@
 #' Validate an object explicitly approved for the client result boundary
 #' @noRd
 .dshpc_client_safe_value <- function(value, kind) {
-  n <- .output_object_cardinality(value)
   nfilter <- .dshpc_disclosure_settings()$nfilter_subset
-  if (!is.na(n)) return(n >= nfilter)
+  if (identical(as.character(kind)[1], "summary")) {
+    # A summary is a closed count-only map, never an arbitrary vector or
+    # classed object. Reject extra attributes because names/labels can carry
+    # record identifiers even when the numeric cardinality is large enough.
+    if (!is.list(value) || is.object(value)) return(FALSE)
+    attrs <- attributes(value)
+    if (!is.null(attrs) && !identical(names(attrs), "names")) return(FALSE)
+    if (length(value) == 0L) return(is.null(names(value)))
+    if (is.null(names(value)) || !is.null(attributes(names(value))) ||
+        anyDuplicated(names(value)) ||
+        !all(names(value) %in% c("n_output_files", "n_samples"))) {
+      return(FALSE)
+    }
+    return(all(vapply(value, function(x) {
+      if (!(is.integer(x) || is.numeric(x)) || length(x) != 1L ||
+          !is.null(attributes(x))) return(FALSE)
+      if (is.na(x)) return(!is.nan(x))
+      if (!is.finite(x) || x < nfilter || x != floor(x)) return(FALSE)
+      identical(as.numeric(x), as.numeric(nfilter)) ||
+        abs(log2(x) - round(log2(x))) < .Machine$double.eps^0.5
+    }, logical(1))))
+  }
 
-  # The built-in summary is a small named map rather than a record vector.
-  # Admit only its closed, count-only schema; arbitrary lists fail closed.
-  if (!identical(as.character(kind)[1], "summary") || !is.list(value)) {
-    return(FALSE)
-  }
-  if (length(value) == 0L) return(TRUE)
-  if (is.null(names(value)) || anyDuplicated(names(value)) ||
-      !all(names(value) %in% c("n_output_files", "n_samples"))) {
-    return(FALSE)
-  }
-  all(vapply(value, function(x) {
-    if (!(is.integer(x) || is.numeric(x)) || length(x) != 1L) return(FALSE)
-    if (is.na(x)) return(!is.nan(x))
-    if (!is.finite(x) || x < nfilter || x != floor(x)) return(FALSE)
-    identical(as.numeric(x), as.numeric(nfilter)) ||
-      abs(log2(x) - round(log2(x))) < .Machine$double.eps^0.5
-  }, logical(1)))
+  FALSE
 }
 
 #' Test whether an existing path is a symbolic link

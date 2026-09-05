@@ -5,11 +5,27 @@
 .store_create_job <- function(db, job_id, owner_id, spec, total_steps,
                                spec_hash = NULL, access_token_hash = NULL,
                                initial_state = "PENDING", clone_owner = NULL,
-                               enforce_quotas = FALSE) {
+                               enforce_quotas = FALSE,
+                               tracking_id = NULL, tracking_role = NULL,
+                               tracking_finalize = FALSE) {
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   if (!is.character(initial_state) || length(initial_state) != 1L ||
       !initial_state %in% c("PENDING", "CLONING")) {
     stop("Invalid initial job state.", call. = FALSE)
+  }
+  if (xor(is.null(tracking_id), is.null(tracking_role))) {
+    stop("tracking_id and tracking_role must be provided together.",
+      call. = FALSE)
+  }
+  if (!is.null(tracking_id)) {
+    tracking_id <- .tracking_validate_id(tracking_id)
+    tracking_role <- match.arg(tracking_role, c("primary", "child"))
+  }
+  if (!is.logical(tracking_finalize) || length(tracking_finalize) != 1L ||
+      is.na(tracking_finalize) ||
+      (isTRUE(tracking_finalize) &&
+       (is.null(tracking_id) || !identical(tracking_role, "primary")))) {
+    stop("tracking_finalize requires one explicit primary job.", call. = FALSE)
   }
 
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
@@ -50,6 +66,56 @@
          VALUES (?, ?, ?, ?, ?, 'pending', ?)",
         params = list(job_id, i, s$type, s$plane,
                        s$runner %||% NA_character_, input_refs))
+    }
+    if (!is.null(tracking_id)) {
+      root <- DBI::dbGetQuery(db,
+        "SELECT lifecycle, implicit, execution_mode, finish_requested,
+                finalizing_job_id
+           FROM tracking_roots
+          WHERE tracking_id = ?",
+        params = list(tracking_id))
+      if (nrow(root) != 1L || identical(root$lifecycle[1], "SEALED")) {
+        stop("Tracked workflow is not available.", call. = FALSE)
+      }
+      if (isTRUE(as.logical(root$finish_requested[1]))) {
+        stop("Tracked workflow is already finalizing.", call. = FALSE)
+      }
+      roles <- DBI::dbGetQuery(db,
+        "SELECT DISTINCT role FROM tracking_jobs WHERE tracking_id = ?",
+        params = list(tracking_id))$role
+      stored_mode <- as.character(root$execution_mode[1])
+      if (is.na(stored_mode) || !nzchar(stored_mode)) {
+        if (length(roles) > 1L) {
+          stop("Tracked workflow is not available.", call. = FALSE)
+        }
+        stored_mode <- if (length(roles) == 1L) roles[[1L]] else tracking_role
+        DBI::dbExecute(db,
+          "UPDATE tracking_roots SET execution_mode = ?
+            WHERE tracking_id = ? AND execution_mode IS NULL",
+          params = list(stored_mode, tracking_id))
+      }
+      if (!identical(stored_mode, tracking_role) ||
+          (length(roles) > 0L && !all(roles == tracking_role))) {
+        stop("Tracked workflow execution mode does not match.",
+          call. = FALSE)
+      }
+      DBI::dbExecute(db,
+        "INSERT INTO tracking_jobs
+           (tracking_id, job_id, role, attached_at) VALUES (?, ?, ?, ?)",
+        params = list(tracking_id, job_id, tracking_role, now))
+      if (identical(tracking_role, "primary")) {
+        DBI::dbExecute(db,
+          "UPDATE tracking_roots SET lifecycle = 'OPEN'
+             WHERE tracking_id = ? AND lifecycle = 'CREATING'",
+          params = list(tracking_id))
+        if (isTRUE(tracking_finalize)) {
+          DBI::dbExecute(db,
+            "UPDATE tracking_roots
+                SET finish_requested = 1, finalizing_job_id = ?
+               WHERE tracking_id = ?",
+            params = list(job_id, tracking_id))
+        }
+      }
     }
     created_details <- list(total_steps = total_steps, owner = owner_id)
     if (!is.null(clone_owner)) created_details$clone_owner <- clone_owner

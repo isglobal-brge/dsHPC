@@ -6,7 +6,8 @@
 
 .unit_test_entry <- function(labels = "dsHPC", runners = character(0),
                              command = .unit_test_command(),
-                             resource_pool_id = NULL) {
+                             resource_pool_id = NULL,
+                             runtime_revision = NULL) {
   entry <- list(
     type = "external",
     enabled = TRUE,
@@ -16,6 +17,9 @@
       external_submit_cmd = command,
       external_status_cmd = command,
       external_cancel_cmd = command))
+  if (!is.null(runtime_revision)) {
+    entry$config$runtime_revision <- runtime_revision
+  }
   if (!is.null(resource_pool_id)) {
     entry$resource_pool_id <- resource_pool_id
   }
@@ -37,6 +41,26 @@
     secret = secret,
     format = format)
 }
+
+test_that("execution units seal an immutable runtime revision", {
+  revision <- strrep("a", 64L)
+  catalog <- .unit_test_catalog(list(unit_alpha = .unit_test_entry(
+    runtime_revision = revision)))
+  withr::local_options(list(dshpc.units_file = catalog))
+  selection <- dsHPC:::.dshpc_unit_from_resource(.unit_test_resource())
+  expect_identical(selection$config$runtime_revision, revision)
+
+  spec <- list(.dshpc_unit = selection)
+  expect_identical(dsHPC:::.dshpc_runtime_revision(spec), revision)
+  spec$.dshpc_runtime_revision <- revision
+  expect_true(dsHPC:::.dshpc_runtime_reuse_ready(spec))
+
+  invalid <- .unit_test_entry(runtime_revision = "mutable-tag")
+  invalid_catalog <- .unit_test_catalog(list(unit_alpha = invalid))
+  withr::local_options(list(dshpc.units_file = invalid_catalog))
+  expect_error(dsHPC:::.dshpc_unit_from_resource(.unit_test_resource()),
+    "HPC unit resource is unavailable", fixed = TRUE)
+})
 
 .unit_test_dslite_config <- function() {
   config <- DSLite::defaultDSConfiguration()
@@ -238,7 +262,9 @@ test_that("submitted jobs persist the unit without Resource names or credentials
   persisted <- as.character(jsonlite::toJSON(stored, auto_unbox = TRUE,
     null = "null"))
   expect_false(grepl("opaque-resource-name", persisted, fixed = TRUE))
-  expect_false(grepl("identity|secret", persisted, ignore.case = TRUE))
+  expect_false(grepl(
+    "opaque-resource-name|temporary-armadillo-jwt|password|private_key",
+    persisted, ignore.case = TRUE))
   expect_length(unique(jobs$spec_hash), 2L)
   expect_false(isTRUE(second$deduplicated))
 

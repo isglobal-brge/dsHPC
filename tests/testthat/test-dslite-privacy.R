@@ -1,34 +1,3 @@
-.description_method_table <- function(field) {
-  description <- system.file("DESCRIPTION", package = "dsHPC")
-  raw <- read.dcf(description, fields = field)[1, 1]
-  if (is.na(raw) || !nzchar(trimws(raw))) {
-    return(data.frame(name = character(0), value = character(0),
-      package = character(0), version = character(0), type = character(0),
-      class = character(0), stringsAsFactors = FALSE))
-  }
-  entries <- trimws(strsplit(raw, ",", fixed = TRUE)[[1]])
-  aliases <- grepl("=", entries, fixed = TRUE)
-  names <- ifelse(aliases, sub("=.*$", "", entries), entries)
-  values <- ifelse(aliases, sub("^[^=]*=", "", entries),
-    paste0("dsHPC::", entries))
-  data.frame(
-    name = names,
-    value = values,
-    package = "dsHPC",
-    version = as.character(utils::packageVersion("dsHPC")),
-    type = if (identical(field, "AggregateMethods")) "aggregate" else "assign",
-    class = "function",
-    stringsAsFactors = FALSE
-  )
-}
-
-.dshpc_dslite_config <- function() {
-  config <- DSLite::defaultDSConfiguration()
-  config$AggregateMethods <- .description_method_table("AggregateMethods")
-  config$AssignMethods <- .description_method_table("AssignMethods")
-  config
-}
-
 .dshpc_encode_test_arg <- function(x) {
   json <- as.character(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null"))
   encoded <- gsub("[\r\n]", "", jsonlite::base64_enc(charToRaw(json)))
@@ -41,17 +10,21 @@
   DSI::dsFetch(DSI::dsAggregate(connection, expression, async = FALSE))
 }
 
-test_that("DESCRIPTION exposes only capability-scoped analyst methods", {
+test_that("DESCRIPTION exposes only closed analyst methods", {
   skip_if_not_installed("DSLite")
 
   config <- .dshpc_dslite_config()
   expect_true("hpcJobReferenceDS" %in% config$AggregateMethods$name)
+  expect_true(all(c("hpcTrackingListDS", "hpcTrackingStatusDS",
+    "hpcTrackingResultDS", "hpcTrackingOutputsDS") %in%
+    config$AggregateMethods$name))
   expect_false(any(config$AggregateMethods$name %in% c(
     "c", "list", "hpcListDS", "hpcStudioDS", "hpcSchedulerStatusDS")))
   expect_false(any(config$AggregateMethods$value %in%
     c("base::c", "base::list")))
   expect_false(any(config$AssignMethods$name %in% c(
     "hpcSubmitDS", "hpcLoadOutputDS")))
+  expect_true("hpcTrackingAssignOutputDS" %in% config$AssignMethods$name)
 
   server <- DSLite::newDSLiteServer(config = config, strict = TRUE)
   env <- environment()

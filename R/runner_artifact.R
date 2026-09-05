@@ -147,6 +147,12 @@
   runner_name <- step$runner
   runner_config <- .load_runner_config(runner_name)
   if (is.null(runner_config)) stop("Runner '", runner_name, "' not found.", call. = FALSE)
+  job_spec <- .store_get_spec(db, job_id)
+  if (is.null(job_spec)) {
+    stop("Durable job specification is unavailable.", call. = FALSE)
+  }
+  .dshpc_assert_runtime_identity(job_spec,
+    runner_overrides = stats::setNames(list(runner_config), runner_name))
   .validate_runner_params(step, runner_config, step_index)
   registered_by <- runner_config$registered_by %||% NULL
   if (!is.null(registered_by) && !identical(registered_by, "dsHPC")) {

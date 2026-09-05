@@ -4,7 +4,14 @@
 \alias{hpcSubmitInternal}
 \title{Submit a Job from Trusted Server Code}
 \usage{
-hpcSubmitInternal(spec_encoded, session_env = NULL, unit_selection = NULL)
+hpcSubmitInternal(
+  spec_encoded,
+  session_env = NULL,
+  unit_selection = NULL,
+  tracking_id = NULL,
+  tracking_role = c("child", "primary"),
+  tracking_finalize = FALSE
+)
 }
 \arguments{
 \item{spec_encoded}{Job specification as a list, JSON string, or `B64:`
@@ -17,11 +24,24 @@ into the job before durable storage.}
 \item{unit_selection}{Optional sealed, non-secret unit selection previously
 returned by [hpcUnitSelectionInternal()]. This is for durable domain
 orchestrators that submit follow-up jobs after the original session call.}
+
+\item{tracking_id}{Optional root returned by [hpcTrackingCreateInternal()].
+A global job without an explicit root automatically creates or reuses one
+logical root.}
+
+\item{tracking_role}{`"child"` for hidden fan-out work, or `"primary"` for
+an idempotent logical execution attached to an explicit root.}
+
+\item{tracking_finalize}{Whether this explicit primary contains the complete
+publication workflow. When true, dsHPC durably records finalization with
+the job attachment and seals only after that job is terminal and its
+reusable output has been published.}
 }
 \value{
-Server-session handle containing `job_id`, a per-job bearer
-  capability, resolved `name`, `state`, and `submitted_at`. The capability
-  is stored durably only as a SHA-256 hash.
+Server-session handle containing `job_id`, optional `tracking_id`,
+  resolved `name`, `state`, and `submitted_at`. A newly created execution
+  also carries a bearer capability, stored durably only as a SHA-256 hash;
+  attaching to shared canonical work does not mint another capability.
 }
 \description{
 Server-side function used by domain packages to enqueue a validated job
@@ -32,4 +52,10 @@ bypass domain disclosure controls. The specification may be a decoded list, JSON
 or a `B64:`-prefixed JSON payload. The decoded specification must contain a
 non-empty character `label` field identifying the submitting server-side
 domain package.
+Whole-job reuse is conservative: the validated specification must
+include a lowercase SHA-256 `reuse_fingerprint` by which the trusted domain
+attests the immutable external inputs and any runtime/model identity not
+already sealed by dsHPC's runner, package, and execution-unit hash. Without
+it, dsHPC launches fresh work rather than claiming that an active or completed
+execution is identical. Explicit primary submissions require the fingerprint.
 }

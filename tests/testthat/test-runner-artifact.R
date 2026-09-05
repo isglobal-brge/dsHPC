@@ -217,3 +217,79 @@ test_that("execution revalidates persisted runner parameters", {
     1L, step, step_dir, NULL), "does not allow: secret", fixed = TRUE)
   expect_false(file.exists(file.path(step_dir, "run.sh")))
 })
+
+test_that("execution refuses a runner definition changed after submission", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  on.exit(cleanup_test_home(home))
+  runner_path <- file.path(home, "runners", "sealed_runtime.yml")
+  yaml::write_yaml(list(name = "sealed_runtime", command = "/bin/echo",
+    args_template = "first", allowed_params = character(0)), runner_path)
+  catalogue_before <- trusted_hpc_call(hpcRuntimeIdentityInternal)
+  step <- list(type = "run", plane = "artifact", runner = "sealed_runtime",
+    config = list())
+  spec <- dsHPC:::.validate_job_spec(list(label = "dsHPC_test",
+    visibility = "global", reuse_fingerprint = strrep("a", 64L),
+    steps = list(step)))
+  spec$.dshpc_provider <- "dsHPC"
+  spec$.dshpc_runtime_revision <- dsHPC:::.dshpc_runtime_revision(spec)
+  spec$.dshpc_runtime_identity <- dsHPC:::.dshpc_runtime_identity(
+    spec, "dsHPC")
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_sealed_runtime", "owner", spec, 1L)
+  step_dir <- dsHPC:::.ensure_step_dir("job_sealed_runtime", 1L)
+  yaml::write_yaml(list(name = "sealed_runtime", command = "/bin/echo",
+    args_template = "second", allowed_params = character(0)), runner_path)
+  catalogue_after <- trusted_hpc_call(hpcRuntimeIdentityInternal)
+
+  expect_false(identical(catalogue_before, catalogue_after))
+  expect_error(dsHPC:::.prepare_artifact_command(db, "job_sealed_runtime",
+    1L, step, step_dir, NULL), "runtime contract changed", fixed = TRUE)
+  expect_error(dsHPC:::.executor_run_step(db, "job_sealed_runtime", 1L,
+    spec), "runtime contract changed", fixed = TRUE)
+  expect_false(file.exists(file.path(step_dir, "run.sh")))
+})
+
+test_that("runtime drift during advance terminalizes the job and its leases", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  on.exit(cleanup_test_home(home))
+  runner_path <- file.path(home, "runners", "advance_runtime.yml")
+  yaml::write_yaml(list(name = "advance_runtime", command = "/bin/echo",
+    args_template = "first", allowed_params = character(0)), runner_path)
+  step <- list(type = "run", plane = "artifact", runner = "advance_runtime",
+    config = list())
+  spec <- dsHPC:::.validate_job_spec(list(label = "dsHPC_test",
+    visibility = "global", reuse_fingerprint = strrep("b", 64L),
+    steps = list(step, step)))
+  spec$.dshpc_provider <- "dsHPC"
+  spec$.dshpc_runtime_revision <- dsHPC:::.dshpc_runtime_revision(spec)
+  spec$.dshpc_runtime_identity <- dsHPC:::.dshpc_runtime_identity(
+    spec, "dsHPC")
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  dsHPC:::.store_create_job(db, "job_advance_runtime", "owner", spec, 2L)
+  dsHPC:::.store_update_job(db, "job_advance_runtime", state = "RUNNING",
+    step_index = 1L)
+  dsHPC:::.store_update_step(db, "job_advance_runtime", 1L, state = "done")
+  DBI::dbExecute(db,
+    "INSERT INTO resource_leases
+       (job_id, resource, amount, acquired_at) VALUES (?, ?, ?, ?)",
+    params = list("job_advance_runtime", "cpu", 1,
+      format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")))
+  yaml::write_yaml(list(name = "advance_runtime", command = "/bin/echo",
+    args_template = "second", allowed_params = character(0)), runner_path)
+
+  dsHPC:::.worker_reap(db)
+  job <- dsHPC:::.store_get_job(db, "job_advance_runtime")
+  expect_identical(job$state, "FAILED")
+  expect_equal(DBI::dbGetQuery(db,
+    "SELECT COUNT(*) AS n FROM resource_leases WHERE job_id = ?",
+    params = list("job_advance_runtime"))$n, 0)
+  expect_true("advance_failed" %in% DBI::dbGetQuery(db,
+    "SELECT event FROM events WHERE job_id = ?",
+    params = list("job_advance_runtime"))$event)
+})

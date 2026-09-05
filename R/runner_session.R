@@ -67,7 +67,8 @@
   # Emit outputs stay server-side -- NOT safe for client disclosure.
   # Use hpcLoadOutputInternal to load them into the server R session.
   .db_register_output(db, job_id, step_index, output_name,
-    "emit_value", out_path, size_bytes = size, safe_for_client = FALSE)
+    "emit_value", out_path, size_bytes = size, safe_for_client = FALSE,
+    reuse_class = "server_reusable")
 
   list(type = "emit", name = output_name, path = out_path)
 }

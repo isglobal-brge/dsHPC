@@ -23,15 +23,25 @@ The default scheduler is adaptive: it reads cgroup/host CPU and memory, detects
 local GPU visibility where available, leases resources while jobs run, and puts
 heavy runners into cooldown after OOM-like exits.
 
-Artifact steps are also content-addressed. For each deterministic runner step,
-dsHPC hashes the resolved input contents, the canonical step definition and the
-registered runner definition. If another job already contains an identical
-completed step, dsHPC copies the cached output into the current job and records
-a `step_cached` event instead of rerunning the runner. If an identical step is
-already running, the duplicate job releases its resource lease, records a
-`step_cache_wait` event and waits for the first step to finish before copying
-the output. Whole-job deduplication by `spec_hash` remains in place for fully
-identical submissions. Domain packages can opt out per invocation with
+Artifact steps are content-addressed only under an explicit immutable reuse
+contract. For each eligible deterministic runner step, dsHPC hashes the trusted
+domain's lowercase SHA-256 `reuse_fingerprint`, resolved input contents,
+canonical step definition, execution unit, and registered runner definition.
+An identical completed step can then be copied into the current job and records
+a `step_cached` event; an identical running step is coalesced through
+`step_cache_wait`. Whole-job deduplication similarly attaches eligible active
+or completed shared submissions to one execution only when both the domain
+`reuse_fingerprint` and an administrator-set `dshpc.runtime_revision` are
+present. The fingerprint binds immutable external inputs; the runtime revision
+must identify the exact container or lockfile and model-weight bundle behind
+the selected execution unit. Package versions, runner definitions, unit
+configuration, and this revision are sealed into the job and revalidated before
+every step. Session operations with caller-visible effects
+(`assign_*`, `aggregate`, and `publish_*`) are never whole-job reused because
+those effects must run in every session. In the `scoped` compatibility policy,
+eligible completed global work is copied into an independent job and bearer,
+again only with this immutable fingerprint.
+Domain packages can opt out per invocation with
 `cache = FALSE` or `cacheable = FALSE` for non-deterministic or effectful
 runners.
 
@@ -61,7 +71,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.2.5.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.3.0.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -87,7 +97,9 @@ Configure dsHPC with R options on the server. Site-wide defaults can use either
 ```r
 options(
   dshpc.home = "/srv/dshpc",
+  dshpc.queue_visibility = "shared",
   dshpc.scheduler = "adaptive",
+  dshpc.runtime_revision = Sys.getenv("DSHPC_RUNTIME_REVISION"),
   dshpc.site_default_pool_id = "site-default",
   dshpc.node_memory_mb = "auto",
   dshpc.memory_reserve_mb = 2048,
@@ -101,6 +113,13 @@ options(
   dshpc.default_timeout_secs = 86400
 )
 ```
+
+`dshpc.runtime_revision` must be a lowercase 64-hex SHA-256 supplied by the
+operator. Change it whenever the executable environment, container content, or
+model weights change. Without it jobs still execute, but active/completed and
+step-cache reuse is disabled; domain packages such as dsImaging that promise
+reusable derivations fail closed until it is configured. A selectable external
+unit may instead declare its own `runtime_revision` in the unit catalogue.
 
 Hospital/site-specific runners can be registered without editing dsHPC by
 pointing `dshpc.runner_registry_paths` at YAML files or directories:
@@ -282,9 +301,9 @@ Guardrails:
   `exit_code` is treated as interrupted and requeued, not as success.
 - Successful step completion is committed before advancing the next step; if a
   crash happens between those phases, the next worker resumes the advance.
-- Interrupted whole-job deduplication clones remain in `CLONING` until a worker
-  rebuilds their independently owned output tree from a completed job with the
-  exact same global label and specification.
+- Interrupted pre-0.3 whole-job deduplication clones remain recoverable from a
+  completed job with the exact same global label and specification. New shared
+  submissions attach to one canonical execution instead of creating clones.
 - Slurm/external submissions write `external_backend.json` before updating the
   DB so a new worker can recover the backend job id and continue polling.
 - Transient external status failures return `STATUS_UNKNOWN` and keep the job
@@ -510,6 +529,15 @@ only when a GPU appears available on the backend host or the site wrapper sets
 
 Aggregate methods:
 
+- `hpcTrackingListDS(limit = 100, cursor = NULL)` returns a bounded `root_v1`
+  page containing one neutral row per logical workflow.
+- `hpcTrackingStatusDS(tracking_id)` looks up a shared root from any session.
+- `hpcTrackingResultDS(tracking_id)` returns only closed-schema,
+  disclosure-validated client-safe results.
+- `hpcTrackingOutputsDS(tracking_id)` lists at most the fixed aliases
+  `output_001` (one reusable server object) and `output_002` (one closed
+  count-only summary), without internal names, values, paths, sizes, child jobs,
+  or providers.
 - `hpcJobReferenceDS(job_bearer_or_symbol)` (the explicit operation that
   exports a portable bearer)
 - `hpcStatusDS(job_bearer_or_symbol)`
@@ -519,10 +547,34 @@ Aggregate methods:
 - `hpcOutputsDS(job_bearer_or_symbol)`
 - `hpcCapabilitiesDS()` (minimal public contract; no topology or load data)
 
+Assign methods:
+
+- `hpcTrackingAssignOutputDS(tracking_id, output_name)` assigns an opaque
+  `dshpc_output_reference` in the server R session. It never materializes or
+  serializes the underlying artifact to the client.
+
 Low-level server API (not registered for direct DataSHIELD calls):
 
 - `hpcSubmitInternal(spec_encoded)`; the decoded spec must include a non-empty
   `label` identifying the server-side domain package that submitted the job.
+  Active and completed reuse require a lowercase SHA-256 `reuse_fingerprint`
+  plus an administrator-sealed runtime revision; an explicit
+  `tracking_role = "primary"` always requires it.
+- `hpcTrackingCreateInternal(reuse_key, kind = "analysis")` creates or joins
+  one logical root; trusted imaging workflows use the neutral `"imaging"`
+  category. Private fan-out jobs use
+  `hpcSubmitInternal(..., tracking_id = root)` and a
+  direct idempotent execution additionally uses `tracking_role = "primary"`.
+- `hpcTrackingPublishOutputInternal()` and
+  `hpcTrackingPublishReferenceInternal()` explicitly publish a neutral logical
+  output on a root. The first attached role fixes a root as a direct primary or
+  a child collection. A terminal primary with a reusable output seals safely on
+  lookup; collections stay open between batches and are sealed explicitly with
+  `hpcTrackingFinishInternal()` or a domain recovery method.
+- `hpcTrackingResolveOutputInternal()` resolves an assigned opaque reference
+  only inside trusted server code. No generic cardinality test is applied at
+  this server-only boundary; any later client result is checked again by the
+  consuming DataSHIELD package.
 - `hpcLoadOutputInternal(...)`; domain packages may load an output after
   applying their own domain contract. Descriptor mode may contain an absolute
   node path for server-side consumers and must never be relayed to a client.
@@ -539,14 +591,21 @@ The retired names `hpcSubmitDS`, `hpcLoadOutputDS`, `hpcListDS`, `hpcStudioDS`,
 and `hpcSchedulerStatusDS` remain exported as compatibility stubs. They always
 report that the method was retired, including when an older server allowlist
 still names them. Domain methods such as those in `dsImaging` submit fixed
-workflows on the server. The resulting server-session handle contains a
-per-job capability; only `hpcJobReferenceDS()` returns a portable B64 bearer,
-while a raw job ID is never a credential. Public status and result payloads do
-not contain that bearer. Status contains only the coarse state, terminal flag,
-and a generic failure marker; exact steps, retries, labels, and timestamps stay
-on the node. A result value must additionally have defensible cardinality at or
-above `nfilter.subset`; arbitrary lists fail closed except for the built-in
-closed, count-only summary schema.
+workflows on the server. Shared workflows use a public `trk_` tracking id as a
+knowledge address; it is sufficient only for neutral status, already-approved
+client results, and assignment of opaque reusable references. It cannot expose
+private artifacts, runner logs, paths, child jobs, scheduler topology, or
+control/cancel a job. Private and compatibility job reads remain capability
+protected: only `hpcJobReferenceDS()` exports that B64 bearer, and a raw
+`job_` id is never a private-data credential.
+
+One tracking root represents one logical workflow even when a collection fans
+out into thousands of per-image jobs. Children and retries never enter the
+analyst list. Root states are only `queued`, `running`, and `terminal`; exact
+progress, outcomes, labels, owners, retries, and timestamps remain internal.
+Set `dshpc.queue_visibility = "scoped"` to disable all shared tracking methods;
+completed global deduplication then retains its pre-0.3 copy-and-capability
+semantics.
 
 For upgrades from dsHPC 0.2.2 or earlier, resynchronise the DataSHIELD package
 methods and inspect the effective server allowlist. Remove the historical
@@ -576,6 +635,12 @@ dsHPCClient::ds.hpc.logs(conns, job_id, last_n = 100)
 dsHPCClient::ds.hpc.outputs(conns, job_id)
 dsHPCClient::ds.hpc.result(conns, job_id)
 dsHPCClient::ds.hpc.capabilities(conns)
+dsHPCClient::ds.hpc.list(conns, limit = 100) # page size; follows all pages
+dsHPCClient::ds.hpc.studio(conns)
+dsHPCClient::ds.hpc.status(conns, "trk_...")
+dsHPCClient::ds.hpc.result(conns, "trk_...")
+dsHPCClient::ds.hpc.load_output(
+  conns, "trk_...", "output_001", symbol = "features_ref")
 
 # Admin-only, enabled by setting dshpc.admin_key on the server or
 # DSHPC_ADMIN_KEY in the Rock/HPC environment.
@@ -590,6 +655,11 @@ generation or job identifier.
 Server-side package API:
 
 - `hpcSubmitInternal(spec_encoded)`
+- `hpcTrackingCreateInternal(reuse_key = NULL, kind = "analysis")`
+- `hpcTrackingFinishInternal(tracking_id, success = TRUE)`
+- `hpcTrackingPublishOutputInternal(...)`
+- `hpcTrackingPublishReferenceInternal(...)`
+- `hpcTrackingResolveOutputInternal(...)`
 - `hpcLoadOutputInternal(job_id_or_symbol, output_name,
   required_label = "domain-package")`
 - `hpcListInternal(label = NULL)`

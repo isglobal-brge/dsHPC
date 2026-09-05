@@ -8,6 +8,8 @@ units:
       - dsImaging
     allowed_runners: []
     config:
+      # SHA-256 of the exact remote runtime/container/model bundle.
+      runtime_revision: REPLACE_WITH_64_LOWERCASE_HEX
       slurm_sbatch: /usr/bin/sbatch
       slurm_squeue: /usr/bin/squeue
       slurm_sacct: /usr/bin/sacct
@@ -27,6 +29,7 @@ units:
   #   allowed_labels: [dsImaging]
   #   allowed_runners: []
   #   config:
+  #     runtime_revision: REPLACE_WITH_64_LOWERCASE_HEX
   #     external_submit_cmd: /usr/local/libexec/dshpc/cluster-a-submit
   #     external_status_cmd: /usr/local/libexec/dshpc/cluster-a-status
   #     external_cancel_cmd: /usr/local/libexec/dshpc/cluster-a-cancel
@@ -38,6 +41,7 @@ units:
   #   allowed_labels: [dsImaging]
   #   allowed_runners: []
   #   config:
+  #     runtime_revision: REPLACE_WITH_64_LOWERCASE_HEX
   #     kubernetes_kubectl: /usr/bin/kubectl
   #     kubernetes_context: dshpc-prod
   #     kubernetes_namespace: dshpc

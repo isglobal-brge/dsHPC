@@ -1,3 +1,46 @@
+# dsHPC 0.3.0
+
+* Added a durable shared-knowledge catalogue with one neutral `trk_` root per
+  logical workflow. The paginated analyst queue exposes only coarse state and
+  a closed neutral `analysis` / `imaging` category; it never enumerates
+  collection children, retries, raw labels, counts, progress, timestamps,
+  errors, or scheduler topology.
+* Added capability-free shared status and disclosure-controlled result lookup.
+  A tracking id addresses only shared knowledge: private job reads and all
+  control operations retain their existing capability or administrator gates.
+* Added explicit `internal_only`, `server_reusable`, and `client_safe` output
+  classification. Reusable outputs can be assigned as path-free opaque server
+  references and resolved by trusted domain packages without sending values to
+  the client; every later client result remains subject to domain disclosure
+  control.
+* Global direct submissions with a trusted immutable identity attach to the
+  same active or completed canonical execution. Whole-job and step reuse require
+  a trusted lowercase SHA-256
+  `reuse_fingerprint` binding immutable external inputs and an operator-set
+  `runtime_revision` binding the exact executable/container/model bundle;
+  reuse is disabled when the runtime revision is absent or changes.
+  Explicit primary submissions require it as well. Explicit workflow roots
+  support idempotent primary execution, hidden fan-out children, retry after
+  failure, opaque domain references, and a terminal seal.
+* Added `dshpc.queue_visibility = "shared" | "scoped"`. Shared is the normal
+  node policy; scoped disables the entire tracking/result/reuse analyst surface
+  while preserving capability-based compatibility APIs and the previous
+  copy-on-dedup behaviour for completed global jobs.
+* Extended garbage collection so unreferenced collection children can expire
+  without deleting published root knowledge, and stale unattached root
+  reservations expire after retention. Existing global jobs are not
+  automatically backfilled, avoiding historical execution cardinality leaks.
+* Whole-job identity now includes dsHPC, provider/publisher versions and runner
+  definitions. Reuse is disabled for explicit cache opt-outs and effectful
+  session operations. Tracking publication and garbage collection are
+  serialized, publication is idempotent, and primary/collection execution modes
+  cannot be mixed on a root.
+* Schema migration is now versioned and serialized under SQLite's writer lock;
+  ordinary Studio/status reads no longer rerun migration writes.
+* Shared output metadata now uses fixed ordinal aliases and a closed shape: at
+  most one opaque `server_object` and one count-only `summary`. Internal output
+  names and output multiplicity no longer enter Studio or client responses.
+
 # dsHPC 0.2.5
 
 * Added backend-neutral DataSHIELD Resource selection for administrator-managed

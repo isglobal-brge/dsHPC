@@ -19,11 +19,18 @@
 .step_cache_enabled_for_job <- function(db, job_id, step) {
   if (!.step_cache_enabled(step)) return(FALSE)
   job <- .store_get_job(db, job_id)
-  !is.null(job) && identical(job$visibility, "global")
+  if (is.null(job) || !identical(job$visibility, "global")) return(FALSE)
+  spec <- tryCatch(jsonlite::fromJSON(job$spec_json, simplifyVector = FALSE),
+    error = function(e) NULL)
+  fingerprint <- spec$reuse_fingerprint %||% NULL
+  is.character(fingerprint) && length(fingerprint) == 1L &&
+    !is.na(fingerprint) && grepl("^[0-9a-f]{64}$", fingerprint) &&
+    .dshpc_runtime_reuse_ready(spec)
 }
 
 #' @keywords internal
-.step_cache_hash <- function(step, input_dir = NULL, execution_unit = NULL) {
+.step_cache_hash <- function(step, input_dir = NULL, execution_unit = NULL,
+                             reuse_fingerprint = NULL) {
   step_for_hash <- step[setdiff(names(step),
     c("inputs", "node_id", "cache", "cacheable"))]
   step_for_hash <- .canonicalise_spec(step_for_hash)
@@ -38,11 +45,12 @@
     }
   }
   payload <- list(
-    version = 2L,
+    version = 3L,
     input_hash = .step_cache_hash_path(input_dir),
     step = step_for_hash,
     runner_config_hash = runner_config_hash,
-    execution_unit = execution_unit
+    execution_unit = execution_unit,
+    reuse_fingerprint = reuse_fingerprint
   )
   digest::digest(jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null"),
     algo = "sha256", serialize = FALSE)
@@ -272,7 +280,7 @@
   if (is.null(target_parent)) return(FALSE)
 
   source_outputs <- DBI::dbGetQuery(db,
-    "SELECT name, kind, path_or_ref, size_bytes, safe_for_client
+    "SELECT name, kind, path_or_ref, size_bytes, safe_for_client, reuse_class
      FROM outputs WHERE job_id = ? AND step_index = ?",
     params = list(cached_step$job_id, as.integer(cached_step$step_index)))
   mapped_outputs <- character(nrow(source_outputs))
@@ -309,7 +317,8 @@
               else source_outputs$size_bytes[i]
       .db_register_output(db, job_id, step_index, source_outputs$name[i],
         source_outputs$kind[i], dst, size_bytes = size,
-        safe_for_client = as.logical(source_outputs$safe_for_client[i]))
+        safe_for_client = as.logical(source_outputs$safe_for_client[i]),
+        reuse_class = source_outputs$reuse_class[i])
     }
   }
 

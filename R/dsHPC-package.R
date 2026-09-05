@@ -25,6 +25,12 @@
 #' @section Core queue options:
 #' - `dshpc.home`: dsHPC state directory. Defaults to `/srv/dshpc`.
 #' - `dshpc.scheduler`: scheduler mode. Defaults to `"adaptive"`.
+#' - `dshpc.runtime_revision`: administrator-set lowercase SHA-256 identifying
+#'   the exact executable/container/lockfile and model-weight bundle. Canonical
+#'   active/completed and step-cache reuse is disabled when absent.
+#' - `dshpc.queue_visibility`: `"shared"` (default) exposes only logical
+#'   tracking roots and approved outputs through the analyst API; `"scoped"`
+#'   disables that surface and retains capability-only access.
 #' - `dshpc.max_jobs_global`: maximum simultaneously running jobs.
 #' - `dshpc.max_jobs_per_user`: per-owner pending/running job quota. Its default
 #'   is `Inf` for compatibility; production sites should configure a finite
@@ -36,9 +42,10 @@
 #'   Defaults to 86400 seconds; non-positive values disable the worker deadline.
 #' - `dshpc.step_cache`: enable content-addressed reuse and single-flight
 #'   coalescing of deterministic artifact steps across jobs. Defaults to
-#'   `TRUE`; set a step's `cache = FALSE` or `cacheable = FALSE` to opt out for
-#'   a particular runner invocation when the runner is non-deterministic or has
-#'   external side effects.
+#'   `TRUE`, but historical reuse is admitted only when the trusted domain job
+#'   supplies a lowercase SHA-256 `reuse_fingerprint` binding its immutable
+#'   external inputs/runtime contract. Set a step's `cache = FALSE` or
+#'   `cacheable = FALSE` to opt out for a non-deterministic or effectful runner.
 #'
 #' @section Embedded resource scheduling:
 #' Admission conservatively leases the maximum requirement of any step for the

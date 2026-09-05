@@ -235,7 +235,8 @@ test_that("a CLONING job is recovered from confined outputs after restart", {
   withr::local_options(list(dshpc.home = home))
 
   spec <- list(.owner = "source-owner", label = "recovery-test",
-    visibility = "global", steps = list(list(
+    visibility = "global", reuse_fingerprint = strrep("a", 64L),
+    steps = list(list(
       type = "emit", plane = "session", output_name = "values",
       value = 1:5)))
   source <- trusted_hpc_call(hpcSubmitInternal, spec)
@@ -293,6 +294,105 @@ test_that("a CLONING job is recovered from confined outputs after restart", {
   expect_equal(hpcStatusDS(target)$state, "FINISHED")
   expect_equal(trusted_hpc_call(hpcLoadOutputInternal, target, "values",
     required_label = "recovery-test"), 1:5)
+})
+
+test_that("clone recovery requires the current conservative reuse contract", {
+  home <- setup_test_home()
+  on.exit(cleanup_test_home(home), add = TRUE)
+  withr::local_options(list(dshpc.home = home))
+
+  sealed_spec <- function(value, fingerprint, step = NULL) {
+    if (is.null(step)) {
+      step <- list(type = "emit", plane = "session", output_name = "values",
+        value = value)
+    }
+    spec <- dsHPC:::.validate_job_spec(list(label = "recovery-test",
+      visibility = "global", reuse_fingerprint = fingerprint,
+      steps = list(step)))
+    spec$.dshpc_provider <- "dsHPC"
+    spec$.dshpc_runtime_revision <- dsHPC:::.dshpc_runtime_revision(spec)
+    spec$.dshpc_runtime_identity <- dsHPC:::.dshpc_runtime_identity(
+      spec, "dsHPC")
+    spec
+  }
+
+  missing_fingerprint <- sealed_spec(1L, strrep("a", 64L))
+  missing_fingerprint$reuse_fingerprint <- NULL
+  malformed_fingerprint <- sealed_spec(2L, strrep("b", 64L))
+  malformed_fingerprint$reuse_fingerprint <- "not-a-sha256"
+  legacy_runtime <- sealed_spec(3L, strrep("c", 64L))
+  legacy_runtime$.dshpc_provider <- NULL
+  legacy_runtime$.dshpc_runtime_identity <- NULL
+  changed_runtime <- sealed_spec(4L, strrep("d", 64L))
+  changed_runtime$.dshpc_runtime_identity <- strrep("0", 64L)
+  missing_revision <- sealed_spec(5L, strrep("e", 64L))
+  missing_revision$.dshpc_runtime_revision <- NULL
+  invalid_provider <- sealed_spec(6L, strrep("e", 64L))
+  invalid_provider$.dshpc_provider <- "invalid-provider"
+  invalid_provider$.dshpc_runtime_identity <- dsHPC:::.dshpc_runtime_identity(
+    invalid_provider, "invalid-provider")
+  effectful <- sealed_spec(7L, strrep("f", 64L),
+    step = list(type = "assign_expr", plane = "session",
+      expr = "1 + 1", symbol = "assigned_value"))
+  valid_target <- sealed_spec(8L, paste0(strrep("a", 63L), "b"))
+  invalid_source <- valid_target
+  invalid_source$.dshpc_runtime_identity <- strrep("0", 64L)
+
+  cases <- list(
+    missing_fingerprint = list(source = missing_fingerprint,
+      target = missing_fingerprint, provider = "dsHPC"),
+    malformed_fingerprint = list(source = malformed_fingerprint,
+      target = malformed_fingerprint, provider = "dsHPC"),
+    legacy_runtime = list(source = legacy_runtime, target = legacy_runtime,
+      provider = "dsHPC"),
+    changed_runtime = list(source = changed_runtime, target = changed_runtime,
+      provider = "dsHPC"),
+    missing_revision = list(source = missing_revision,
+      target = missing_revision, provider = "dsHPC"),
+    invalid_provider = list(source = invalid_provider,
+      target = invalid_provider, provider = "invalid-provider"),
+    effectful = list(source = effectful, target = effectful,
+      provider = "dsHPC"),
+    invalid_source = list(source = invalid_source, target = valid_target,
+      provider = "dsHPC")
+  )
+
+  db <- dsHPC:::.db_connect()
+  for (case_name in names(cases)) {
+    case <- cases[[case_name]]
+    source_id <- paste0("job_source_", case_name)
+    target_id <- paste0("job_target_", case_name)
+    spec_hash <- dsHPC:::.dshpc_whole_job_hash(case$target, case$provider)
+
+    dsHPC:::.store_create_job(db, source_id, "source-owner", case$source, 1L,
+      spec_hash = spec_hash)
+    source_dir <- file.path(dsHPC:::.ensure_step_dir(source_id, 1L), "output")
+    source_path <- file.path(source_dir, "value.rds")
+    saveRDS(case_name, source_path)
+    dsHPC:::.db_register_output(db, source_id, 1L, "values", "server_object",
+      source_path, safe_for_client = FALSE, reuse_class = "server_reusable")
+    dsHPC:::.store_update_step(db, source_id, 1L, state = "done",
+      output_ref = source_dir)
+    dsHPC:::.store_update_job(db, source_id, state = "FINISHED",
+      step_index = 1L, finished_at = "2026-01-01T00:00:00.000Z")
+    dsHPC:::.store_create_job(db, target_id, "target-owner", case$target, 1L,
+      spec_hash = spec_hash, initial_state = "CLONING")
+  }
+
+  dsHPC:::.recover_deduplicated_job_clones(db)
+  targets <- DBI::dbGetQuery(db,
+    "SELECT job_id, state FROM jobs WHERE job_id LIKE 'job_target_%'")
+  failed_events <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM events WHERE event = 'clone_recovery_failed'")
+  target_outputs <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM outputs WHERE job_id LIKE 'job_target_%'")
+  dsHPC:::.db_close(db)
+
+  expect_equal(nrow(targets), length(cases))
+  expect_true(all(targets$state == "FAILED"))
+  expect_setequal(failed_events$job_id,
+    paste0("job_target_", names(cases)))
+  expect_equal(nrow(target_outputs), 0L)
 })
 
 test_that("clone recovery skips live owners and fails closed without a source", {

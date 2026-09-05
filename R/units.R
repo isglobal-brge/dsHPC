@@ -120,6 +120,7 @@
 .dshpc_unit_config_names <- function(type) {
   common <- c(
     "default_timeout_secs", "max_retries",
+    "runtime_revision",
     "external_enforce_local_resources",
     "external_enforce_runner_concurrency",
     "backend_path_mappings", "backend_gpu_count",
@@ -150,6 +151,7 @@
   common <- list(
     default_timeout_secs = 86400L,
     max_retries = 3L,
+    runtime_revision = NULL,
     external_enforce_local_resources = FALSE,
     external_enforce_runner_concurrency = FALSE,
     backend_path_mappings = NULL,
@@ -249,6 +251,7 @@
     out$backend_path_mappings <- .dshpc_unit_paths(config$backend_path_mappings)
   }
   string_patterns <- list(
+    runtime_revision = "^[0-9a-f]{64}$",
     slurm_partition = "^[A-Za-z0-9._-]*$",
     slurm_account = "^[A-Za-z0-9._-]*$",
     slurm_qos = "^[A-Za-z0-9._-]*$",

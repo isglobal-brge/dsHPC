@@ -35,6 +35,21 @@ test_that("job visibility and output names are validated", {
   expect_error(dsHPC:::.validate_job_spec(invalid_output), "output_name")
 })
 
+test_that("completed-reuse fingerprints are immutable digest identities", {
+  valid <- make_test_spec()
+  valid$reuse_fingerprint <- strrep("a", 64L)
+  expect_identical(dsHPC:::.validate_job_spec(valid)$reuse_fingerprint,
+    strrep("a", 64L))
+
+  for (value in list("input-name", strrep("A", 64L), strrep("a", 63L),
+                     NA_character_, c(strrep("a", 64L), strrep("b", 64L)))) {
+    invalid <- make_test_spec()
+    invalid$reuse_fingerprint <- value
+    expect_error(dsHPC:::.validate_job_spec(invalid),
+      "reuse_fingerprint", fixed = TRUE)
+  }
+})
+
 test_that("step plane is inferred from type", {
   spec <- list(steps = list(list(type = "aggregate")))
   result <- dsHPC:::.validate_job_spec(spec)

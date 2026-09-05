@@ -229,7 +229,7 @@ test_that("hpcResultDS rejects marked-safe values below the disclosure floor", {
   expect_false(grepl("secret-marker", conditionMessage(error), fixed = TRUE))
 })
 
-test_that("private jobs never participate in whole-job deduplication", {
+test_that("private jobs stay separate and shared jobs reuse one execution", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
   on.exit(cleanup_test_home(home))
@@ -243,47 +243,25 @@ test_that("private jobs never participate in whole-job deduplication", {
 
   global_spec <- private_spec
   global_spec$visibility <- "global"
+  global_spec$reuse_fingerprint <- strrep("a", 64L)
   global_first <- trusted_hpc_call(hpcSubmitInternal, global_spec)
   global_second <- trusted_hpc_call(hpcSubmitInternal, global_spec)
   expect_true(isTRUE(global_second$deduplicated))
-  expect_false(identical(global_first$.dshpc_capability,
-    global_second$.dshpc_capability))
+  expect_identical(global_second$job_id, global_first$job_id)
+  expect_identical(global_second$tracking_id, global_first$tracking_id)
+  expect_null(global_second$.dshpc_capability)
 
   db <- dsHPC:::.db_connect()
   private_events <- DBI::dbGetQuery(db,
     "SELECT event FROM events WHERE job_id IN (?, ?)",
     params = list(first$job_id, second$job_id))
   expect_false("deduplicated" %in% private_events$event)
-  global_outputs <- DBI::dbGetQuery(db,
-    "SELECT job_id, path_or_ref FROM outputs WHERE job_id IN (?, ?)",
-    params = list(global_first$job_id, global_second$job_id))
-  global_steps <- DBI::dbGetQuery(db,
-    "SELECT job_id, state, output_ref FROM steps WHERE job_id IN (?, ?)",
-    params = list(global_first$job_id, global_second$job_id))
+  global_jobs <- DBI::dbGetQuery(db,
+    "SELECT job_id FROM jobs WHERE job_id = ?",
+    params = list(global_first$job_id))
   dsHPC:::.db_close(db)
-
-  first_path <- global_outputs$path_or_ref[
-    global_outputs$job_id == global_first$job_id][1]
-  second_path <- global_outputs$path_or_ref[
-    global_outputs$job_id == global_second$job_id][1]
-  expect_false(identical(first_path, second_path))
-  expect_match(first_path, global_first$job_id, fixed = TRUE)
-  expect_match(second_path, global_second$job_id, fixed = TRUE)
-  expect_true(file.exists(second_path))
-  expect_true(all(global_steps$state == "done"))
-  expect_true(all(vapply(seq_len(nrow(global_steps)), function(i) {
-    startsWith(gsub("\\\\", "/", global_steps$output_ref[i]),
-      paste0("artifacts/", global_steps$job_id[i], "/"))
-  }, logical(1))))
-
-  # A deduplicated job owns an independent durable tree. Removing the source
-  # after a simulated restart cannot invalidate the target's bearer or output.
-  bearer <- hpcJobReferenceDS(global_second)
-  unlink(file.path(home, "artifacts", global_first$job_id),
-    recursive = TRUE, force = TRUE)
-  expect_equal(hpcStatusDS(bearer)$state, "FINISHED")
-  expect_equal(trusted_hpc_call(hpcLoadOutputInternal, bearer, "values",
-    required_label = "privacy-test"), 1:5)
+  expect_equal(nrow(global_jobs), 1L)
+  expect_equal(hpcStatusDS(global_first)$state, "FINISHED")
 })
 
 test_that("whole-job dedup requires the exact persisted domain label", {
@@ -311,7 +289,7 @@ test_that("large artifact sizes remain exact internally and hidden publicly", {
   on.exit(cleanup_test_home(home), add = TRUE)
   handle <- make_capability_job(home)
   path <- file.path(home, "artifacts", handle$job_id, "large-summary.rds")
-  saveRDS(rep("safe", 3L), path)
+  saveRDS(list(n_samples = 4L), path)
   large_size <- 3 * 1024^3
 
   db <- dsHPC:::.db_connect()

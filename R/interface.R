@@ -121,7 +121,8 @@
     file.path(.dshpc_home(), "artifacts", source_job_id), source_job_id,
     check_tree = TRUE)
   outputs <- DBI::dbGetQuery(db,
-    "SELECT step_index, name, kind, path_or_ref, size_bytes, safe_for_client
+    "SELECT step_index, name, kind, path_or_ref, size_bytes, safe_for_client,
+            reuse_class
      FROM outputs WHERE job_id = ? ORDER BY id",
     params = list(source_job_id))
   steps <- DBI::dbGetQuery(db,
@@ -177,7 +178,8 @@
         as.integer(o$step_index), o$name, o$kind, target_path,
         size_bytes = if (file.exists(target_path)) file.info(target_path)$size
           else o$size_bytes,
-        safe_for_client = as.logical(o$safe_for_client))
+        safe_for_client = as.logical(o$safe_for_client),
+        reuse_class = o$reuse_class)
     }
   }
 
@@ -226,7 +228,10 @@
 #' Remove a failed, not-yet-visible deduplicated job clone
 #' @noRd
 .discard_deduplicated_job_clone <- function(db, job_id) {
-  for (table in c("outputs", "events", "steps", "jobs")) {
+  DBI::dbExecute(db,
+    "DELETE FROM tracking_outputs WHERE source_job_id = ?",
+    params = list(job_id))
+  for (table in c("tracking_jobs", "outputs", "events", "steps", "jobs")) {
     DBI::dbExecute(db, paste0("DELETE FROM ", table, " WHERE job_id = ?"),
       params = list(job_id))
   }
@@ -234,6 +239,40 @@
   if (dir.exists(target_root) || file.exists(target_root) ||
       .dshpc_path_is_symlink(target_root)) {
     unlink(target_root, recursive = TRUE, force = TRUE)
+  }
+  invisible(TRUE)
+}
+
+#' Decide whether a validated workflow is safe for whole-job reuse
+#' @noRd
+.dshpc_whole_job_reuse_allowed <- function(spec) {
+  effectful_session_types <- c("assign_table", "assign_resource",
+    "assign_expr", "aggregate", "publish_asset", "publish_dataset")
+  !any(vapply(spec$steps, function(step) {
+    identical(step$cache, FALSE) || identical(step$cacheable, FALSE) ||
+      (identical(step$plane, "session") &&
+       step$type %in% effectful_session_types)
+  }, logical(1)))
+}
+
+#' Validate a durable specification before recovering a whole-job clone
+#' @noRd
+.dshpc_assert_clone_reuse_contract <- function(db, job_id, spec_hash) {
+  if (!is.character(spec_hash) || length(spec_hash) != 1L ||
+      is.na(spec_hash) || !grepl("^[0-9a-f]{64}$", spec_hash)) {
+    stop("Interrupted clone specification identity is invalid.",
+      call. = FALSE)
+  }
+  spec <- .validate_job_spec(.store_get_spec(db, job_id))
+  if (is.null(spec$reuse_fingerprint) ||
+      !isTRUE(.dshpc_whole_job_reuse_allowed(spec)) ||
+      !isTRUE(.dshpc_runtime_reuse_ready(spec)) ||
+      !isTRUE(.dshpc_assert_runtime_identity(spec))) {
+    stop("Interrupted clone reuse contract is invalid.", call. = FALSE)
+  }
+  provider <- spec$.dshpc_provider
+  if (!identical(.dshpc_whole_job_hash(spec, provider), spec_hash)) {
+    stop("Interrupted clone specification identity changed.", call. = FALSE)
   }
   invisible(TRUE)
 }
@@ -313,6 +352,8 @@
           is.na(target$label[1]) || !nzchar(target$label[1])) {
         stop("Interrupted clone metadata is invalid.", call. = FALSE)
       }
+      .dshpc_assert_clone_reuse_contract(db, job_id,
+        as.character(target$spec_hash[1]))
       source <- DBI::dbGetQuery(db,
         "SELECT job_id FROM jobs
          WHERE job_id <> ? AND spec_hash = ? AND visibility = 'global'
@@ -323,6 +364,8 @@
         stop("Interrupted clone source is unavailable.", call. = FALSE)
       }
       source_job_id <- source$job_id[1]
+      .dshpc_assert_clone_reuse_contract(db, source_job_id,
+        as.character(target$spec_hash[1]))
       source_job <- .store_get_job(db, source_job_id)
       plan <- .prepare_deduplicated_job_clone(db, source_job_id)
       .clone_deduplicated_job(db, source_job_id, job_id, plan)
@@ -369,6 +412,160 @@ hpcSubmitDS <- function(spec_encoded) {
   .legacy_ds_method_disabled("hpcSubmitDS")
 }
 
+#' Build the live server runtime contract for a validated specification
+#' @keywords internal
+.dshpc_runtime_revision <- function(spec) {
+  snapshot <- spec$.dshpc_unit %||% NULL
+  value <- if (!is.null(snapshot) &&
+      identical(as.character(snapshot$source %||% ""), "resource")) {
+    snapshot$config$runtime_revision %||% NULL
+  } else {
+    .dshpc_option("runtime_revision", NULL)
+  }
+  if (is.null(value) || length(value) == 0L ||
+      (is.character(value) && length(value) == 1L &&
+       (is.na(value) || !nzchar(value)))) {
+    return(NULL)
+  }
+  if (!is.character(value) || length(value) != 1L || is.na(value) ||
+      !grepl("^[0-9a-f]{64}$", value)) {
+    stop("dshpc.runtime_revision must be a lowercase SHA-256 digest.",
+      call. = FALSE)
+  }
+  value
+}
+
+#' Test whether a job has an operator-sealed immutable runtime revision
+#' @keywords internal
+.dshpc_runtime_reuse_ready <- function(spec) {
+  stored <- spec$.dshpc_runtime_revision %||% NULL
+  live <- .dshpc_runtime_revision(spec)
+  is.character(stored) && length(stored) == 1L && !is.na(stored) &&
+    grepl("^[0-9a-f]{64}$", stored) && identical(stored, live)
+}
+
+#' Build the live server runtime contract for a validated specification
+#' @keywords internal
+.dshpc_runtime_contract <- function(spec, provider,
+                                    runner_overrides = list()) {
+  runners <- unique(vapply(spec$steps, function(step) {
+    value <- step$runner %||% ""
+    if (length(value) != 1L || is.na(value)) "" else as.character(value)
+  }, character(1)))
+  runners <- runners[nzchar(runners)]
+  runner_definitions <- stats::setNames(lapply(runners, function(name) {
+    config <- if (name %in% names(runner_overrides)) {
+      runner_overrides[[name]]
+    } else {
+      tryCatch(.load_runner_config(name), error = function(e) NULL)
+    }
+    if (is.null(config)) NULL else .canonicalise_spec(config)
+  }), runners)
+
+  packages <- unique(c("dsHPC", provider, unlist(lapply(spec$steps, function(step) {
+    config_package <- if (is.list(step$config)) {
+      step$config$publisher_package %||% NULL
+    } else NULL
+    c(step$publisher_package %||% NULL,
+      config_package)
+  }), use.names = FALSE)))
+  packages <- as.character(packages)
+  packages <- packages[!is.na(packages) & nzchar(packages)]
+  package_versions <- stats::setNames(vapply(packages, function(package) {
+    tryCatch(as.character(utils::packageVersion(package)),
+      error = function(e) NA_character_)
+  }, character(1)), packages)
+
+  list(version = 2L, runtime_revision = .dshpc_runtime_revision(spec),
+    runner_definitions = runner_definitions,
+    package_versions = package_versions,
+    execution_unit = .canonicalise_spec(spec$.dshpc_unit %||% NULL))
+}
+
+#' Hash the live server runtime contract without persisting its contents
+#' @keywords internal
+.dshpc_runtime_identity <- function(spec, provider,
+                                    runner_overrides = list()) {
+  contract <- .dshpc_runtime_contract(spec, provider,
+    runner_overrides = runner_overrides)
+  digest::digest(jsonlite::toJSON(contract, auto_unbox = TRUE, null = "null"),
+    algo = "sha256", serialize = FALSE)
+}
+
+#' Refuse to execute a durable job under a different runtime definition
+#' @keywords internal
+.dshpc_assert_runtime_identity <- function(spec, runner_overrides = list()) {
+  expected <- spec$.dshpc_runtime_identity %||% NULL
+  provider <- spec$.dshpc_provider %||% NULL
+  # Jobs created by pre-0.3 versions have no recoverable historical snapshot.
+  # They retain their legacy execution behavior, but their hashes cannot match
+  # newly submitted sealed jobs.
+  if (is.null(expected) && is.null(provider)) return(invisible(FALSE))
+  stored_revision <- spec$.dshpc_runtime_revision %||% NULL
+  live_revision <- .dshpc_runtime_revision(spec)
+  revision_valid <- (is.null(stored_revision) && is.null(live_revision)) ||
+    (is.character(stored_revision) && length(stored_revision) == 1L &&
+      !is.na(stored_revision) && grepl("^[0-9a-f]{64}$", stored_revision) &&
+      identical(stored_revision, live_revision))
+  valid <- isTRUE(revision_valid) &&
+    is.character(expected) && length(expected) == 1L &&
+    !is.na(expected) && grepl("^[0-9a-f]{64}$", expected) &&
+    is.character(provider) && length(provider) == 1L && !is.na(provider) &&
+    grepl("^[A-Za-z][A-Za-z0-9.]*$", provider)
+  if (!isTRUE(valid) || !identical(expected,
+      .dshpc_runtime_identity(spec, provider,
+        runner_overrides = runner_overrides))) {
+    stop("Durable job runtime contract changed after submission.",
+      call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Include the trusted runtime definition in whole-job identity. Domain
+# packages remain responsible for putting immutable external-input identities
+# in their fixed specification; dsHPC must not guess which strings are paths.
+.dshpc_whole_job_hash <- function(spec, provider) {
+  stable_spec <- spec[setdiff(names(spec), c("job_id", ".owner", "name",
+    ".dshpc_runtime_identity", ".dshpc_runtime_revision",
+    ".dshpc_provider"))]
+  stable_spec <- .canonicalise_spec(stable_spec)
+  runtime_contract <- .dshpc_runtime_contract(spec, provider)
+
+  payload <- list(version = 4L, spec = stable_spec,
+    runtime_contract = runtime_contract)
+  digest::digest(jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null"),
+    algo = "sha256", serialize = FALSE)
+}
+
+#' Get a Conservative Runtime Catalogue Identity
+#'
+#' Trusted domain packages can include this digest in their own durable
+#' derivation keys. It changes when the provider package, dsHPC, any registered
+#' runner definition, the selected execution unit, or its administrator-set
+#' immutable runtime revision changes. The revision must identify the exact
+#' container/lockfile/model bundle; no configuration detail is returned.
+#'
+#' @param unit_selection Optional sealed execution-unit snapshot.
+#' @return A lowercase SHA-256 digest.
+#' @export
+hpcRuntimeIdentityInternal <- function(unit_selection = NULL) {
+  .dshpc_require_trusted_server_caller()
+  provider <- .dshpc_trusted_server_caller()
+  if (!is.null(unit_selection)) {
+    unit_selection <- .dshpc_validate_unit_snapshot(unit_selection)
+  }
+  runners <- sort(.list_runners())
+  spec <- list(steps = lapply(runners, function(runner) list(runner = runner)),
+    .dshpc_unit = unit_selection)
+  revision <- .dshpc_runtime_revision(spec)
+  if (is.null(revision)) {
+    stop("Immutable dsHPC runtime revision is not configured.",
+      call. = FALSE)
+  }
+  spec$.dshpc_runtime_revision <- revision
+  .dshpc_runtime_identity(spec, provider)
+}
+
 #' Submit a Job from Trusted Server Code
 #'
 #' Server-side function used by domain packages to enqueue a validated job
@@ -379,6 +576,12 @@ hpcSubmitDS <- function(spec_encoded) {
 #' or a `B64:`-prefixed JSON payload. The decoded specification must contain a
 #' non-empty character `label` field identifying the submitting server-side
 #' domain package.
+#' Whole-job reuse is conservative: the validated specification must
+#' include a lowercase SHA-256 `reuse_fingerprint` by which the trusted domain
+#' attests the immutable external inputs and any runtime/model identity not
+#' already sealed by dsHPC's runner, package, and execution-unit hash. Without
+#' it, dsHPC launches fresh work rather than claiming that an active or completed
+#' execution is identical. Explicit primary submissions require the fingerprint.
 #'
 #' @param spec_encoded Job specification as a list, JSON string, or `B64:`
 #'   encoded JSON string.
@@ -388,21 +591,49 @@ hpcSubmitDS <- function(spec_encoded) {
 #' @param unit_selection Optional sealed, non-secret unit selection previously
 #'   returned by [hpcUnitSelectionInternal()]. This is for durable domain
 #'   orchestrators that submit follow-up jobs after the original session call.
-#' @return Server-session handle containing `job_id`, a per-job bearer
-#'   capability, resolved `name`, `state`, and `submitted_at`. The capability
-#'   is stored durably only as a SHA-256 hash.
+#' @param tracking_id Optional root returned by [hpcTrackingCreateInternal()].
+#'   A global job without an explicit root automatically creates or reuses one
+#'   logical root.
+#' @param tracking_role `"child"` for hidden fan-out work, or `"primary"` for
+#'   an idempotent logical execution attached to an explicit root.
+#' @param tracking_finalize Whether this explicit primary contains the complete
+#'   publication workflow. When true, dsHPC durably records finalization with
+#'   the job attachment and seals only after that job is terminal and its
+#'   reusable output has been published.
+#' @return Server-session handle containing `job_id`, optional `tracking_id`,
+#'   resolved `name`, `state`, and `submitted_at`. A newly created execution
+#'   also carries a bearer capability, stored durably only as a SHA-256 hash;
+#'   attaching to shared canonical work does not mint another capability.
 #' @export
 hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
-                              unit_selection = NULL) {
+                              unit_selection = NULL, tracking_id = NULL,
+                              tracking_role = c("child", "primary"),
+                              tracking_finalize = FALSE) {
   .dshpc_require_trusted_server_caller()
+  tracking_was_explicit <- !is.null(tracking_id)
+  tracking_role <- match.arg(tracking_role)
+  if (!is.logical(tracking_finalize) || length(tracking_finalize) != 1L ||
+      is.na(tracking_finalize) ||
+      (isTRUE(tracking_finalize) &&
+       (!isTRUE(tracking_was_explicit) ||
+        !identical(tracking_role, "primary")))) {
+    stop("tracking_finalize requires one explicit primary job.", call. = FALSE)
+  }
   spec <- .ds_arg(spec_encoded)
-  if (!is.list(spec) || ".dshpc_unit" %in% names(spec)) {
+  if (!is.list(spec) || any(c(".dshpc_unit", ".dshpc_provider",
+      ".dshpc_runtime_identity", ".dshpc_runtime_revision") %in% names(spec))) {
     stop("Job specification contains a reserved field.", call. = FALSE)
   }
   spec <- .validate_job_spec(spec)
+  if (isTRUE(tracking_was_explicit) && identical(tracking_role, "primary") &&
+      is.null(spec$reuse_fingerprint)) {
+    stop("Tracked primary submissions require an immutable fingerprint.",
+      call. = FALSE)
+  }
   .dshpc_require_label_value(spec$label,
     "dsHPC submission requires a domain label (spec$label). Every job must declare the server-side package that submitted it. This is a hard requirement; there is no opt-out.")
   .dshpc_require_trusted_server_caller(spec$label)
+  provider <- .dshpc_trusted_server_caller()
   if (!is.null(session_env) && !is.null(unit_selection)) {
     stop("Provide only one HPC unit selection source.", call. = FALSE)
   }
@@ -421,6 +652,12 @@ hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
     spec$.dshpc_unit <- selected_unit
   }
   .dshpc_assert_unit_dispatchable(spec)
+  spec$.dshpc_provider <- provider
+  runtime_revision <- .dshpc_runtime_revision(spec)
+  if (!is.null(runtime_revision)) {
+    spec$.dshpc_runtime_revision <- runtime_revision
+  }
+  spec$.dshpc_runtime_identity <- .dshpc_runtime_identity(spec, provider)
   owner_id <- .get_owner_id(spec$.owner)
   # Job identifiers are server-generated. Caller-selected identifiers enable
   # collision/oracle behaviour and are not part of the domain API contract.
@@ -439,57 +676,196 @@ hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
   capability <- .generate_job_capability()
   capability_hash <- .hash_job_capability(capability)
 
-  # Deduplication by spec_hash
-  spec_for_hash <- spec[setdiff(names(spec), c("job_id", ".owner", "name"))]
-  spec_for_hash <- .canonicalise_spec(spec_for_hash)
-  spec_hash <- digest::digest(jsonlite::toJSON(spec_for_hash, auto_unbox = TRUE),
-                              algo = "sha256", serialize = FALSE)
-  existing_dup <- if (identical(spec$visibility, "global")) {
-    DBI::dbGetQuery(db,
-      "SELECT job_id, state FROM jobs
-       WHERE spec_hash = ?
-         AND visibility = 'global'
-         AND label = ?
-         AND state IN ('FINISHED', 'PUBLISHED')
-       LIMIT 1",
-      params = list(spec_hash, spec$label))
-  } else {
-    data.frame(job_id = character(0), state = character(0))
+  # Canonical whole-job reuse. Shared callers attach to the same execution and
+  # logical tracking root; they do not create a visible clone row.
+  spec_hash <- .dshpc_whole_job_hash(spec, provider)
+  reuse_allowed <- .dshpc_whole_job_reuse_allowed(spec)
+  # A specification alone cannot prove equality when it refers to mutable
+  # external inputs. Active and completed reuse both require the trusted domain
+  # to attest an immutable input/runtime identity.
+  canonical_reuse_allowed <- isTRUE(reuse_allowed) &&
+    !is.null(spec$reuse_fingerprint) && .dshpc_runtime_reuse_ready(spec)
+  shared_queue <- identical(.dshpc_queue_visibility(), "shared")
+
+  if (isTRUE(shared_queue) && identical(spec$visibility, "global") &&
+      !tracking_was_explicit && isTRUE(canonical_reuse_allowed)) {
+    tracking_lock <- file.path(.dshpc_home(), "locks",
+      paste0("tracking-spec.", spec_hash, ".lock"))
+    .lock_acquire(tracking_lock)
+    on.exit(.lock_release(tracking_lock), add = TRUE)
   }
-  if (nrow(existing_dup) > 0) {
-    source_job_id <- existing_dup$job_id[1]
-    clone_plan <- tryCatch(
-      .prepare_deduplicated_job_clone(db, source_job_id),
-      error = function(e) NULL)
-    if (!is.null(clone_plan)) {
-      existing_job <- .store_get_job(db, source_job_id)
-      .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
-        spec_hash = spec_hash, access_token_hash = capability_hash,
-        initial_state = "CLONING",
-        clone_owner = list(node = .scheduler_node_id(), pid = Sys.getpid()),
-        enforce_quotas = TRUE)
-      cloned <- tryCatch({
-        .clone_deduplicated_job(db, source_job_id, job_id, clone_plan)
-        TRUE
-      }, error = function(e) FALSE)
-      if (isTRUE(cloned)) {
-        .complete_deduplicated_job_clone(db, job_id, existing_job)
-        job <- .store_get_job(db, job_id)
-        return(list(job_id = job_id, .dshpc_capability = capability,
-                    state = job$state,
-                    name = job$name,
-                    deduplicated = TRUE,
-                    submitted_at = job$submitted_at))
+  if (!is.null(tracking_id)) {
+    tracking_id <- .tracking_validate_id(tracking_id)
+    root <- .tracking_get_root(db, tracking_id)
+    .tracking_assert_provider(root, provider)
+
+    if (identical(tracking_role, "primary")) {
+      tracking_lock <- file.path(.dshpc_home(), "locks",
+        paste0("tracking-root.", tracking_id, ".lock"))
+      .lock_acquire(tracking_lock)
+      on.exit(.lock_release(tracking_lock), add = TRUE)
+      active_primary <- DBI::dbGetQuery(db,
+        "SELECT j.job_id, j.spec_hash FROM tracking_jobs tj
+          JOIN jobs j ON j.job_id = tj.job_id
+          WHERE tj.tracking_id = ? AND tj.role = 'primary'
+            AND j.state IN ('PENDING','RUNNING','CLONING')
+          ORDER BY tj.attached_at DESC LIMIT 1", params = list(tracking_id))
+      if (nrow(active_primary) == 1L) {
+        if (!identical(as.character(active_primary$spec_hash[1]), spec_hash)) {
+          stop("Tracked primary specification does not match.", call. = FALSE)
+        }
+        if (!isTRUE(canonical_reuse_allowed)) {
+          stop("Tracked primary execution is already active.", call. = FALSE)
+        }
+        if (isTRUE(tracking_finalize)) {
+          .tracking_request_finalize(db, tracking_id,
+            active_primary$job_id[1])
+        }
+        existing_job <- .store_get_job(db, active_primary$job_id[1])
+        .db_log_event(db, active_primary$job_id[1], "shared_attached")
+        return(list(job_id = active_primary$job_id[1], tracking_id = tracking_id,
+          state = existing_job$state, name = existing_job$name,
+          deduplicated = TRUE, reused = TRUE,
+          submitted_at = existing_job$submitted_at))
       }
-      .discard_deduplicated_job_clone(db, job_id)
+      completed_primary <- DBI::dbGetQuery(db,
+        "SELECT j.job_id, j.spec_hash FROM tracking_jobs tj
+          JOIN jobs j ON j.job_id = tj.job_id
+          WHERE tj.tracking_id = ? AND tj.role = 'primary'
+            AND j.state IN ('FINISHED','PUBLISHED')
+            AND (EXISTS(SELECT 1 FROM outputs o WHERE o.job_id = j.job_id
+                  AND o.reuse_class IN ('server_reusable','client_safe'))
+              OR EXISTS(SELECT 1 FROM tracking_outputs out
+                  WHERE out.tracking_id = tj.tracking_id
+                    AND out.reuse_class IN ('server_reusable','client_safe')))
+          ORDER BY tj.attached_at DESC LIMIT 1", params = list(tracking_id))
+      if (nrow(completed_primary) == 1L) {
+        if (!identical(as.character(completed_primary$spec_hash[1]), spec_hash)) {
+          stop("Tracked primary specification does not match.", call. = FALSE)
+        }
+        if (!isTRUE(canonical_reuse_allowed)) {
+          stop("Completed primary reuse requires an immutable fingerprint.",
+            call. = FALSE)
+        }
+        if (isTRUE(tracking_finalize)) {
+          .tracking_request_finalize(db, tracking_id,
+            completed_primary$job_id[1])
+        }
+        existing_job <- .store_get_job(db, completed_primary$job_id[1])
+        .db_log_event(db, completed_primary$job_id[1], "shared_attached")
+        return(list(job_id = completed_primary$job_id[1],
+          tracking_id = tracking_id, state = existing_job$state,
+          name = existing_job$name, deduplicated = TRUE, reused = TRUE,
+          submitted_at = existing_job$submitted_at))
+      }
+    }
+    if (identical(root$lifecycle, "SEALED")) {
+      stop("Tracked workflow is already complete.", call. = FALSE)
     }
   }
 
-  .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
-                     spec_hash = spec_hash,
-                     access_token_hash = capability_hash,
-                     enforce_quotas = TRUE)
+  # Scoped deployments retain the pre-0.3 global deduplication contract:
+  # completed work is copied into an independent job with its own capability.
+  if (!isTRUE(shared_queue) && identical(spec$visibility, "global") &&
+      !tracking_was_explicit && isTRUE(canonical_reuse_allowed)) {
+    existing_dup <- DBI::dbGetQuery(db,
+      "SELECT job_id FROM jobs
+       WHERE spec_hash = ? AND visibility = 'global' AND label = ?
+         AND state IN ('FINISHED', 'PUBLISHED') LIMIT 1",
+      params = list(spec_hash, spec$label))
+    if (nrow(existing_dup) > 0L) {
+      source_job_id <- existing_dup$job_id[1]
+      clone_plan <- tryCatch(
+        .prepare_deduplicated_job_clone(db, source_job_id),
+        error = function(e) NULL)
+      if (!is.null(clone_plan)) {
+        existing_job <- .store_get_job(db, source_job_id)
+        .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
+          spec_hash = spec_hash, access_token_hash = capability_hash,
+          initial_state = "CLONING",
+          clone_owner = list(node = .scheduler_node_id(), pid = Sys.getpid()),
+          enforce_quotas = TRUE)
+        cloned <- tryCatch({
+          .clone_deduplicated_job(db, source_job_id, job_id, clone_plan)
+          TRUE
+        }, error = function(e) FALSE)
+        if (isTRUE(cloned)) {
+          .complete_deduplicated_job_clone(db, job_id, existing_job)
+          job <- .store_get_job(db, job_id)
+          return(list(job_id = job_id, .dshpc_capability = capability,
+            state = job$state, name = job$name, deduplicated = TRUE,
+            submitted_at = job$submitted_at))
+        }
+        .discard_deduplicated_job_clone(db, job_id)
+      }
+    }
+  }
 
+  if (isTRUE(shared_queue) && identical(spec$visibility, "global") &&
+      is.null(tracking_id) && isTRUE(canonical_reuse_allowed)) {
+    reused <- .tracking_find_execution(db, spec_hash, spec$label,
+      allow_completed = TRUE)
+    if (!is.null(reused)) {
+      existing_job <- .store_get_job(db, reused$job_id)
+      .db_log_event(db, reused$job_id, "shared_attached")
+      return(list(job_id = reused$job_id,
+        tracking_id = reused$tracking_id,
+        state = existing_job$state,
+        name = existing_job$name,
+        deduplicated = TRUE, reused = TRUE,
+        submitted_at = existing_job$submitted_at))
+    }
+  }
+
+  created_root <- FALSE
+  if (isTRUE(shared_queue) && identical(spec$visibility, "global") &&
+      is.null(tracking_id)) {
+    root_handle <- .tracking_create(db, provider,
+      reuse_key = if (isTRUE(canonical_reuse_allowed)) spec_hash else NULL,
+      implicit = TRUE)
+    tracking_id <- root_handle$tracking_id
+    created_root <- !isTRUE(root_handle$reused)
+
+    # Close the small race between root creation and execution attachment.
+    primary <- DBI::dbGetQuery(db,
+      "SELECT j.job_id, j.spec_hash FROM tracking_jobs tj
+        JOIN jobs j ON j.job_id = tj.job_id
+        WHERE tj.tracking_id = ? AND tj.role = 'primary'
+          AND j.state IN ('PENDING','RUNNING','FINISHED','PUBLISHED')
+        ORDER BY tj.attached_at LIMIT 1", params = list(tracking_id))
+    if (nrow(primary) == 1L) {
+      if (!identical(as.character(primary$spec_hash[1]), spec_hash)) {
+        stop("Tracked primary specification does not match.", call. = FALSE)
+      }
+      existing_job <- .store_get_job(db, primary$job_id[1])
+      .db_log_event(db, primary$job_id[1], "shared_attached")
+      return(list(job_id = primary$job_id[1], tracking_id = tracking_id,
+        state = existing_job$state,
+        name = existing_job$name, deduplicated = TRUE, reused = TRUE,
+        submitted_at = existing_job$submitted_at))
+    }
+  }
+
+  tryCatch(
+    .store_create_job(db, job_id, owner_id, spec, length(spec$steps),
+      spec_hash = spec_hash, access_token_hash = capability_hash,
+      enforce_quotas = TRUE, tracking_id = tracking_id,
+      tracking_role = if (isTRUE(tracking_was_explicit)) {
+        tracking_role
+      } else if (!is.null(tracking_id)) {
+        "primary"
+      } else {
+        NULL
+      }, tracking_finalize = tracking_finalize),
+    error = function(e) {
+      if (isTRUE(created_root)) {
+        tryCatch(DBI::dbExecute(db,
+          "DELETE FROM tracking_roots WHERE tracking_id = ? AND NOT EXISTS
+             (SELECT 1 FROM tracking_jobs WHERE tracking_id = ?)",
+          params = list(tracking_id, tracking_id)), error = function(e2) NULL)
+      }
+      stop(e)
+    })
   # If all steps are session-plane, execute inline (synchronous).
   # Artifact-plane steps are deferred to the worker daemon.
   all_session <- all(vapply(spec$steps, function(s)
@@ -514,10 +890,12 @@ hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
   }
 
   job <- .store_get_job(db, job_id)
-  list(job_id = job_id, .dshpc_capability = capability,
+  handle <- list(job_id = job_id, .dshpc_capability = capability,
        state = job$state %||% "PENDING",
        name = job$name,
        submitted_at = job$submitted_at %||% format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"))
+  if (!is.null(tracking_id)) handle$tracking_id <- tracking_id
+  handle
 }
 
 #' Disabled Legacy DataSHIELD Output Loading
@@ -891,7 +1269,7 @@ hpcOutputsDS <- function(job_id_or_symbol) {
     "SELECT name, kind, safe_for_client FROM outputs
      WHERE job_id = ?
        AND safe_for_client = 1
-       AND kind IN ('summary', 'aggregate_result', 'job_metadata')
+       AND kind = 'summary'
      ORDER BY id",
     params = list(access$job_id))
   # Keep the existing client schema without exposing exact artifact sizes or
@@ -910,7 +1288,11 @@ hpcCapabilitiesDS <- function() {
     dshpc_version = as.character(utils::packageVersion("dsHPC")),
     status = "available",
     submission = "domain_methods_only",
-    job_access = "capability",
+    job_access = "shared_tracking_or_private_capability",
+    shared_tracking = "root_v1",
+    shared_results = "safe_v1",
+    reusable_outputs = "opaque_ref_v1",
+    queue_visibility = .dshpc_queue_visibility(),
     execution_units = "resource_selection",
     admin_enabled = .admin_is_configured()
   )

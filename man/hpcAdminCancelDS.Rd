@@ -14,5 +14,5 @@ hpcAdminCancelDS(job_id, admin_key = NULL)
 \description{
 Disabled by default. Enable by setting dshpc.admin_key or DSHPC_ADMIN_KEY.
 Remote executors acknowledge cancellation asynchronously: the job remains
-\code{RUNNING} until worker reconciliation observes a terminal backend state.
+`RUNNING` until worker reconciliation observes a terminal backend state.
 }

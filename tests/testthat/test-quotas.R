@@ -95,3 +95,8 @@ test_that("concurrent admissions cannot exceed the quota", {
   expect_equal(sum(vapply(results, isTRUE, logical(1))), 1L)
   expect_true(any(grepl("quota exceeded", unlist(results), fixed = TRUE)))
 })
+
+# testthat sources this file in one shared process; do not let the final
+# concurrency test's intentionally tiny limits affect later contexts.
+options(dshpc.max_jobs_per_user = NULL,
+  dshpc.max_queued_jobs_global = NULL)

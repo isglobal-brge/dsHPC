@@ -607,6 +607,8 @@ test_that("container runners use container command and backend paths", {
   on.exit(dsHPC:::.db_close(db), add = TRUE)
   step <- list(type = "run", plane = "artifact", runner = "containerized",
     config = list())
+  spec <- list(steps = list(step))
+  dsHPC:::.store_create_job(db, "job_container", "user", spec, 1L)
   local_step <- file.path(home, "artifacts", "job_container", "step_001")
   dir.create(file.path(local_step, "output"), recursive = TRUE)
   prepared <- dsHPC:::.prepare_artifact_command(db, "job_container", 1L,

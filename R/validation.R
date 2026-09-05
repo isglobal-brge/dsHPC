@@ -11,6 +11,15 @@
     stop("visibility must be 'private' or 'global'.", call. = FALSE)
   }
   spec$visibility <- visibility
+  if (!is.null(spec$reuse_fingerprint)) {
+    fingerprint <- spec$reuse_fingerprint
+    if (!is.character(fingerprint) || length(fingerprint) != 1L ||
+        is.na(fingerprint) ||
+        !grepl("^[0-9a-f]{64}$", fingerprint)) {
+      stop("reuse_fingerprint must be a lowercase SHA-256 digest.",
+        call. = FALSE)
+    }
+  }
   steps <- spec$steps
   if (is.null(steps) || length(steps) == 0)
     stop("Job spec must contain at least one step.", call. = FALSE)

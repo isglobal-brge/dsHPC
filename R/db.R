@@ -1,6 +1,8 @@
 # Module: SQLite Database
 # Source of truth. WAL mode. Expanded schema with outputs, checkpoints.
 
+.DSHPC_DB_SCHEMA_VERSION <- 2L
+
 #' @keywords internal
 .db_connect <- function() {
   home <- .dshpc_home()
@@ -11,10 +13,10 @@
   DBI::dbExecute(db, "PRAGMA journal_mode=WAL")
   DBI::dbExecute(db, "PRAGMA busy_timeout=5000")
   DBI::dbExecute(db, "PRAGMA foreign_keys=ON")
-  # Always run the idempotent schema path. Opal/Rock deployments keep
-  # persistent volumes across package upgrades, so new scheduler tables must be
-  # created on load/connect even when the database already exists.
-  .db_create_schema(db)
+  tryCatch(.db_migrate_schema(db), error = function(e) {
+    tryCatch(DBI::dbDisconnect(db), error = function(e2) NULL)
+    stop(e)
+  })
   for (path in c(db_path, paste0(db_path, "-wal"), paste0(db_path, "-shm"))) {
     if (file.exists(path)) {
       tryCatch(Sys.chmod(path, "0660", use_umask = FALSE),
@@ -22,6 +24,35 @@
     }
   }
   db
+}
+
+#' Apply durable schema migrations once under SQLite's writer lock
+#' @keywords internal
+.db_migrate_schema <- function(db) {
+  current <- as.integer(DBI::dbGetQuery(db, "PRAGMA user_version")[[1L]])
+  if (is.na(current) || current > .DSHPC_DB_SCHEMA_VERSION) {
+    stop("dsHPC database schema is newer than this package.", call. = FALSE)
+  }
+  if (current == .DSHPC_DB_SCHEMA_VERSION) {
+    return(invisible(FALSE))
+  }
+  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  tryCatch({
+    current <- as.integer(DBI::dbGetQuery(db, "PRAGMA user_version")[[1L]])
+    if (is.na(current) || current > .DSHPC_DB_SCHEMA_VERSION) {
+      stop("dsHPC database schema is newer than this package.", call. = FALSE)
+    }
+    if (current < .DSHPC_DB_SCHEMA_VERSION) {
+      .db_create_schema(db)
+      DBI::dbExecute(db, paste0("PRAGMA user_version = ",
+        .DSHPC_DB_SCHEMA_VERSION))
+    }
+    DBI::dbExecute(db, "COMMIT")
+    invisible(TRUE)
+  }, error = function(e) {
+    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    stop(e)
+  })
 }
 
 #' @keywords internal
@@ -101,8 +132,84 @@
       path_or_ref   TEXT,
       size_bytes    INTEGER,
       safe_for_client INTEGER NOT NULL DEFAULT 0,
+      reuse_class   TEXT NOT NULL DEFAULT 'internal_only',
       created_at    TEXT NOT NULL,
       FOREIGN KEY (job_id) REFERENCES jobs(job_id)
+    )")
+
+  .db_ensure_columns(db, "outputs", list(
+    reuse_class = "TEXT NOT NULL DEFAULT 'internal_only'"))
+
+  # Analyst-visible tracking roots are deliberately separate from execution
+  # jobs. A collection may fan out into many private jobs while contributing
+  # exactly one row to the shared queue.
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS tracking_roots (
+      tracking_id  TEXT PRIMARY KEY,
+      provider     TEXT NOT NULL,
+      reuse_hash   TEXT,
+      visibility   TEXT NOT NULL DEFAULT 'scoped',
+      kind         TEXT NOT NULL DEFAULT 'analysis',
+      lifecycle    TEXT NOT NULL DEFAULT 'OPEN',
+      success      INTEGER,
+      implicit     INTEGER NOT NULL DEFAULT 0,
+      execution_mode TEXT,
+      finish_requested INTEGER NOT NULL DEFAULT 0,
+      finalizing_job_id TEXT,
+      created_at   TEXT NOT NULL,
+      finished_at  TEXT
+    )")
+
+  .db_ensure_columns(db, "tracking_roots", list(
+    execution_mode = "TEXT",
+    finish_requested = "INTEGER NOT NULL DEFAULT 0",
+    finalizing_job_id = "TEXT"))
+
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS tracking_jobs (
+      tracking_id  TEXT NOT NULL,
+      job_id       TEXT NOT NULL,
+      role         TEXT NOT NULL DEFAULT 'child',
+      attached_at  TEXT NOT NULL,
+      PRIMARY KEY (tracking_id, job_id),
+      FOREIGN KEY (tracking_id) REFERENCES tracking_roots(tracking_id),
+      FOREIGN KEY (job_id) REFERENCES jobs(job_id)
+    )")
+
+  # Backfill the durable mode if a development/rolling-upgrade database
+  # already contains an unambiguous attachment history.
+  DBI::dbExecute(db, "
+    UPDATE tracking_roots
+       SET execution_mode = CASE
+         WHEN EXISTS(SELECT 1 FROM tracking_jobs tj
+           WHERE tj.tracking_id = tracking_roots.tracking_id
+             AND tj.role = 'primary') THEN 'primary'
+         WHEN EXISTS(SELECT 1 FROM tracking_jobs tj
+           WHERE tj.tracking_id = tracking_roots.tracking_id
+             AND tj.role = 'child') THEN 'child'
+       END
+     WHERE execution_mode IS NULL
+       AND NOT (EXISTS(SELECT 1 FROM tracking_jobs tj
+          WHERE tj.tracking_id = tracking_roots.tracking_id
+            AND tj.role = 'primary')
+         AND EXISTS(SELECT 1 FROM tracking_jobs tj
+          WHERE tj.tracking_id = tracking_roots.tracking_id
+            AND tj.role = 'child'))")
+
+  DBI::dbExecute(db, "
+    CREATE TABLE IF NOT EXISTS tracking_outputs (
+      tracking_id       TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      source_job_id     TEXT,
+      source_output_name TEXT,
+      provider          TEXT NOT NULL,
+      provider_ref      TEXT,
+      kind              TEXT NOT NULL,
+      reuse_class       TEXT NOT NULL,
+      created_at        TEXT NOT NULL,
+      PRIMARY KEY (tracking_id, name),
+      FOREIGN KEY (tracking_id) REFERENCES tracking_roots(tracking_id),
+      FOREIGN KEY (source_job_id) REFERENCES jobs(job_id)
     )")
 
   DBI::dbExecute(db, "
@@ -164,6 +271,11 @@
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_jobs_spec_hash ON jobs(spec_hash)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_outputs_job ON outputs(job_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_tracking_roots_page ON tracking_roots(visibility, created_at, tracking_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_tracking_roots_reuse ON tracking_roots(provider, reuse_hash, visibility)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_tracking_jobs_job ON tracking_jobs(job_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_tracking_outputs_root ON tracking_outputs(tracking_id)")
+  DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_tracking_outputs_source ON tracking_outputs(source_job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_steps_external ON steps(external_backend, external_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_steps_step_hash ON steps(step_hash)")
@@ -222,15 +334,31 @@
 #' @keywords internal
 .db_register_output <- function(db, job_id, step_index, name, kind,
                                  path_or_ref, size_bytes = NA_real_,
-                                 safe_for_client = FALSE) {
+                                 safe_for_client = FALSE,
+                                 reuse_class = NULL) {
   path_or_ref <- .dshpc_validate_job_artifact_path(path_or_ref, job_id,
     check_tree = TRUE)
   size_bytes <- .normalize_output_size_bytes(size_bytes)
+  if (!is.logical(safe_for_client) || length(safe_for_client) != 1L ||
+      is.na(safe_for_client)) {
+    stop("safe_for_client must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (is.null(reuse_class)) {
+    reuse_class <- if (isTRUE(safe_for_client)) "client_safe" else
+      "internal_only"
+  }
+  reuse_class <- match.arg(as.character(reuse_class)[1],
+    c("internal_only", "server_reusable", "client_safe"))
+  if (identical(reuse_class, "client_safe")) safe_for_client <- TRUE
+  if (isTRUE(safe_for_client) && !identical(reuse_class, "client_safe")) {
+    stop("Client-safe outputs must use reuse_class='client_safe'.",
+      call. = FALSE)
+  }
   DBI::dbExecute(db,
     "INSERT INTO outputs (job_id, step_index, name, kind, path_or_ref,
-                          size_bytes, safe_for_client, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                          size_bytes, safe_for_client, reuse_class, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     params = list(job_id, step_index, name, kind, path_or_ref,
-      size_bytes, as.integer(safe_for_client),
+      size_bytes, as.integer(safe_for_client), reuse_class,
       format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")))
 }

@@ -1,3 +1,11 @@
+.seal_step_cache_spec <- function(spec, provider = "dsHPC") {
+  spec$.dshpc_provider <- provider
+  spec$.dshpc_runtime_revision <- dsHPC:::.dshpc_runtime_revision(spec)
+  spec$.dshpc_runtime_identity <- dsHPC:::.dshpc_runtime_identity(
+    spec, provider)
+  spec
+}
+
 test_that("step cache hashes input content and executable step definition", {
   input_a <- tempfile("input_a_")
   input_b <- tempfile("input_b_")
@@ -49,6 +57,13 @@ test_that("step cache hashes input content and executable step definition", {
     dsHPC:::.step_cache_hash(step, input_a),
     dsHPC:::.step_cache_hash(step_other_node, input_a)
   )
+
+  expect_false(identical(
+    dsHPC:::.step_cache_hash(step, input_a,
+      reuse_fingerprint = strrep("a", 64L)),
+    dsHPC:::.step_cache_hash(step, input_a,
+      reuse_fingerprint = strrep("b", 64L))
+  ))
 })
 
 test_that("step cache detects relative names, empty dirs and symlinked input content", {
@@ -170,17 +185,20 @@ test_that("completed artifact steps are reused across different jobs", {
 
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
-  source_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default", visibility = "global")
-  target_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default", visibility = "global")
+  source_spec <- .seal_step_cache_spec(list(steps = list(step), label = "dsHPC_test",
+                      resource_class = "default", visibility = "global",
+                      reuse_fingerprint = strrep("a", 64L)))
+  target_spec <- .seal_step_cache_spec(list(steps = list(step), label = "dsHPC_test",
+                      resource_class = "default", visibility = "global",
+                      reuse_fingerprint = strrep("a", 64L)))
 
   dsHPC:::.store_create_job(db, "job_source", "user_a", source_spec, 1L)
   source_step_dir <- dsHPC:::.ensure_step_dir("job_source", 1L)
   source_out <- file.path(source_step_dir, "output", "result.txt")
   writeLines("cached-output", source_out)
   source_ref <- file.path("artifacts", "job_source", "step_001", "output")
-  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL,
+    reuse_fingerprint = source_spec$reuse_fingerprint)
   dsHPC:::.db_register_output(db, "job_source", 1L, "result.txt",
     "artifact_file", source_out, size_bytes = file.info(source_out)$size,
     safe_for_client = FALSE)
@@ -276,10 +294,12 @@ test_that("step cache reuses completed steps from still-running parent jobs", {
 
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
-  source_spec <- list(steps = list(step, step), label = "dsHPC_test",
-                      resource_class = "default", visibility = "global")
-  target_spec <- list(steps = list(step), label = "dsHPC_test",
-                      resource_class = "default", visibility = "global")
+  source_spec <- .seal_step_cache_spec(list(steps = list(step, step), label = "dsHPC_test",
+                      resource_class = "default", visibility = "global",
+                      reuse_fingerprint = strrep("a", 64L)))
+  target_spec <- .seal_step_cache_spec(list(steps = list(step), label = "dsHPC_test",
+                      resource_class = "default", visibility = "global",
+                      reuse_fingerprint = strrep("a", 64L)))
 
   dsHPC:::.store_create_job(db, "job_source_running", "user_a",
     source_spec, 2L)
@@ -288,7 +308,8 @@ test_that("step cache reuses completed steps from still-running parent jobs", {
   writeLines("completed-prefix-output", source_out)
   source_ref <- file.path("artifacts", "job_source_running", "step_001",
                           "output")
-  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL,
+    reuse_fingerprint = source_spec$reuse_fingerprint)
   dsHPC:::.db_register_output(db, "job_source_running", 1L, "result.txt",
     "artifact_file", source_out, size_bytes = file.info(source_out)$size,
     safe_for_client = FALSE)
@@ -326,9 +347,11 @@ test_that("step cache coalesces equivalent in-flight steps", {
 
   step <- list(type = "run", plane = "artifact", runner = "dummy",
                config = list(alpha = 1))
-  spec <- list(steps = list(step), label = "dsHPC_test",
-               resource_class = "default", visibility = "global")
-  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  spec <- .seal_step_cache_spec(list(steps = list(step), label = "dsHPC_test",
+               resource_class = "default", visibility = "global",
+               reuse_fingerprint = strrep("a", 64L)))
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL,
+    reuse_fingerprint = spec$reuse_fingerprint)
 
   dsHPC:::.store_create_job(db, "job_inflight_source", "user_a", spec, 1L)
   dsHPC:::.store_update_job(db, "job_inflight_source", state = "RUNNING",
@@ -407,8 +430,9 @@ test_that("step cache reuses shared multi-step prefixes by content", {
                  config = list(stage = "A"))
   step_b <- list(type = "run", plane = "artifact", runner = "dummy_b",
                  config = list(stage = "B"))
-  source_spec <- list(steps = list(step_a, step_b), label = "dsHPC_test",
-                      resource_class = "default", visibility = "global")
+  source_spec <- .seal_step_cache_spec(list(steps = list(step_a, step_b), label = "dsHPC_test",
+                      resource_class = "default", visibility = "global",
+                      reuse_fingerprint = strrep("a", 64L)))
   target_spec <- source_spec
 
   dsHPC:::.store_create_job(db, "job_prefix_source", "user_a", source_spec, 2L)
@@ -421,8 +445,10 @@ test_that("step cache reuses shared multi-step prefixes by content", {
                             "output")
   source_ref_b <- file.path("artifacts", "job_prefix_source", "step_002",
                             "output")
-  hash_a <- dsHPC:::.step_cache_hash(step_a, NULL)
-  hash_b <- dsHPC:::.step_cache_hash(step_b, file.path(home, source_ref_a))
+  hash_a <- dsHPC:::.step_cache_hash(step_a, NULL,
+    reuse_fingerprint = source_spec$reuse_fingerprint)
+  hash_b <- dsHPC:::.step_cache_hash(step_b, file.path(home, source_ref_a),
+    reuse_fingerprint = source_spec$reuse_fingerprint)
 
   dsHPC:::.db_register_output(db, "job_prefix_source", 1L, "a.txt",
     "artifact_file", file.path(source_dir_a, "output", "a.txt"),
@@ -493,7 +519,12 @@ test_that("step cache never crosses a private job boundary", {
     visibility = "private")
   global_spec <- private_spec
   global_spec$visibility <- "global"
-  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  global_spec$reuse_fingerprint <- strrep("a", 64L)
+  global_spec <- .seal_step_cache_spec(global_spec)
+  unsealed_global_spec <- global_spec
+  unsealed_global_spec$reuse_fingerprint <- NULL
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL,
+    reuse_fingerprint = global_spec$reuse_fingerprint)
 
   dsHPC:::.store_create_job(db, "job_private_source", "user_a",
     private_spec, 1L)
@@ -509,6 +540,8 @@ test_that("step cache never crosses a private job boundary", {
     private_spec, 1L)
   dsHPC:::.store_create_job(db, "job_global_target", "user_b",
     global_spec, 1L)
+  dsHPC:::.store_create_job(db, "job_unsealed_global_target", "user_b",
+    unsealed_global_spec, 1L)
 
   # Cache policy must come entirely from durable job metadata, not an
   # in-memory worker/session association.
@@ -519,6 +552,8 @@ test_that("step cache never crosses a private job boundary", {
     db, "job_private_target", step))
   expect_true(dsHPC:::.step_cache_enabled_for_job(
     db, "job_global_target", step))
+  expect_false(dsHPC:::.step_cache_enabled_for_job(
+    db, "job_unsealed_global_target", step))
   expect_null(dsHPC:::.step_cache_find(db, step_hash,
     current_job_id = "job_global_target"))
 })
@@ -531,11 +566,14 @@ test_that("step cache never crosses a domain label boundary", {
   on.exit(dsHPC:::.db_close(db), add = TRUE)
 
   step <- list(type = "run", plane = "artifact", runner = "dummy")
-  source_spec <- list(steps = list(step), label = "domain_a",
-    visibility = "global")
-  target_spec <- list(steps = list(step), label = "domain_b",
-    visibility = "global")
-  step_hash <- dsHPC:::.step_cache_hash(step, NULL)
+  source_spec <- .seal_step_cache_spec(list(steps = list(step),
+    label = "domain_a", visibility = "global",
+    reuse_fingerprint = strrep("a", 64L)))
+  target_spec <- .seal_step_cache_spec(list(steps = list(step),
+    label = "domain_b", visibility = "global",
+    reuse_fingerprint = strrep("a", 64L)))
+  step_hash <- dsHPC:::.step_cache_hash(step, NULL,
+    reuse_fingerprint = target_spec$reuse_fingerprint)
   dsHPC:::.store_create_job(db, "job_label_source", "user_a",
     source_spec, 1L)
   source_dir <- dsHPC:::.ensure_step_dir("job_label_source", 1L)

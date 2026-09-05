@@ -22,6 +22,22 @@ test_that("job creation persists to database", {
   expect_true(all(steps$state == "pending"))
 })
 
+test_that("job and tracking attachment are created atomically", {
+  home <- setup_test_home()
+  withr::local_options(list(dshpc.home = home))
+  on.exit(cleanup_test_home(home))
+
+  db <- dsHPC:::.db_connect()
+  on.exit(dsHPC:::.db_close(db), add = TRUE)
+  missing_root <- "trk_00000000-0000-4000-8000-000000000000"
+
+  expect_error(dsHPC:::.store_create_job(db, "job_orphan", "user_a",
+    make_test_spec(), 1L, tracking_id = missing_root,
+    tracking_role = "primary"), "Tracked workflow is not available")
+  expect_equal(DBI::dbGetQuery(db,
+    "SELECT COUNT(*) AS n FROM jobs WHERE job_id = 'job_orphan'")$n, 0)
+})
+
 test_that("job update is atomic", {
   home <- setup_test_home()
   withr::local_options(list(dshpc.home = home))
