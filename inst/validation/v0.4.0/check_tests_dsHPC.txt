@@ -1,0 +1,41 @@
+
+R version 4.5.2 (2025-10-31) -- "[Not] Part in a Rumble"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(testthat)
+> library(dsHPC)
+>
+> test_check("dsHPC")
+DAG timing: parallel 2.100s; sequential 4.158s; runners 2s each
+[2026-09-23 15:34:32] Dispatch claim error for job_transient_spec_read: database is locked
+[2026-09-23 15:34:33] Advance recovery error for job_advance_runtime: Durable job runtime contract changed after submission.
+[2026-09-23 15:34:36] GC removed 1 jobs
+[2026-09-23 15:34:36] GC removed 1 jobs
+[2026-09-23 15:34:36] GC removed 1 jobs
+[2026-09-23 15:34:36] GC removed 1 jobs
+[ FAIL 0 | WARN 0 | SKIP 2 | PASS 1400 ]
+
+══ Skipped tests (2) ═══════════════════════════════════════════════════════════
+• set DSHPC_RUN_DOCKER_TESTS=1 to run Docker integration test (1):
+  'test-backend.R:629:3'
+• set DSHPC_RUN_DOCKER_TESTS=1 to run Docker integration tests (1):
+  'test-docker-hpc-unit.R:2:3'
+
+[ FAIL 0 | WARN 0 | SKIP 2 | PASS 1400 ]
+>
+> proc.time()
+   user  system elapsed
+ 11.931   3.692  26.565

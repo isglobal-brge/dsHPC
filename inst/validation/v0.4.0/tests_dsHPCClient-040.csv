@@ -1,0 +1,78 @@
+"file","context","test","nb","failed","skipped","error","warning","user","system","real","passed"
+"test-job-id.R","job-id","ds.hpc.job_id uses the explicit reference method",3,0,FALSE,FALSE,0,0.076,0.005,0.086,3
+"test-job-id.R","job-id","ds.hpc.job_id returns NA for a server-side resolution failure",2,0,FALSE,FALSE,0,0.006,0.001,0.00700000000000001,2
+"test-job-id.R","job-id","named bearers are routed to their matching servers",3,0,FALSE,FALSE,0,0.014,0.003,0.017,3
+"test-job-id.R","job-id","status and result retain successful sites when one site fails",6,0,FALSE,FALSE,0,0.006,0.002,0.00900000000000001,6
+"test-namespace-scope.R","namespace-scope","exported namespace is observation and admin only",1,0,FALSE,FALSE,0,0.001,0,0.002,1
+"test-print.R","print","dshpc_result creation and printing",3,0,FALSE,FALSE,0,0.003,0.001,0.004,3
+"test-print.R","print","dshpc_result $ accessor works",2,0,FALSE,FALSE,0,0.004,0.000999999999999994,0.004,2
+"test-print.R","print","dshpc_result as.data.frame returns empty for non-df",1,0,FALSE,FALSE,0,0.001,0,0.002,1
+"test-print.R","print","print renders a jobs data.frame as a table",4,0,FALSE,FALSE,0,0.005,0.001,0.00699999999999995,4
+"test-print.R","print","print renders an empty jobs data.frame as (no jobs)",1,0,FALSE,FALSE,0,0.002,0,0.002,1
+"test-print.R","print","print never renders a bearer-shaped job reference",4,0,FALSE,FALSE,0,0.004,0.001,0.004,4
+"test-print.R","print","print renders shared roots without treating ids as capabilities",3,0,FALSE,FALSE,0,0.003,0.001,0.004,3
+"test-print.R","print","print renders outputs as name/kind/size rows",4,0,FALSE,FALSE,0,0.003,0.001,0.004,4
+"test-print.R","print","print renders log lines",3,0,FALSE,FALSE,0,0.002,0,0.003,3
+"test-print.R","print","print renders per-server ds_errors",2,0,FALSE,FALSE,0,0.002,0,0.003,2
+"test-sensitive-transport.R","sensitive-transport","sensitive aggregate calls suppress DSI expression progress",58,0,FALSE,FALSE,0,0.066,0.014,0.087,58
+"test-sensitive-transport.R","sensitive-transport","remote aggregate failures do not reflect sensitive details",10,0,FALSE,FALSE,0,0.00700000000000001,0.001,0.01,10
+"test-studio.R","studio","Studio data negotiates root_v1 and requests only tracking pages",4,0,FALSE,FALSE,0,0.00799999999999995,0.001,0.00800000000000001,4
+"test-studio.R","studio","Studio keeps loaded roots when the next page fails",4,0,FALSE,FALSE,0,0.004,0.001,0.005,4
+"test-studio.R","studio","Studio rejects replayed and cyclic continuation cursors",4,0,FALSE,FALSE,0,0.003,0.001,0.004,4
+"test-studio.R","studio","manual Studio pages reject a replayed requested cursor",2,0,FALSE,FALSE,0,0.005,0.001,0.005,2
+"test-studio.R","studio","Studio capability negotiation requires exact field names",2,0,FALSE,FALSE,0,0.003,0,0.003,2
+"test-studio.R","studio","Studio never associates another node's response",3,0,FALSE,FALSE,0,0.006,0,0.006,3
+"test-studio.R","studio","Studio rejects a page larger than it requested",2,0,FALSE,FALSE,0,0.003,0.001,0.003,2
+"test-studio.R","studio","Studio degrades cleanly when shared tracking is unavailable",3,0,FALSE,FALSE,0,0.003,0.001,0.003,3
+"test-studio.R","studio","Studio detail strips execution and storage fields",4,0,FALSE,FALSE,0,0.005,0.001,0.006,4
+"test-studio.R","studio","Studio detail must match the requested tracking root",2,0,FALSE,FALSE,0,0.003,0.001,0.003,2
+"test-studio.R","studio","Studio rendering contains roots and no operational panels",8,0,FALSE,FALSE,0,0.095,0.012,0.127,8
+"test-studio.R","studio","Studio assigns a selected output only through the safe assign API",2,0,FALSE,FALSE,0,0.003,0,0.004,2
+"test-studio.R","studio","Studio output assignment reflects no remote error detail",2,0,FALSE,FALSE,0,0.002,0,0.004,2
+"test-studio.R","studio","Studio output table exposes only reusable metadata",1,0,FALSE,FALSE,0,0.001,0.001,0.002,1
+"test-studio.R","studio","Studio renders the generic terminal failure",2,0,FALSE,FALSE,0,0.002,0,0.003,2
+"test-studio.R","studio","Studio loads beyond 100 roots and directly finds root 125",19,0,FALSE,FALSE,0,0.355,0.00799999999999999,0.363,19
+"test-tracking.R","tracking","shared listing follows every page by default",5,0,FALSE,FALSE,0,0.006,0.001,0.00800000000000001,5
+"test-tracking.R","tracking","shared listing requires unique named connections",1,0,FALSE,FALSE,0,0.002,0,0.004,1
+"test-tracking.R","tracking","per-site tracking ids and cursors require unique names",2,0,FALSE,FALSE,0,0.0079999999999999,0.001,0.00900000000000012,2
+"test-tracking.R","tracking","single-page and explicit max preserve continuation",5,0,FALSE,FALSE,0,0.0069999999999999,0.001,0.00900000000000012,5
+"test-tracking.R","tracking","tracking responses are reduced to the fixed public schema",2,0,FALSE,FALSE,0,0.0069999999999999,0.001,0.0089999999999999,2
+"test-tracking.R","tracking","tracking normalization strips remote vector attributes",7,0,FALSE,FALSE,0,0.00800000000000001,0.002,0.0110000000000001,7
+"test-tracking.R","tracking","tracking kind is a closed neutral vocabulary",2,0,FALSE,FALSE,0,0.004,0.001,0.00499999999999989,2
+"test-tracking.R","tracking","malformed shared pages fail without reflecting private fields",3,0,FALSE,FALSE,0,0.0430000000000001,0.001,0.0449999999999999,3
+"test-tracking.R","tracking","a missing remote page is not mistaken for an empty history",3,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.004,3
+"test-tracking.R","tracking","a remote page cannot exceed the requested bound",3,0,FALSE,FALSE,0,0.004,0.001,0.00499999999999989,3
+"test-tracking.R","tracking","a terminal page cannot carry a continuation cursor",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00299999999999989,1
+"test-tracking.R","tracking","tracking schemas reject partial and duplicate field names",4,0,FALSE,FALSE,0,0.00900000000000012,0.001,0.0089999999999999,4
+"test-tracking.R","tracking","a ready result without summaries keeps an empty fixed schema",1,0,FALSE,FALSE,0,0.002,0.000999999999999987,0.002,1
+"test-tracking.R","tracking","shared summaries and availability describe the same output",2,0,FALSE,FALSE,0,0.00499999999999989,0.001,0.00500000000000012,2
+"test-tracking.R","tracking","not-ready states carry only their canonical error",2,0,FALSE,FALSE,0,0.00499999999999989,0,0.00500000000000012,2
+"test-tracking.R","tracking","listing rejects a replay of the caller supplied cursor",7,0,FALSE,FALSE,0,0.00800000000000001,0.001,0.01,7
+"test-tracking.R","tracking","status result and outputs dispatch tracking ids to new methods",6,0,FALSE,FALSE,0,0.0109999999999999,0.003,0.0129999999999999,6
+"test-tracking.R","tracking","tracking status must describe the requested root",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00500000000000012,3
+"test-tracking.R","tracking","shared result rejects non-generic server error details",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.004,3
+"test-tracking.R","tracking","private bearers retain capability endpoint compatibility",1,0,FALSE,FALSE,0,0.002,0,0.002,1
+"test-tracking.R","tracking","shared output assignment creates only server-side references",6,0,FALSE,FALSE,0,0.00800000000000001,0.002,0.00900000000000012,6
+"test-tracking.R","tracking","shared output assignment derives a valid default symbol",6,0,FALSE,FALSE,0,0.012,0.002,0.0130000000000001,6
+"test-tracking.R","tracking","shared output assignment does not reflect provider failures",2,0,FALSE,FALSE,0,0.00299999999999989,0,0.00300000000000011,2
+"test-tracking.R","tracking","shared output metadata uses only the fixed public projection",8,0,FALSE,FALSE,0,0.014,0.001,0.016,8
+"test-tracking.R","tracking","shared summaries reject values outside the closed schema",8,0,FALSE,FALSE,0,0.014,0.002,0.016,8
+"test-tracking.R","tracking","logs remain unavailable for public tracking ids",2,0,FALSE,FALSE,0,0.006,0.001,0.00800000000000001,2
+"test-tracking.R","tracking","summary counts logical roots, not server execution metadata",2,0,FALSE,FALSE,0,0.00500000000000012,0.001,0.00700000000000012,2
+"test-unit.R","unit","unit Resource routing is exact and backend-neutral",7,0,FALSE,FALSE,0,0.0150000000000001,0.002,0.0169999999999999,7
+"test-unit.R","unit","unit initialization uses only DSI generics and removes its Resource",7,0,FALSE,FALSE,0,0.02,0.004,0.024,7
+"test-unit.R","unit","partial unit initialization rolls back without reflecting names",3,0,FALSE,FALSE,0,0.0109999999999999,0.001,0.012,3
+"test-unit.R","unit","failed initialization reports incomplete rollback safely",10,0,FALSE,FALSE,0,0.0150000000000001,0.002,0.0170000000000001,10
+"test-unit.R","unit","unit initialization verifies availability before assignment",2,0,FALSE,FALSE,0,0.0069999999999999,0.001,0.00700000000000012,2
+"test-unit.R","unit","a scalar DSConnection uses only backend-neutral DSI calls",5,0,FALSE,FALSE,0,0.018,0.002,0.02,5
+"test-utils.R","utils","ds_encode produces B64 prefix for lists",1,0,FALSE,FALSE,0,0.00100000000000011,0.001,0.002,1
+"test-utils.R","utils","ds_encode is identity for scalars",2,0,FALSE,FALSE,0,0.002,0,0.00300000000000011,2
+"test-utils.R","utils","ds_encode handles vectors",1,0,FALSE,FALSE,0,0.00099999999999989,0.001,0.002,1
+"test-utils.R","utils","generate_symbol has correct format",2,0,FALSE,FALSE,0,0.002,0.001,0.00300000000000011,2
+"test-utils.R","utils","generate_symbol is unique",1,0,FALSE,FALSE,0,0.00299999999999989,0,0.00299999999999989,1
+"test-utils.R","utils",".ds_safe_aggregate warns per failed server and records ds_errors",3,0,FALSE,FALSE,0,0.00500000000000012,0.001,0.006,3
+"test-utils.R","utils","transport warnings are replaced with a generic warning",2,0,FALSE,FALSE,0,0.002,0,0.00299999999999989,2
+"test-wait.R","wait","ds.hpc.wait never prints a transferable bearer",2,0,FALSE,FALSE,0,0.002,0.001,0.004,2
+"test-wait.R","wait","ds.hpc.wait polls each server with its named bearer",2,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.004,2
+"test-wait.R","wait","ds.hpc.wait uses coarse shared tracking status",3,0,FALSE,FALSE,0,0.004,0.001,0.00499999999999989,3
+"test-wait.R","wait","ds.hpc.wait ignores status for a different tracking root",1,0,FALSE,FALSE,0,0.00299999999999989,0,0.00299999999999989,1

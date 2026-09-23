@@ -1,0 +1,5 @@
+run,runner_sleep_seconds,nodes,max_parallel_steps,elapsed_seconds
+clean_suite,2,2,2,2.104
+clean_suite,2,2,1,4.125
+R_CMD_check,2,2,2,2.100
+R_CMD_check,2,2,1,4.158

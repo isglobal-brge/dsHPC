@@ -1,0 +1,251 @@
+"file","context","test","nb","failed","skipped","error","warning","user","system","real","passed"
+"test-api-plugins.R","api-plugins","cancel_jobs_by_tag requires admin key and cancels matching active jobs",8,0,FALSE,FALSE,0,0.05,0.005,0.055,8
+"test-api-plugins.R","api-plugins","admin key can be supplied by environment",4,0,FALSE,FALSE,0,0.023,0.003,0.026,4
+"test-artifact-confinement.R","artifact-confinement","registered outputs and step references stay inside their job",7,0,FALSE,FALSE,0,0.057,0.008,0.0700000000000001,7
+"test-artifact-confinement.R","artifact-confinement","successful runners cannot register symlinked artifact trees",3,0,FALSE,FALSE,0,0.018,0.004,0.0219999999999999,3
+"test-artifact-confinement.R","artifact-confinement","cache, copy, and publishers reject symlink traversal",6,0,FALSE,FALSE,0,0.018,0.004,0.023,6
+"test-backend.R","backend","executor backend status reports embedded and missing slurm",9,0,FALSE,FALSE,0,0.014,0.003,0.047,9
+"test-backend.R","backend","external backends delegate local resources unless configured otherwise",5,0,FALSE,FALSE,0,0.0239999999999999,0.004,0.0399999999999999,5
+"test-backend.R","backend","external command backend can submit and reap an artifact step",6,0,FALSE,FALSE,0,0.038,0.01,0.423,6
+"test-backend.R","backend","external submit accepts only one bounded safe stdout id",5,0,FALSE,FALSE,0,0.018,0.004,0.188,5
+"test-backend.R","backend","delegated submission scripts use the job settings snapshot",3,0,FALSE,FALSE,0,0.011,0.00399999999999999,0.306,3
+"test-backend.R","backend","external status and recovery validate their backend id contracts",10,0,FALSE,FALSE,0,0.027,0.00800000000000001,0.191,10
+"test-backend.R","backend","kubernetes backend submits job manifest and reaps completion",23,0,FALSE,FALSE,0,0.0569999999999999,0.012,0.241,23
+"test-backend.R","backend","external status command failures do not create duplicate retries",5,0,FALSE,FALSE,0,0.012,0.003,0.155,5
+"test-backend.R","backend","backend step scripts write exit_code atomically",6,0,FALSE,FALSE,0,0.00900000000000001,0.003,0.0110000000000001,6
+"test-backend.R","backend","backend runner scripts clear the submitting environment",4,0,FALSE,FALSE,0,0.00800000000000001,0.00299999999999999,0.0310000000000001,4
+"test-backend.R","backend","backend path mappings support alternate host/container views",4,0,FALSE,FALSE,0,0.00900000000000001,0.001,0.0089999999999999,4
+"test-backend.R","backend","external backend can execute through a mapped backend path",4,0,FALSE,FALSE,0,0.033,0.01,0.322,4
+"test-backend.R","backend","container runners use container command and backend paths",5,0,FALSE,FALSE,0,0.0259999999999999,0.006,0.0420000000000003,5
+"test-backend.R","backend","external docker container runner can execute without backend deps",1,0,TRUE,FALSE,0,0.001,0.001,0.00199999999999978,0
+"test-backend.R","backend","slurm backend submits with runner resources and reaps completion",9,0,FALSE,FALSE,0,0.038,0.011,0.496,9
+"test-backend.R","backend","slurm status falls back to local exit_code file when sacct is missing",9,0,FALSE,FALSE,0,0.022,0.006,0.332,9
+"test-backend.R","backend","optional backend GPUs are requested independently of Rock GPUs",2,0,FALSE,FALSE,0,0.021,0.006,0.174,2
+"test-backend.R","backend","slurm capabilities auto-detect backend GPUs for optional requests",3,0,FALSE,FALSE,0,0.0259999999999999,0.00800000000000001,0.379999999999999,3
+"test-backend.R","backend","external capabilities command drives optional GPU requests",3,0,FALSE,FALSE,0,0.024,0.00799999999999998,0.388,3
+"test-backend.R","backend","slurm parses only parsable stdout and derives a default time limit",3,0,FALSE,FALSE,0,0.0379999999999999,0.00900000000000001,0.21,3
+"test-backend.R","backend","artifact retries discard stale backend state and output",8,0,FALSE,FALSE,0,0.0310000000000001,0.01,0.306,8
+"test-backend.R","backend","retry cleanup failure leaves durable attempt state retryable",5,0,FALSE,FALSE,0,0.0190000000000001,0.004,0.0220000000000002,5
+"test-backend.R","backend","running timeout waits for accepted external cancellation",12,0,FALSE,FALSE,0,0.048,0.011,0.492999999999999,12
+"test-backend.R","backend","admin cancellation does not confirm a rejected backend request",7,0,FALSE,FALSE,0,0.0349999999999999,0.006,0.44,7
+"test-builders.R","builders","step constructors return dshpc_step S3 objects",5,0,FALSE,FALSE,0,0.00499999999999989,0.001,0.00600000000000023,5
+"test-builders.R","builders","artifact step has runner field",3,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00499999999999989,3
+"test-builders.R","builders","inputs field is preserved",1,0,FALSE,FALSE,0,0.00100000000000011,0,0.00199999999999978,1
+"test-builders.R","builders","publish_asset has correct fields",3,0,FALSE,FALSE,0,0.006,0.001,0.00699999999999967,3
+"test-builders.R","builders","safe_summary has no extra args",2,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,2
+"test-builders.R","builders","step print works",3,0,FALSE,FALSE,0,0.00299999999999989,0.001,0.00399999999999956,3
+"test-builders.R","builders","all session step types exist",9,0,FALSE,FALSE,0,0.00500000000000012,0,0.00499999999999989,9
+"test-builders.R","builders","ds_job creates valid job object",4,0,FALSE,FALSE,0,0.006,0.001,0.00699999999999967,4
+"test-builders.R","builders","ds_job requires a label",1,0,FALSE,FALSE,0,0.00299999999999989,0,0.00300000000000011,1
+"test-builders.R","builders","ds_job rejects empty steps",1,0,FALSE,FALSE,0,0.00299999999999989,0,0.00300000000000011,1
+"test-builders.R","builders","ds_job rejects non-step objects",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,1
+"test-builders.R","builders","ds_job strips S3 classes from steps for serialization",1,0,FALSE,FALSE,0,0.002,0.001,0.00199999999999978,1
+"test-builders.R","builders","ds_job with publish config",1,0,FALSE,FALSE,0,0.002,0,0.00199999999999978,1
+"test-builders.R","builders","job print works",2,0,FALSE,FALSE,0,0.004,0.001,0.00399999999999956,2
+"test-builders.R","builders","ds_job accepts DAG pipelines",5,0,FALSE,FALSE,0,0.00500000000000012,0.002,0.00599999999999934,5
+"test-canonical.R","canonical","canonical spec hashing sorts top-level named lists",1,0,FALSE,FALSE,0,0.00099999999999989,0.001,0.00200000000000067,1
+"test-canonical.R","canonical","canonical spec hashing preserves positional step order",2,0,FALSE,FALSE,0,0.004,0,0.00400000000000045,2
+"test-canonical.R","canonical","canonical spec hashing sorts deeply nested named lists",1,0,FALSE,FALSE,0,0.002,0,0.00300000000000011,1
+"test-canonical.R","canonical","canonical spec hashing sorts named subset before unnamed entries",2,0,FALSE,FALSE,0,0.00300000000000011,0.001,0.00400000000000045,2
+"test-concurrent-backend.R","concurrent-backend","external DAG units accept concurrent independent ids and reap separately",14,0,FALSE,FALSE,0,0.118,0.038,0.51,14
+"test-concurrent-backend.R","concurrent-backend","external DAG cancellation waits for the remaining branch acknowledgement",9,0,FALSE,FALSE,0,0.103,0.024,0.654999999999999,9
+"test-concurrent-backend.R","concurrent-backend","embedded DAG containers use container commands and overlap",13,0,FALSE,FALSE,0,0.099,0.065,0.321,13
+"test-concurrent-cache.R","concurrent-cache","a DAG cache waiter retains sibling leases and unlocks downstream input",20,0,FALSE,FALSE,0,0.153,0.022,0.176,20
+"test-concurrent-cache.R","concurrent-cache","private DAG steps execute without consuming shared cache entries",6,0,FALSE,FALSE,0,0.038,0.00900000000000001,0.048,6
+"test-concurrent-cache.R","concurrent-cache","sequential DAG mode waits for cache before dispatching later roots",4,0,FALSE,FALSE,0,0.063,0.011,0.0760000000000005,4
+"test-concurrent-cache.R","concurrent-cache","DAG failure draining releases allocations with an unreadable spec",11,0,FALSE,FALSE,0,0.0680000000000001,0.00800000000000001,0.0780000000000003,11
+"test-concurrent-cache.R","concurrent-cache","unknown migrated DAG reservations block admission until attempts settle",8,0,FALSE,FALSE,0,0.0549999999999999,0.00699999999999995,0.0619999999999994,8
+"test-concurrent-dag.R","concurrent-dag","independent DAG runners overlap and parallelism one is sequential",16,0,FALSE,FALSE,0,0.127,0.063,6.258,16
+"test-concurrent-dag.R","concurrent-dag","a diamond DAG stages both successful upstream outputs",14,0,FALSE,FALSE,0,0.117,0.0820000000000001,0.266999999999999,14
+"test-concurrent-dag.R","concurrent-dag","DAG failures drain in-flight branches and retain the first error",22,0,FALSE,FALSE,0,0.148,0.095,0.315999999999999,22
+"test-concurrent-dag.R","concurrent-dag","a ready descendant starts while an unrelated branch is running",9,0,FALSE,FALSE,0,0.106,0.082,0.258999999999999,9
+"test-concurrent-dag.R","concurrent-dag","SIGKILL recovery retries two lost attempts without rerunning a sibling",19,0,FALSE,FALSE,0,0.162,0.122,0.421999999999999,19
+"test-concurrent-dag.R","concurrent-dag","fresh worker state adopts two live durable DAG attempts",7,0,FALSE,FALSE,0,0.0819999999999999,0.0660000000000001,0.197999999999999,7
+"test-concurrent-dag.R","concurrent-dag","SIGKILL of the worker preserves two attempts for a new leader",8,0,FALSE,FALSE,0,0.056,0.0699999999999998,1.076,8
+"test-concurrent-dag.R","concurrent-dag","a worker killed before PID commit cannot launch unrecorded runner code",9,0,FALSE,FALSE,0,0.0680000000000001,0.0549999999999999,0.600999999999999,9
+"test-concurrent-dag.R","concurrent-dag","a new leader retires an expired live daemon before retrying its launch",13,0,FALSE,FALSE,0,0.073,0.056,0.581,13
+"test-concurrent-dag.R","concurrent-dag","launch retirement does not kill session owners or reused worker PIDs",7,0,FALSE,FALSE,0,0.0310000000000001,0.0159999999999998,0.0809999999999995,7
+"test-concurrent-dag.R","concurrent-dag","shared tracking reveals no DAG fan-out while two steps run",19,0,FALSE,FALSE,0,0.145,0.0850000000000002,0.277000000000001,19
+"test-dag-fencing.R","dag-fencing","a stale dispatch error cannot fail a replacement DAG attempt",7,0,FALSE,FALSE,0,0.0270000000000001,0.006,0.0339999999999989,7
+"test-dag-fencing.R","dag-fencing","external cancellation reconciliation rejects a stale DAG attempt",4,0,FALSE,FALSE,0,0.0369999999999999,0.00500000000000012,0.0420000000000016,4
+"test-dag-fencing.R","dag-fencing","DAG session cancellation waits for the executing operation to settle",7,0,FALSE,FALSE,0,0.036,0.00500000000000012,0.0500000000000007,7
+"test-dag-fencing.R","dag-fencing","a stale session completion cannot finish a replacement DAG attempt",4,0,FALSE,FALSE,0,0.0229999999999997,0.00500000000000012,0.0309999999999988,4
+"test-dag-fencing.R","dag-fencing","DAG cancellation reconciles a remote id acknowledged after the request",11,0,FALSE,FALSE,0,0.0489999999999999,0.00800000000000001,0.0670000000000002,11
+"test-dag-scheduler.R","dag-scheduler","DAG resources are admitted per running step and released separately",12,0,FALSE,FALSE,0,0.044,0.006,0.0499999999999972,12
+"test-dag-scheduler.R","dag-scheduler","DAG runner limits count simultaneous steps within one job",8,0,FALSE,FALSE,0,0.0370000000000004,0.006,0.0429999999999993,8
+"test-dag-scheduler.R","dag-scheduler","concurrent DAG GPU allocations remain disjoint and durable",10,0,FALSE,FALSE,0,0.0429999999999997,0.0069999999999999,0.0519999999999996,10
+"test-dag.R","dag","DAG specs compile to ordered steps",5,0,FALSE,FALSE,0,0.00699999999999967,0.00099999999999989,0.00799999999999912,5
+"test-dag.R","dag","DAG validation rejects cycles and unknown nodes",2,0,FALSE,FALSE,0,0.00499999999999989,0,0.004999999999999,2
+"test-dag.R","dag","DAG and legacy steps are mutually exclusive",1,0,FALSE,FALSE,0,0.00499999999999989,0.00099999999999989,0.004999999999999,1
+"test-db.R","db","SQLite database is created with correct schema",22,0,FALSE,FALSE,0,0.0299999999999998,0.00800000000000001,0.0380000000000003,22
+"test-db.R","db","a newer database schema fails closed",1,0,FALSE,FALSE,0,0.00499999999999989,0.002,0.0069999999999979,1
+"test-db.R","db","v0.3.0 migration preserves attempts, capabilities and shared roots",17,0,FALSE,FALSE,0,0.0379999999999998,0.016,0.0560000000000009,17
+"test-db.R","db","WAL mode is enabled",1,0,FALSE,FALSE,0,0.00900000000000034,0.002,0.0110000000000028,1
+"test-db.R","db","tracking migration does not promote legacy outputs",3,0,FALSE,FALSE,0,0.012,0.00299999999999989,0.0150000000000006,3
+"test-db.R","db","event logging works",2,0,FALSE,FALSE,0,0.0139999999999998,0.00300000000000011,0.0169999999999995,2
+"test-disclosure-controls.R","disclosure-controls","log tails reject invalid limits and never exceed 200 lines",6,0,FALSE,FALSE,0,0.00499999999999989,0,0.004999999999999,6
+"test-disclosure-controls.R","disclosure-controls","session summaries suppress counts below nfilter.subset",8,0,FALSE,FALSE,0,0.0169999999999999,0.004,0.0219999999999985,8
+"test-disclosure-controls.R","disclosure-controls","malformed nfilter settings cannot lower the privacy floor",12,0,FALSE,FALSE,0,0.00900000000000034,0.00100000000000011,0.00999999999999801,12
+"test-disclosure-controls.R","disclosure-controls","deserialized output cardinality fails closed for lists and maps",6,0,FALSE,FALSE,0,0.00699999999999967,0.002,0.00700000000000145,6
+"test-disclosure-controls.R","disclosure-controls","safe job errors never return runner-provided values",2,0,FALSE,FALSE,0,0.00300000000000011,0.00099999999999989,0.00300000000000011,2
+"test-disclosure-controls.R","disclosure-controls","client-safe results enforce cardinality and the closed summary schema",13,0,FALSE,FALSE,0,0.0150000000000001,0.004,0.0189999999999984,13
+"test-docker-hpc-unit.R","docker-hpc-unit","external backend can delegate to a dockerized HPC unit",1,0,TRUE,FALSE,0,0.00100000000000033,0,0.00100000000000122,0
+"test-domain-label-policy.R","domain-label-policy","hpcSubmitInternal requires a domain label",1,0,FALSE,FALSE,0,0.004,0.00099999999999989,0.004999999999999,1
+"test-domain-label-policy.R","domain-label-policy","hpcLoadOutputInternal always requires a domain label",2,0,FALSE,FALSE,0,0.00500000000000034,0.00100000000000011,0.004999999999999,2
+"test-domain-label-policy.R","domain-label-policy","get_job_output_ref always requires a domain label",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,1
+"test-domain-label-policy.R","domain-label-policy","hpcStatusInternal requires a trusted caller and exact label",3,0,FALSE,FALSE,0,0.0369999999999999,0.006,0.0479999999999983,3
+"test-domain-label-policy.R","domain-label-policy","server-only APIs reject direct non-package callers",14,0,FALSE,FALSE,0,0.0309999999999997,0.00099999999999989,0.032,14
+"test-domain-label-policy.R","domain-label-policy","server-only entry guards do not force nested side effects",3,0,FALSE,FALSE,0,0.016,0.00300000000000011,0.0189999999999984,3
+"test-domain-label-policy.R","domain-label-policy","get_job_output_ref matches domain labels exactly",4,0,FALSE,FALSE,0,0.0390000000000001,0.0069999999999999,0.0510000000000019,4
+"test-domain-label-policy.R","domain-label-policy","publisher registration denies replacement and enforces its label",5,0,FALSE,FALSE,0,0.0219999999999998,0.004,0.0259999999999998,5
+"test-dslite-privacy.R","dslite-privacy","DESCRIPTION exposes only closed analyst methods",8,0,FALSE,FALSE,0,0.426,0.0349999999999999,0.550000000000001,8
+"test-dslite-privacy.R","dslite-privacy","DSLite rejects direct generic job submission and output loading",4,0,FALSE,FALSE,0,0.217,0.026,0.242999999999999,4
+"test-dslite-privacy.R","dslite-privacy","public methods reject evaluated argument expressions",5,0,FALSE,FALSE,0,0.0389999999999997,0.006,0.0500000000000007,5
+"test-dslite-privacy.R","dslite-privacy","retired DS methods fail under a persisted legacy allowlist",5,0,FALSE,FALSE,0,0.214,0.0229999999999999,0.235999999999997,5
+"test-dslite-privacy.R","dslite-privacy","result reconstruction failures do not disclose server paths",5,0,FALSE,FALSE,0,0.241000000000001,0.0270000000000001,0.274000000000001,5
+"test-dslite-privacy.R","dslite-privacy","private handle symbols never resolve across DSLite sessions",4,0,FALSE,FALSE,0,0.261,0.032,0.297000000000001,4
+"test-job-capabilities.R","job-capabilities","per-job capabilities protect every analyst read surface",30,0,FALSE,FALSE,0,0.119,0.0209999999999999,0.146999999999998,30
+"test-job-capabilities.R","job-capabilities","legacy jobs without capability hashes fail closed",1,0,FALSE,FALSE,0,0.0149999999999997,0.00300000000000011,0.0189999999999984,1
+"test-job-capabilities.R","job-capabilities","output loading rejects unknown and small cardinalities",4,0,FALSE,FALSE,0,0.0489999999999995,0.00800000000000001,0.0630000000000024,4
+"test-job-capabilities.R","job-capabilities","output loading uses record counts and rejects non-tabular paths",3,0,FALSE,FALSE,0,0.0440000000000005,0.00800000000000001,0.0579999999999998,3
+"test-job-capabilities.R","job-capabilities","hpcResultDS requires both the safe flag and an allowed kind",5,0,FALSE,FALSE,0,0.0399999999999991,0.00900000000000012,0.0539999999999985,5
+"test-job-capabilities.R","job-capabilities","hpcResultDS rejects marked-safe values below the disclosure floor",3,0,FALSE,FALSE,0,0.0380000000000003,0.0069999999999999,0.0489999999999995,3
+"test-job-capabilities.R","job-capabilities","private jobs stay separate and shared jobs reuse one execution",8,0,FALSE,FALSE,0,0.102,0.016,0.137,8
+"test-job-capabilities.R","job-capabilities","whole-job dedup requires the exact persisted domain label",2,0,FALSE,FALSE,0,0.0590000000000002,0.00900000000000012,0.0779999999999994,2
+"test-job-capabilities.R","job-capabilities","large artifact sizes remain exact internally and hidden publicly",8,0,FALSE,FALSE,0,0.0510000000000002,0.01,0.065999999999999,8
+"test-naming.R","naming","job name templates use the next visible number",2,0,FALSE,FALSE,0,0.00300000000000011,0.00099999999999989,0.00400000000000134,2
+"test-naming.R","naming","job name template validation is strict",2,0,FALSE,FALSE,0,0.00500000000000078,0,0.00600000000000023,2
+"test-naming.R","naming","job name templates are resolved when a job is stored",2,0,FALSE,FALSE,0,0.0279999999999996,0.00299999999999989,0.0309999999999988,2
+"test-naming.R","naming","hpcSubmitInternal resolves job name templates",2,0,FALSE,FALSE,0,0.0569999999999995,0.0069999999999999,0.0739999999999981,2
+"test-network-isolation.R","network-isolation","Docker and Podman builders retain their isolated network default",6,0,FALSE,FALSE,0,0.00499999999999989,0.00099999999999989,0.00600000000000023,6
+"test-network-isolation.R","network-isolation","Apptainer and Singularity builders verify isolated execution",24,0,FALSE,FALSE,0,0.0380000000000003,0.002,0.0399999999999991,24
+"test-network-isolation.R","network-isolation","Apptainer runtime refusal fails closed and preserves its exit status",10,0,FALSE,FALSE,0,0.0179999999999998,0.022,0.354999999999997,10
+"test-network-isolation.R","network-isolation","a runtime silently ignoring isolation never executes the runner",4,0,FALSE,FALSE,0,0.0100000000000007,0.0149999999999999,0.301000000000002,4
+"test-network-isolation.R","network-isolation","network guard requires a distinct loopback-only namespace",6,0,FALSE,FALSE,0,0.0120000000000005,0.0250000000000001,0.193000000000001,6
+"test-persistence-restart.R","persistence-restart","unreadable pending specs fail with a safe durable event",5,0,FALSE,FALSE,0,0.0180000000000007,0.0069999999999999,0.0249999999999986,5
+"test-persistence-restart.R","persistence-restart","invalid running unit snapshots fail and release leases",5,0,FALSE,FALSE,0,0.0260000000000007,0.006,0.0380000000000003,5
+"test-persistence-restart.R","persistence-restart","transient spec reads leave pending jobs retryable",2,0,FALSE,FALSE,0,0.0140000000000002,0.00299999999999989,0.017000000000003,2
+"test-persistence-restart.R","persistence-restart","private multi-step DAG survives worker and database restarts",12,0,FALSE,FALSE,0,0.0999999999999996,0.046,0.321000000000002,12
+"test-persistence-restart.R","persistence-restart","a CLONING job is recovered from confined outputs after restart",9,0,FALSE,FALSE,0,0.0700000000000003,0.014,0.0980000000000025,9
+"test-persistence-restart.R","persistence-restart","clone recovery requires the current conservative reuse contract",4,0,FALSE,FALSE,0,0.0870000000000006,0.0139999999999998,0.102,4
+"test-persistence-restart.R","persistence-restart","clone recovery skips live owners and fails closed without a source",5,0,FALSE,FALSE,0,0.032,0.006,0.0570000000000022,5
+"test-quotas.R","quotas","per-user quota blocks excess submissions",1,0,FALSE,FALSE,0,0.0140000000000002,0.002,0.0159999999999982,1
+"test-quotas.R","quotas","global quota blocks excess submissions",1,0,FALSE,FALSE,0,0.0170000000000003,0.002,0.0190000000000019,1
+"test-quotas.R","quotas","completed jobs don't count against quota",1,0,FALSE,FALSE,0,0.0170000000000003,0.00299999999999989,0.0199999999999996,1
+"test-quotas.R","quotas","concurrent admissions cannot exceed the quota",4,0,FALSE,FALSE,0,0.0189999999999992,0.02,0.0649999999999977,4
+"test-runner-artifact.R","runner-artifact","blocked env vars are rejected in validation spec",3,0,FALSE,FALSE,0,0.00400000000000045,0.002,0.00600000000000023,3
+"test-runner-artifact.R","runner-artifact","env var names are prefixed with DSHPC_CFG_",2,0,FALSE,FALSE,0,0.00600000000000023,0.00300000000000011,0.00700000000000145,2
+"test-runner-artifact.R","runner-artifact","runner argument templating is literal and vector-safe",5,0,FALSE,FALSE,0,0.00800000000000001,0.00299999999999989,0.0109999999999992,5
+"test-runner-artifact.R","runner-artifact","blocked env var in config list is caught",1,0,FALSE,FALSE,0,0.00300000000000011,0.00100000000000011,0.00400000000000134,1
+"test-runner-artifact.R","runner-artifact","missing exit_code is not treated as success for durable wrappers",2,0,FALSE,FALSE,0,0.00200000000000067,0.002,0.00400000000000134,2
+"test-runner-artifact.R","runner-artifact","legacy output-only jobs remain recoverable",1,0,FALSE,FALSE,0,0.00199999999999978,0.00099999999999989,0.00199999999999889,1
+"test-runner-artifact.R","runner-artifact","interrupted running jobs are requeued without losing state",5,0,FALSE,FALSE,0,0.0170000000000003,0.004,0.0210000000000008,5
+"test-runner-artifact.R","runner-artifact","worker recovers jobs committed after step completion before advance",2,0,FALSE,FALSE,0,0.0219999999999994,0.00300000000000011,0.0249999999999986,2
+"test-runner-artifact.R","runner-artifact","worker GC never expires domain-package workflows",2,0,FALSE,FALSE,0,0.00500000000000078,0.00099999999999989,0.00600000000000023,2
+"test-runner-artifact.R","runner-artifact","embedded runners inherit only the explicit confined environment",14,0,FALSE,FALSE,0,0.0300000000000002,0.00800000000000001,0.070999999999998,14
+"test-runner-artifact.R","runner-artifact","execution revalidates persisted runner parameters",2,0,FALSE,FALSE,0,0.016,0.004,0.0199999999999996,2
+"test-runner-artifact.R","runner-artifact","execution refuses a runner definition changed after submission",4,0,FALSE,FALSE,0,0.032,0.006,0.0380000000000003,4
+"test-runner-artifact.R","runner-artifact","runtime drift during advance terminalizes the job and its leases",3,0,FALSE,FALSE,0,0.0219999999999994,0.004,0.0249999999999986,3
+"test-runner-registry.R","runner-registry","external runner registry installs allowlisted YAML runners",4,0,FALSE,FALSE,0,0.00599999999999934,0.00299999999999989,0.00900000000000034,4
+"test-runner-registry.R","runner-registry","runner registry rejects unsafe runner names",1,0,FALSE,FALSE,0,0.00699999999999967,0,0.00799999999999912,1
+"test-runner-registry.R","runner-registry","managed runners deny implicit and cross-owner replacement",6,0,FALSE,FALSE,0,0.0129999999999999,0.002,0.0159999999999982,6
+"test-runner-registry.R","runner-registry","writable runner registry ignores symbolic-link entries",3,0,FALSE,FALSE,0,0.00499999999999989,0.00100000000000011,0.0069999999999979,3
+"test-runner-registry.R","runner-registry","built-in runners cannot be shadowed by the writable registry",2,0,FALSE,FALSE,0,0.00399999999999956,0.00099999999999989,0.004999999999999,2
+"test-runner-registry.R","runner-registry","managed runner ownership is bound to the job label",2,0,FALSE,FALSE,0,0.00599999999999934,0.00099999999999989,0.00700000000000145,2
+"test-scheduler.R","scheduler","scheduler derives conservative node budgets without configuration",4,0,FALSE,FALSE,0,0.00599999999999934,0.00100000000000011,0.0069999999999979,4
+"test-scheduler.R","scheduler","runner resources are read from YAML and options can override them",6,0,FALSE,FALSE,0,0.0110000000000001,0.002,0.0129999999999981,6
+"test-scheduler.R","scheduler","scheduler gates pending jobs by memory budget",3,0,FALSE,FALSE,0,0.0190000000000001,0.00300000000000011,0.0240000000000009,3
+"test-scheduler.R","scheduler","scheduler records OOM cooldowns for runners",3,0,FALSE,FALSE,0,0.0190000000000001,0.00300000000000011,0.0229999999999997,3
+"test-scheduler.R","scheduler","recent OOM failures throttle runner concurrency after cooldown",6,0,FALSE,FALSE,0,0.0259999999999998,0.00499999999999989,0.0359999999999978,6
+"test-scheduler.R","scheduler","optional GPU runners receive devices only when available",2,0,FALSE,FALSE,0,0.0179999999999998,0.00300000000000011,0.0210000000000008,2
+"test-scheduler.R","scheduler","worker leader election creates one active scheduler per cell",5,0,FALSE,FALSE,0,0.0229999999999997,0.004,0.0329999999999977,5
+"test-scheduler.R","scheduler","dead worker leaders can be marked stale for shared-cell takeover",3,0,FALSE,FALSE,0,0.0209999999999999,0.004,0.0330000000000013,3
+"test-scheduler.R","scheduler","a remote leader is judged by heartbeat instead of its PID",2,0,FALSE,FALSE,0,0.0129999999999999,0.00299999999999989,0.0160000000000018,2
+"test-shared-tracking.R","shared-tracking","tracking mutation and resolution APIs require a package caller",3,0,FALSE,FALSE,0,0.016,0.00099999999999989,0.0169999999999995,3
+"test-shared-tracking.R","shared-tracking","tracking roots use only neutral closed-vocabulary kinds",5,0,FALSE,FALSE,0,0.0250000000000004,0.004,0.0309999999999988,5
+"test-shared-tracking.R","shared-tracking","shared public methods reject evaluated argument expressions",8,0,FALSE,FALSE,0,0.0129999999999999,0.00100000000000011,0.0139999999999993,8
+"test-shared-tracking.R","shared-tracking","global submissions create one root and reuse active or completed work",15,0,FALSE,FALSE,0,0.0810000000000004,0.0109999999999999,0.104999999999997,15
+"test-shared-tracking.R","shared-tracking","jobs are reused only with a trusted immutable identity",4,0,FALSE,FALSE,0,0.0860000000000003,0.0130000000000001,0.111000000000001,4
+"test-shared-tracking.R","shared-tracking","a fingerprint cannot enable reuse without a sealed runtime",4,0,FALSE,FALSE,0,0.0649999999999995,0.00800000000000001,0.0829999999999984,4
+"test-shared-tracking.R","shared-tracking","an interrupted implicit root is recovered without becoming visible",6,0,FALSE,FALSE,0,0.0539999999999994,0.00800000000000001,0.070999999999998,6
+"test-shared-tracking.R","shared-tracking","a failed implicit execution is resubmitted under a new root",6,0,FALSE,FALSE,0,0.0629999999999997,0.00900000000000012,0.0839999999999996,6
+"test-shared-tracking.R","shared-tracking","a failed implicit job never publishes a partial reusable output",5,0,FALSE,FALSE,0,0.093,0.012,0.114999999999998,5
+"test-shared-tracking.R","shared-tracking","an explicit primary is idempotent and can retry after failure",7,0,FALSE,FALSE,0,0.113,0.0149999999999999,0.152999999999999,7
+"test-shared-tracking.R","shared-tracking","explicit primary submissions require an immutable identity",2,0,FALSE,FALSE,0,0.0199999999999996,0.004,0.0249999999999986,2
+"test-shared-tracking.R","shared-tracking","explicit session effects are reconstructed instead of reused",3,0,FALSE,FALSE,0,0.0650000000000004,0.00800000000000001,0.0829999999999984,3
+"test-shared-tracking.R","shared-tracking","implicit reuse cannot attach to an explicit workflow primary",2,0,FALSE,FALSE,0,0.0620000000000003,0.0089999999999999,0.0809999999999995,2
+"test-shared-tracking.R","shared-tracking","an explicit root cannot mix primary and collection children",4,0,FALSE,FALSE,0,0.116000000000001,0.0139999999999998,0.154,4
+"test-shared-tracking.R","shared-tracking","cache opt-out prevents whole-job reuse",2,0,FALSE,FALSE,0,0.056,0.00900000000000034,0.0990000000000002,2
+"test-shared-tracking.R","shared-tracking","session operations with caller-visible effects are not reused",2,0,FALSE,FALSE,0,0.11,0.0089999999999999,0.129000000000001,2
+"test-shared-tracking.R","shared-tracking","an explicit workflow cannot claim success without knowledge",4,0,FALSE,FALSE,0,0.0190000000000001,0.00499999999999989,0.0249999999999986,4
+"test-shared-tracking.R","shared-tracking","a published primary seals only after execution is terminal",17,0,FALSE,FALSE,0,0.0830000000000002,0.0169999999999999,0.103999999999999,17
+"test-shared-tracking.R","shared-tracking","a self-contained primary durably requests terminal reconciliation",6,0,FALSE,FALSE,0,0.0469999999999997,0.00800000000000001,0.0599999999999987,6
+"test-shared-tracking.R","shared-tracking","a successful finalizing retry supersedes an earlier failed primary",5,0,FALSE,FALSE,0,0.0569999999999995,0.0089999999999999,0.075999999999997,5
+"test-shared-tracking.R","shared-tracking","reattaching an existing primary can durably request finalization",6,0,FALSE,FALSE,0,0.0860000000000003,0.0139999999999998,0.119000000000003,6
+"test-shared-tracking.R","shared-tracking","collection execution cardinality is hidden behind one root",7,0,FALSE,FALSE,0,0.154,0.024,0.208000000000002,7
+"test-shared-tracking.R","shared-tracking","shared results cross only the closed client-safe boundary",17,0,FALSE,FALSE,0,0.0609999999999999,0.0110000000000001,0.0779999999999994,17
+"test-shared-tracking.R","shared-tracking","a summary-only root keeps the fixed output_002 alias",5,0,FALSE,FALSE,0,0.0429999999999993,0.00800000000000001,0.0560000000000009,5
+"test-shared-tracking.R","shared-tracking","a result without a client-safe summary keeps its fixed schema",5,0,FALSE,FALSE,0,0.0389999999999997,0.00599999999999978,0.049000000000003,5
+"test-shared-tracking.R","shared-tracking","DSLite assigns only an opaque reusable reference",5,0,FALSE,FALSE,0,0.234,0.0250000000000004,0.263000000000002,5
+"test-shared-tracking.R","shared-tracking","private jobs and scoped deployments stay capability-only",14,0,FALSE,FALSE,0,0.0910000000000011,0.016,0.121000000000002,14
+"test-shared-tracking.R","shared-tracking","tracking pages allow deterministic recovery without a raw count",9,0,FALSE,FALSE,0,0.0280000000000005,0.00599999999999978,0.0339999999999989,9
+"test-shared-tracking.R","shared-tracking","tracking pagination rejects ambiguous bounds and cursors",11,0,FALSE,FALSE,0,0.0359999999999996,0.004,0.0410000000000004,11
+"test-shared-tracking.R","shared-tracking","GC removes unpublished children but keeps referenced knowledge",6,0,FALSE,FALSE,0,0.0800000000000001,0.0150000000000001,0.105,6
+"test-shared-tracking.R","shared-tracking","GC removes failed implicit execution but retains terminal tracking",6,0,FALSE,FALSE,0,0.0440000000000005,0.00800000000000001,0.0560000000000009,6
+"test-shared-tracking.R","shared-tracking","GC does not retain a successful implicit job without knowledge",5,0,FALSE,FALSE,0,0.0440000000000005,0.00800000000000001,0.0549999999999997,5
+"test-shared-tracking.R","shared-tracking","GC seals an expired incomplete primary before removing it",6,0,FALSE,FALSE,0,0.0439999999999987,0.00800000000000001,0.0569999999999986,6
+"test-step-cache.R","step-cache","step cache hashes input content and executable step definition",7,0,FALSE,FALSE,0,0.0149999999999988,0.004,0.0190000000000019,7
+"test-step-cache.R","step-cache","step cache detects relative names, empty dirs and symlinked input content",4,0,FALSE,FALSE,0,0.00599999999999845,0.00200000000000022,0.00799999999999912,4
+"test-step-cache.R","step-cache","step cache ignores volatile staged input paths",2,0,FALSE,FALSE,0,0.00699999999999967,0.00300000000000011,0.0100000000000016,2
+"test-step-cache.R","step-cache","step cache includes runner registry definition in the hash",1,0,FALSE,FALSE,0,0.00300000000000011,0.00099999999999989,0.00399999999999778,1
+"test-step-cache.R","step-cache","completed artifact steps are reused across different jobs",11,0,FALSE,FALSE,0,0.0340000000000007,0.0110000000000001,0.0440000000000005,11
+"test-step-cache.R","step-cache","step cache does not reuse running steps or missing cached outputs",2,0,FALSE,FALSE,0,0.0139999999999993,0.00299999999999967,0.017000000000003,2
+"test-step-cache.R","step-cache","step cache reuses completed steps from still-running parent jobs",4,0,FALSE,FALSE,0,0.0259999999999998,0.00699999999999967,0.0330000000000013,4
+"test-step-cache.R","step-cache","step cache coalesces equivalent in-flight steps",14,0,FALSE,FALSE,0,0.0429999999999993,0.0089999999999999,0.0519999999999996,14
+"test-step-cache.R","step-cache","step cache reuses shared multi-step prefixes by content",5,0,FALSE,FALSE,0,0.0310000000000006,0.00900000000000034,0.0410000000000004,5
+"test-step-cache.R","step-cache","step cache can be disabled per step and skips session side effects",3,0,FALSE,FALSE,0,0.00600000000000023,0.00099999999999989,0.00799999999999912,3
+"test-step-cache.R","step-cache","step cache never crosses a private job boundary",4,0,FALSE,FALSE,0,0.0190000000000001,0.00599999999999978,0.0249999999999986,4
+"test-step-cache.R","step-cache","step cache never crosses a domain label boundary",2,0,FALSE,FALSE,0,0.0140000000000011,0.004,0.0180000000000007,2
+"test-storage-permissions.R","storage-permissions","job artifacts and results deny access to other OS users",7,0,FALSE,FALSE,0,0.016,0.00500000000000034,0.0209999999999972,7
+"test-storage-permissions.R","storage-permissions","persistent runner definitions are atomic and group-private",2,0,FALSE,FALSE,0,0.00300000000000011,0.00199999999999978,0.00500000000000256,2
+"test-storage-permissions.R","storage-permissions","published artifacts and operational files are group-private",4,0,FALSE,FALSE,0,0.0149999999999988,0.00600000000000023,0.0210000000000008,4
+"test-storage-permissions.R","storage-permissions","staged input manifests and copied files are group-private",2,0,FALSE,FALSE,0,0.0130000000000017,0.00499999999999989,0.0189999999999984,2
+"test-storage-permissions.R","storage-permissions","generated worker scripts set a private umask",5,0,FALSE,FALSE,0,0.00600000000000023,0.00099999999999989,0.0069999999999979,5
+"test-storage-permissions.R","storage-permissions","legacy permissions are remediated without following symlinks",10,0,FALSE,FALSE,0,0.0239999999999991,0.00800000000000001,0.032,10
+"test-store.R","store","job creation persists to database",6,0,FALSE,FALSE,0,0.016,0.00299999999999967,0.0190000000000019,6
+"test-store.R","store","job and tracking attachment are created atomically",2,0,FALSE,FALSE,0,0.0139999999999993,0.00199999999999978,0.0160000000000018,2
+"test-store.R","store","job update is atomic",2,0,FALSE,FALSE,0,0.0150000000000006,0.00300000000000011,0.0169999999999995,2
+"test-store.R","store","job update accepts SQL NULL values",2,0,FALSE,FALSE,0,0.011000000000001,0.00300000000000011,0.0139999999999993,2
+"test-store.R","store","listing jobs filters by owner",3,0,FALSE,FALSE,0,0.016,0.00199999999999978,0.0189999999999984,3
+"test-store.R","store","listing jobs filters by state",3,0,FALSE,FALSE,0,0.0129999999999999,0.00199999999999978,0.0160000000000018,3
+"test-store.R","store","jobs default to private visibility",2,0,FALSE,FALSE,0,0.011000000000001,0.00200000000000022,0.0139999999999993,2
+"test-store.R","store","spec retrieval returns parsed JSON",3,0,FALSE,FALSE,0,0.0150000000000006,0.00200000000000022,0.0180000000000007,3
+"test-studio.R","studio","Studio snapshot exposes global jobs only",11,0,FALSE,FALSE,0,0.0449999999999999,0.00700000000000012,0.0609999999999999,11
+"test-studio.R","studio","hpcListInternal ignores owner scopes and lists global jobs",4,0,FALSE,FALSE,0,0.0190000000000001,0.00299999999999967,0.0229999999999997,4
+"test-unit-resource.R","unit-resource","execution units seal an immutable runtime revision",4,0,FALSE,FALSE,0,0.0129999999999999,0.00199999999999978,0.0250000000000021,4
+"test-unit-resource.R","unit-resource","execution-unit Resources resolve only administrator catalogue entries",20,0,FALSE,FALSE,0,0.0419999999999998,0.00499999999999989,0.0560000000000009,20
+"test-unit-resource.R","unit-resource","unit snapshots are canonical, authorized, and durable",7,0,FALSE,FALSE,0,0.016,0.00300000000000011,0.0229999999999997,7
+"test-unit-resource.R","unit-resource","unit references remain private to one DataSHIELD session",13,0,FALSE,FALSE,0,0.0350000000000001,0.00499999999999989,0.0449999999999982,13
+"test-unit-resource.R","unit-resource","unit initialization requires a platform-resolved Resource client",1,0,FALSE,FALSE,0,0.00399999999999956,0.00200000000000022,0.0109999999999992,1
+"test-unit-resource.R","unit-resource","submitted jobs persist the unit without Resource names or credentials",8,0,FALSE,FALSE,0,0.0680000000000014,0.0110000000000001,0.088000000000001,8
+"test-unit-resource.R","unit-resource","new jobs pin the effective site default",8,0,FALSE,FALSE,0,0.0409999999999986,0.00699999999999967,0.0519999999999996,8
+"test-unit-resource.R","unit-resource","resource units are rechecked before new execution steps",3,0,FALSE,FALSE,0,0.0119999999999987,0.00200000000000022,0.0229999999999997,3
+"test-unit-resource.R","unit-resource","revoked units fail queued and continuing jobs without stale leases",6,0,FALSE,FALSE,0,0.0350000000000001,0.00499999999999989,0.0509999999999984,6
+"test-unit-resource.R","unit-resource","completed unit jobs remain readable after catalogue removal",2,0,FALSE,FALSE,0,0.0329999999999995,0.00599999999999978,0.0429999999999993,2
+"test-unit-resource.R","unit-resource","snapshot integrity does not depend on command availability",4,0,FALSE,FALSE,0,0.00999999999999979,0.00200000000000022,0.0159999999999982,4
+"test-unit-resource.R","unit-resource","unit aliases share only an explicitly configured physical pool",2,0,FALSE,FALSE,0,0.00699999999999967,0.00099999999999989,0.0159999999999982,2
+"test-unit-resource.R","unit-resource","legacy and pinned site-default jobs share one scheduler pool",3,0,FALSE,FALSE,0,0.011000000000001,0.00100000000000033,0.0160000000000018,3
+"test-unit-resource.R","unit-resource","durable unit snapshots reject arbitrary persisted extra arguments",2,0,FALSE,FALSE,0,0.00799999999999912,0,0.0120000000000005,2
+"test-unit-resource.R","unit-resource","DSLite resolves an opaque unit Resource without Opal naming",4,0,FALSE,FALSE,0,0.209000000000001,0.0190000000000001,0.233999999999998,4
+"test-validation.R","validation","empty spec is rejected",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,1
+"test-validation.R","validation","spec with too many steps is rejected",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00300000000000011,1
+"test-validation.R","validation","step without type is rejected",1,0,FALSE,FALSE,0,0.00300000000000011,0.00099999999999989,0.00400000000000134,1
+"test-validation.R","validation","artifact step without runner is rejected",1,0,FALSE,FALSE,0,0.00300000000000011,0,0.00400000000000134,1
+"test-validation.R","validation","valid session step passes validation",2,0,FALSE,FALSE,0,0.00699999999999967,0.00099999999999989,0.00700000000000145,2
+"test-validation.R","validation","job visibility and output names are validated",2,0,FALSE,FALSE,0,0.00600000000000023,0,0.00600000000000023,2
+"test-validation.R","validation","completed-reuse fingerprints are immutable digest identities",6,0,FALSE,FALSE,0,0.0120000000000005,0,0.0120000000000005,6
+"test-validation.R","validation","step plane is inferred from type",1,0,FALSE,FALSE,0,0.00200000000000067,0.00099999999999989,0.00300000000000011,1
+"test-validation.R","validation","identifier validation blocks path traversal",4,0,FALSE,FALSE,0,0.00500000000000078,0,0.00600000000000023,4
+"test-validation.R","validation","spec size limit is enforced",1,0,FALSE,FALSE,0,0.004999999999999,0,0.004999999999999,1
+"test-validation.R","validation","publish step identifiers are validated",1,0,FALSE,FALSE,0,0.00400000000000134,0,0.00399999999999778,1
+"test-validation.R","validation","runner parameters fail closed when allowed_params is absent",4,0,FALSE,FALSE,0,0.00500000000000078,0,0.00600000000000023,4
