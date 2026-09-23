@@ -37,6 +37,9 @@
 #'   value and domain packages must supply a stable authorized owner.
 #' - `dshpc.max_queued_jobs_global`: global pending/running queue quota.
 #' - `dshpc.max_steps_per_job`: maximum steps accepted in one job spec.
+#' - `dshpc.max_parallel_steps`: maximum simultaneous steps in one compiled
+#'   DAG, default `2`. Set `1` for sequential topological dispatch. This is an
+#'   administrator setting; plain ordered `steps` jobs remain sequential.
 #' - `dshpc.max_retries`: retry count for failed artifact steps.
 #' - `dshpc.default_timeout_secs`: maximum runtime for one artifact attempt.
 #'   Defaults to 86400 seconds; non-positive values disable the worker deadline.
@@ -48,8 +51,9 @@
 #'   `cacheable = FALSE` to opt out for a non-deterministic or effectful runner.
 #'
 #' @section Embedded resource scheduling:
-#' Admission conservatively leases the maximum requirement of any step for the
-#' whole job; leases are not resized at DAG step transitions.
+#' Linear jobs conservatively lease the maximum requirement of any step for the
+#' whole job. Compiled DAGs admit and release each running step independently,
+#' including separate GPU assignments, while keeping one durable job identity.
 #' - `dshpc.node_memory_mb`: node memory budget, or `"auto"` for cgroup/host
 #'   detection.
 #' - `dshpc.memory_reserve_mb`: memory reserved for Rock/Rserve and OS work.
@@ -130,7 +134,11 @@
 #' - `dshpc.container_runtime`: `"auto"`, `"docker"`, `"podman"`,
 #'   `"apptainer"`, `"singularity"`, or `"none"`.
 #' - `dshpc.container_pull`: `"missing"`, `"always"`, or `"never"`.
-#' - `dshpc.container_network`: network mode for Docker/Podman runners.
+#' - `dshpc.container_network`: defaults to `"none"` for Docker, Podman,
+#'   Apptainer and Singularity. Apptainer/Singularity require permitted network
+#'   namespaces (user namespaces or an administrator-approved setuid runtime),
+#'   Linux procfs and an image with `/bin/sh`, `readlink` and `/usr/bin/env`.
+#'   Namespace verification fails closed before the runner executes.
 #' - `dshpc.container_extra_args` is retained only for pre-0.2.5 jobs without a
 #'   unit snapshot. New durable submissions reject it; put fixed runtime flags
 #'   in an administrator-controlled runner definition instead.

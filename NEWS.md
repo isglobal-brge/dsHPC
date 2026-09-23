@@ -1,3 +1,23 @@
+# dsHPC 0.4.0
+
+* Compiled DAG jobs dispatch independent artifact nodes concurrently, with
+  `dshpc.max_parallel_steps = 2` by default and `1` for sequential execution.
+  Explicit dependencies control staging and readiness; plain `steps` jobs keep
+  their sequential behavior.
+* SQLite schema version 3 records per-step PIDs, launch identities, retries and
+  resource allocations. Recovery adopts surviving runners and retries only
+  interrupted nodes; permanent failures drain running branches before the job
+  becomes terminal. DAG progress counts completed nodes. Existing databases
+  migrate without changing capabilities, sealed specs or shared tracking.
+* DAG resource admission and cache waits preserve each sibling's reservation.
+  Local, container and accepted external steps can overlap within one job.
+* Apptainer/Singularity default to `--containall --net --network none` and verify
+  isolation before executing runner code. Unsupported or ignored isolation
+  fails closed. Embedded containers now use the same builder as delegated ones.
+* Shared tracking remains the existing coarse root protocol; step counts,
+  timings, fan-out and intermediate errors remain private. No client change is
+  required. Release validation is recorded under `inst/validation/v0.4.0/`.
+
 # dsHPC 0.3.0
 
 * Added a durable shared-knowledge catalogue with one neutral `trk_` root per

@@ -56,6 +56,9 @@
                      spec_hash %||% NA_character_,
                      access_token_hash %||% NA_character_,
                      now, spec_json))
+    if (!is.null(spec$dag_compiled)) {
+      .store_update_job(db, job_id, dag = 1L)
+    }
     for (i in seq_along(spec$steps)) {
       s <- spec$steps[[i]]
       input_refs <- if (!is.null(s$inputs))

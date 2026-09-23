@@ -4,7 +4,7 @@
 \alias{.executor_run_step}
 \title{Execute the current step of a job}
 \usage{
-.executor_run_step(db, job_id, step_index, spec)
+.executor_run_step(db, job_id, step_index, spec, attempt_id = NULL)
 }
 \description{
 Execute the current step of a job

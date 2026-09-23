@@ -211,11 +211,15 @@
     cache_source_step_index = as.integer(inflight_step$step_index),
     started_at = now,
     error_message = NA_character_)
-  .scheduler_release_leases(db, job_id)
-  .store_update_job(db, job_id, state = "PENDING",
-    worker_pid = NA_integer_,
-    error_message = paste("Waiting for equivalent step",
-      inflight_step$job_id, inflight_step$step_index))
+  if (isTRUE(as.logical(.store_get_job(db, job_id)$dag))) {
+    .scheduler_release_step_lease(db, job_id, step_index)
+  } else {
+    .scheduler_release_leases(db, job_id)
+    .store_update_job(db, job_id, state = "PENDING",
+      worker_pid = NA_integer_,
+      error_message = paste("Waiting for equivalent step",
+        inflight_step$job_id, inflight_step$step_index))
+  }
   .db_log_event(db, job_id, "step_cache_wait",
     list(step_index = as.integer(step_index),
          source_job_id = inflight_step$job_id,

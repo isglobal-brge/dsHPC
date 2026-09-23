@@ -12,7 +12,8 @@
 
 #' Execute the current step of a job
 #' @keywords internal
-.executor_run_step <- function(db, job_id, step_index, spec) {
+.executor_run_step <- function(db, job_id, step_index, spec,
+                               attempt_id = NULL) {
   .dshpc_assert_runtime_identity(spec)
   .dshpc_assert_unit_dispatchable(spec)
   settings <- .dshpc_settings_for_spec(spec)
@@ -21,7 +22,8 @@
     .reset_failed_step_attempt(db, job_id, step_index)
   }
   step_dir <- .ensure_step_dir(job_id, step_index)
-  input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir)
+  input_dir <- .resolve_step_input(db, job_id, step_index, step, step_dir,
+    implicit_previous = is.null(spec$dag_compiled))
 
   step_hash <- NA_character_
   if (.step_cache_enabled_for_job(db, job_id, step)) {
@@ -52,10 +54,11 @@
     started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
 
   if (identical(step$plane, "session")) {
-    .run_session_step(db, job_id, step_index, step, step_dir, input_dir)
+    .run_session_step(db, job_id, step_index, step, step_dir, input_dir,
+      attempt_id = attempt_id)
   } else {
     .run_artifact_step(db, job_id, step_index, step, step_dir, input_dir,
-      settings = settings)
+      settings = settings, attempt_id = attempt_id)
   }
 }
 
@@ -64,6 +67,10 @@
 .executor_advance <- function(db, job_id) {
   job <- .store_get_job(db, job_id)
   if (is.null(job)) return()
+  if (isTRUE(as.logical(job$dag))) {
+    # The ready-set loop advances DAGs after reconciling the current batch.
+    return(invisible(TRUE))
+  }
   current <- as.integer(job$step_index)
   total <- as.integer(job$total_steps)
 
@@ -105,6 +112,9 @@
 #' @keywords internal
 .executor_kill <- function(db, job_id, settings = NULL) {
   job <- .store_get_job(db, job_id)
+  if (!is.null(job) && isTRUE(as.logical(job$dag))) {
+    return(.executor_kill_dag(db, job_id, settings))
+  }
   if (is.null(settings)) {
     spec <- .store_get_spec(db, job_id)
     settings <- if (is.null(spec)) .dshpc_settings() else
@@ -225,11 +235,13 @@
 
 #' Remove durable state and files from a failed artifact attempt before retry
 #' @keywords internal
-.reset_failed_step_attempt <- function(db, job_id, step_index) {
+.reset_failed_step_attempt <- function(db, job_id, step_index,
+                                        transaction = TRUE) {
   previous <- DBI::dbGetQuery(db,
     "SELECT state FROM steps WHERE job_id = ? AND step_index = ?",
     params = list(job_id, as.integer(step_index)))
-  if (nrow(previous) != 1L || !identical(previous$state[1], "failed")) {
+  if (nrow(previous) != 1L ||
+      !previous$state[1] %in% c("failed", "retry_pending")) {
     return(invisible(FALSE))
   }
 
@@ -249,7 +261,7 @@
     }
   }
 
-  DBI::dbExecute(db, "BEGIN IMMEDIATE")
+  if (transaction) DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
     DBI::dbExecute(db,
       "DELETE FROM outputs WHERE job_id = ? AND step_index = ?",
@@ -264,10 +276,14 @@
       error_message = NA_character_,
       external_backend = NA_character_,
       external_id = NA_character_,
-      external_status = NA_character_)
-    DBI::dbExecute(db, "COMMIT")
+      external_status = NA_character_,
+      worker_pid = NA_integer_, attempt_id = NA_character_,
+      launch_owner_pid = NA_integer_)
+    if (transaction) DBI::dbExecute(db, "COMMIT")
   }, error = function(e) {
-    tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    if (transaction) {
+      tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+    }
     stop(e)
   })
   invisible(TRUE)
@@ -299,7 +315,8 @@
 }
 
 #' @keywords internal
-.resolve_step_input <- function(db, job_id, step_index, step_spec, step_dir = NULL) {
+.resolve_step_input <- function(db, job_id, step_index, step_spec, step_dir = NULL,
+                                implicit_previous = TRUE) {
   if (!is.null(step_spec$inputs)) {
     refs <- .normalize_step_input_refs(step_spec$inputs)
     refs <- refs[!is.na(vapply(refs, `[[`, integer(1), "step"))]
@@ -311,7 +328,7 @@
       return(.stage_step_inputs(db, job_id, refs, step_dir))
     }
   }
-  if (step_index > 1L) {
+  if (isTRUE(implicit_previous) && step_index > 1L) {
     path <- .step_output_path(db, job_id, step_index - 1L)
     if (!is.null(path)) return(path)
   }

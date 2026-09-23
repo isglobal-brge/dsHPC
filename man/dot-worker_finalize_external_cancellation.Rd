@@ -4,7 +4,13 @@
 \alias{.worker_finalize_external_cancellation}
 \title{Mark a remotely cancelled job terminal only after backend reconciliation}
 \usage{
-.worker_finalize_external_cancellation(db, jid, sidx, external_status)
+.worker_finalize_external_cancellation(
+  db,
+  jid,
+  sidx,
+  external_status,
+  attempt_id = NULL
+)
 }
 \description{
 Mark a remotely cancelled job terminal only after backend reconciliation

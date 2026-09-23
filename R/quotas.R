@@ -22,6 +22,7 @@
 #' @keywords internal
 .dshpc_settings <- function() {
   list(
+    max_parallel_steps = .dshpc_parallel_steps(),
     max_jobs_global = as.integer(.dshpc_option("max_jobs_global", 1000000L)),
     max_jobs_per_user = as.numeric(.dshpc_option("max_jobs_per_user", Inf)),
     max_queued_jobs_global = as.integer(.dshpc_option("max_queued_jobs_global",
@@ -112,4 +113,15 @@
     runner_registry_autosync = .dshpc_option("runner_registry_autosync", TRUE),
     runner_registry_sync_secs = as.numeric(.dshpc_option("runner_registry_sync_secs", 30)),
     runner_overrides = .dshpc_option("runner_overrides", list()))
+}
+
+.dshpc_parallel_steps <- function() {
+  value <- .dshpc_option("max_parallel_steps", 2L)
+  if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+      !is.finite(value) || value < 1 || value != floor(value) ||
+      value > .Machine$integer.max) {
+    stop("dshpc.max_parallel_steps must be a positive whole number.",
+      call. = FALSE)
+  }
+  as.integer(value)
 }

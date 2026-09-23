@@ -4,7 +4,7 @@
 \alias{.reset_failed_step_attempt}
 \title{Remove durable state and files from a failed artifact attempt before retry}
 \usage{
-.reset_failed_step_attempt(db, job_id, step_index)
+.reset_failed_step_attempt(db, job_id, step_index, transaction = TRUE)
 }
 \description{
 Remove durable state and files from a failed artifact attempt before retry

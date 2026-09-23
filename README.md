@@ -45,16 +45,24 @@ Domain packages can opt out per invocation with
 `cache = FALSE` or `cacheable = FALSE` for non-deterministic or effectful
 runners.
 
-Resource admission is conservative: a job leases the maximum CPU, memory, and
-GPU requirement declared by any of its steps until the job finishes. Resources
-are not currently resized between DAG steps. This can reduce utilization for
-heterogeneous pipelines, but it avoids under-accounting at step transitions.
+Linear `steps` jobs retain their sequential cursor and conservative reservation
+of the maximum resource requirement of any step. Compiled DAG jobs reserve CPU,
+memory, runner/group slots and GPU devices separately for each running step;
+completing or waiting on one node does not release a sibling's reservation.
 
 Jobs may be submitted as classic ordered steps or as a declarative DAG pipeline.
 The DAG form uses named nodes and explicit input dependencies; dsHPC validates
-the graph, rejects cycles, topologically compiles it to the durable step model,
-and stages multiple upstream artifact inputs under a per-step input manifest
-without returning those artifacts to the client.
+the graph, rejects cycles, and compiles it to the durable step model. A ready-set
+executor dispatches independent artifact nodes concurrently, up to the
+administrator option `dshpc.max_parallel_steps` (default `2`). Set it to `1` for
+strictly sequential topological execution. Nodes start once all their explicit
+inputs are durably complete; an unrelated slow branch does not block them.
+Multiple upstream outputs are staged under a per-step input manifest without
+returning those artifacts to the client. Root nodes have no implicit input.
+Session operations remain synchronous. Step parallelism, counts and timings
+are never added to the shared tracking surface.
+Embedded DAG artifact execution requires a Unix worker; unsupported hosts fail
+before launching a runner.
 
 The same control plane supports three deployment modes:
 
@@ -71,7 +79,7 @@ Install the package on the DataSHIELD server and publish the DataSHIELD methods
 as usual for the deployment:
 
 ```r
-install.packages("dsHPC_0.3.0.tar.gz", repos = NULL, type = "source")
+install.packages("dsHPC_0.4.0.tar.gz", repos = NULL, type = "source")
 ```
 
 On load, dsHPC creates the default state tree if needed:
@@ -299,8 +307,14 @@ Guardrails:
   `cancel_jobs_by_tag()` use the same gate as `hpcAdminCancelDS()`.
 - Embedded artifact steps write `child.pid` and an atomic `exit_code`; missing
   `exit_code` is treated as interrupted and requeued, not as success.
-- Successful step completion is committed before advancing the next step; if a
-  crash happens between those phases, the next worker resumes the advance.
+- Successful step completion is committed before dispatching dependants; a
+  replacement worker resumes from step rows. DAG wrappers wait on a launch gate
+  until their PID is committed, so a crash before acknowledgement cannot execute
+  an unrecorded runner. Surviving branches are adopted, interrupted branches
+  retry independently, and completed branches are retained.
+- A permanent DAG failure records the first error and stops fresh dispatch.
+  The job stays `RUNNING` until all in-flight branches settle, then becomes
+  `FAILED`. Cancellation also reconciles every running branch.
 - Interrupted pre-0.3 whole-job deduplication clones remain recoverable from a
   completed job with the exact same global label and specification. New shared
   submissions attach to one canonical execution instead of creating clones.
@@ -309,7 +323,7 @@ Guardrails:
 - Transient external status failures return `STATUS_UNKNOWN` and keep the job
   running instead of creating duplicate retries.
 - Unreadable persisted specifications and invalid execution-unit snapshots are
-  moved to `FAILED` transactionally and release stale scheduler leases instead
+  moved to `FAILED` transactionally (after active DAG branches settle) and release stale scheduler leases instead
   of remaining indefinitely `PENDING` or `RUNNING`; transient database read
   errors are retried.
 - OOM-like exits (`-9`, `137`) put the runner/concurrency group into cooldown
@@ -319,6 +333,28 @@ Guardrails:
 
 These guarantees apply to local cell, shared cell, Slurm, and external-HPC
 execution. The client API is unchanged across modes.
+
+Upgrading from 0.3.0 automatically applies additive SQLite schema version 3
+under the writer lock. Drain sealed 0.3.0 jobs and stop old workers before
+upgrading, then restart workers with 0.4.0. The migration copies the active PID
+and retry count to its step, preserves
+capabilities, outputs and sealed specifications, and converts a DAG's
+`jobs.step_index` into its completed-node count. `total_steps` stays fixed;
+linear cursor semantics are unchanged. Per-step allocation JSON projects into
+the existing job resource leases. No historical execution is promoted into the
+shared catalogue. See [the design note](DESIGN_CONCURRENT_DAG.md).
+The existing runtime seal includes package versions: migration does not bless a
+changed executable environment. An old sealed job may reconcile already-running
+attempts, but launching another node under 0.4.0 fails its runtime check and
+requires resubmission. Unsealed legacy jobs retain their recovery behavior.
+
+Slurm, Kubernetes and generic external units may have multiple accepted steps
+in flight. The leader calls submit serially, and each call must return promptly
+with an independent step id. Generic wrappers must honour job id, step index
+and separate step directories. Configure parallelism `1` for wrappers that
+cannot overlap steps, together with runner/group limits when the restriction
+also spans jobs. Submission recovery retains the existing at-least-once
+contract; external side effects must be idempotent.
 
 ## Backends
 
@@ -458,6 +494,14 @@ options(
 ```
 
 Supported runtimes are Docker, Podman, Apptainer, and Singularity.
+Embedded and delegated container runners use the same command builders.
+The default `container_network = "none"` passes `--network none` to
+Docker/Podman and `--containall --net --network none` to Apptainer/Singularity.
+Apptainer isolation requires permitted user/network namespaces or an
+administrator-approved setuid installation. The generated command verifies a
+distinct loopback-only network namespace before executing runner code, and
+fails closed when the runtime refuses or ignores isolation. See
+[container network requirements](docs/CONTAINER_NETWORK.md).
 
 ## Backend GPU detection
 

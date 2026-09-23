@@ -9,7 +9,8 @@
   jid,
   sidx,
   reason,
-  settings = .dshpc_settings()
+  settings = .dshpc_settings(),
+  attempt_id = NULL
 )
 }
 \description{

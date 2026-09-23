@@ -284,7 +284,7 @@
 .scheduler_running_usage <- function(db, settings = .dshpc_settings(),
                                      unit_key = NULL) {
   running <- DBI::dbGetQuery(db,
-    "SELECT job_id, spec_json FROM jobs WHERE state = 'RUNNING'")
+    "SELECT job_id, spec_json, dag FROM jobs WHERE state = 'RUNNING'")
   memory_mb <- 0
   cpu_slots <- 0
   gpus <- 0
@@ -296,22 +296,39 @@
     for (i in seq_len(nrow(running))) {
       spec <- tryCatch(jsonlite::fromJSON(running$spec_json[i], simplifyVector = FALSE),
                        error = function(e) NULL)
-      if (is.null(spec)) next
-      job_settings <- .dshpc_settings_for_spec(spec, base_settings = settings)
-      current_key <- .dshpc_unit_key(spec, settings = job_settings)
-      if (!is.null(unit_key) && !identical(current_key, unit_key)) next
-      plan <- .scheduler_job_plan(spec, job_settings)
-      running_jobs <- running_jobs + 1L
-      memory_mb <- memory_mb + plan$memory_mb
-      cpu_slots <- cpu_slots + plan$cpu_slots
-      lease <- .scheduler_job_gpu_devices(db, running$job_id[i])
-      gpus <- gpus + length(lease)
-      gpu_memory_mb <- gpu_memory_mb + plan$gpu_memory_mb
-      for (runner in plan$runners) {
-        runner_counts[[runner]] <- .scheduler_named_count(runner_counts, runner) + 1L
+      if (isTRUE(as.logical(running$dag[i]))) {
+        context <- if (is.null(spec)) NULL else tryCatch({
+          job_settings <- .dshpc_settings_for_spec(spec, base_settings = settings)
+          list(settings = job_settings,
+            key = .dshpc_unit_key(spec, settings = job_settings))
+        }, error = function(e) NULL)
+        # A corrupt specification cannot erase reservations while its runners
+        # drain. If its unit is unknown, charge every candidate unit.
+        if (!is.null(context) && !is.null(unit_key) &&
+            !identical(context$key, unit_key)) next
+        allocations <- .scheduler_step_allocations(db, running$job_id[i],
+          spec, context$settings)
+      } else {
+        if (is.null(spec)) next
+        job_settings <- .dshpc_settings_for_spec(spec, base_settings = settings)
+        current_key <- .dshpc_unit_key(spec, settings = job_settings)
+        if (!is.null(unit_key) && !identical(current_key, unit_key)) next
+        allocations <- list(list(plan = .scheduler_job_plan(spec, job_settings),
+          gpu_devices = .scheduler_job_gpu_devices(db, running$job_id[i])))
       }
-      for (group in plan$groups) {
-        group_counts[[group]] <- .scheduler_named_count(group_counts, group) + 1L
+      running_jobs <- running_jobs + 1L
+      for (allocation in allocations) {
+        plan <- allocation$plan
+        memory_mb <- memory_mb + plan$memory_mb
+        cpu_slots <- cpu_slots + plan$cpu_slots
+        gpus <- gpus + length(allocation$gpu_devices)
+        gpu_memory_mb <- gpu_memory_mb + plan$gpu_memory_mb
+        for (runner in unlist(plan$runners, use.names = FALSE)) {
+          runner_counts[[runner]] <- .scheduler_named_count(runner_counts, runner) + 1L
+        }
+        for (group in unlist(plan$groups, use.names = FALSE)) {
+          group_counts[[group]] <- .scheduler_named_count(group_counts, group) + 1L
+        }
       }
     }
   }
@@ -322,8 +339,15 @@
 }
 
 #' @keywords internal
-.scheduler_can_start_job <- function(db, job_id, spec, settings = .dshpc_settings()) {
-  plan <- .scheduler_job_plan(spec, settings)
+.scheduler_can_start_job <- function(db, job_id, spec,
+                                     settings = .dshpc_settings(),
+                                     step_index = NULL) {
+  dag <- !is.null(spec$dag_compiled)
+  candidate <- if (dag) {
+    list(steps = if (is.null(step_index)) list() else
+      list(spec$steps[[step_index]]))
+  } else spec
+  plan <- .scheduler_job_plan(candidate, settings)
   usage <- .scheduler_running_usage(db, .dshpc_settings(),
     unit_key = .dshpc_unit_key(spec, settings = settings))
   budget <- .scheduler_node_budget(settings)
@@ -331,14 +355,23 @@
   enforce_runner_concurrency <- .executor_enforces_runner_concurrency(settings)
   global_running <- DBI::dbGetQuery(db,
     "SELECT COUNT(*) AS n FROM jobs WHERE state = 'RUNNING'")$n
+  job <- .store_get_job(db, job_id)
+  already_running <- dag && !is.null(step_index) &&
+    !is.null(job) && identical(job$state, "RUNNING")
+  has_job_slot <- already_running || global_running < settings$max_jobs_global
+  if (!is.finite(usage$cpu_slots)) {
+    return(list(ok = FALSE, reason = "unresolved_dag_resources",
+      plan = plan, usage = usage, budget = budget))
+  }
 
-  if (!identical(settings$scheduler, "adaptive")) {
-    return(list(ok = global_running < settings$max_jobs_global,
-                reason = if (global_running < settings$max_jobs_global) "ok" else "max_jobs_global",
+  if ((dag && is.null(step_index)) ||
+      (!identical(settings$scheduler, "adaptive") && is.null(step_index))) {
+    return(list(ok = has_job_slot,
+                reason = if (has_job_slot) "ok" else "max_jobs_global",
                 plan = plan, usage = usage, budget = budget))
   }
 
-  if (global_running >= settings$max_jobs_global)
+  if (!has_job_slot)
     return(list(ok = FALSE, reason = "max_jobs_global", plan = plan,
                 usage = usage, budget = budget))
   if (!delegated && usage$memory_mb + plan$memory_mb > budget$memory_mb)
@@ -459,7 +492,18 @@
 }
 
 #' @keywords internal
-.scheduler_job_gpu_devices <- function(db, job_id) {
+.scheduler_job_gpu_devices <- function(db, job_id, step_index = NULL) {
+  if (!is.null(step_index)) {
+    step <- DBI::dbGetQuery(db,
+      "SELECT s.resource_json, j.dag FROM steps s JOIN jobs j USING (job_id)
+        WHERE s.job_id = ? AND s.step_index = ?",
+      params = list(job_id, as.integer(step_index)))
+    if (nrow(step) == 1L && isTRUE(as.logical(step$dag[1]))) {
+      return(tryCatch(as.character(unlist(jsonlite::fromJSON(
+        step$resource_json[1], simplifyVector = FALSE)$gpu_devices,
+        use.names = FALSE)), error = function(e) character(0)))
+    }
+  }
   row <- DBI::dbGetQuery(db,
     "SELECT details_json FROM resource_leases
      WHERE job_id = ? AND resource = 'gpu_devices'",
@@ -467,6 +511,68 @@
   if (nrow(row) == 0) return(character(0))
   tryCatch(jsonlite::fromJSON(row$details_json[1], simplifyVector = FALSE)$devices,
            error = function(e) character(0))
+}
+
+#' Read durable allocations, with a conservative v0.3.0 attempt fallback
+#' @keywords internal
+.scheduler_step_allocations <- function(db, job_id, spec = NULL,
+                                         settings = NULL) {
+  rows <- DBI::dbGetQuery(db,
+    "SELECT step_index, resource_json FROM steps
+      WHERE job_id = ? AND (state = 'running' OR resource_json IS NOT NULL)",
+    params = list(job_id))
+  lapply(seq_len(nrow(rows)), function(i) {
+    allocation <- tryCatch(jsonlite::fromJSON(rows$resource_json[i],
+      simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(allocation$plan)) {
+      allocation$plan <- tryCatch({
+        if (is.null(spec)) spec <- .store_get_spec(db, job_id)
+        if (is.null(settings)) settings <- .dshpc_settings_for_spec(spec)
+        .scheduler_job_plan(list(steps = list(spec$steps[[rows$step_index[i]]])),
+          settings)
+      }, error = function(e) list(memory_mb = Inf, cpu_slots = Inf,
+        gpu_memory_mb = Inf, runners = character(0), groups = character(0)))
+    }
+    allocation$gpu_devices <- as.character(unlist(
+      allocation$gpu_devices %||% character(0), use.names = FALSE))
+    allocation
+  })
+}
+
+#' Reserve one DAG step within the caller's SQLite claim transaction
+#' @keywords internal
+.scheduler_acquire_step_lease <- function(db, job_id, step_index, decision) {
+  allocation <- list(plan = decision$plan,
+    gpu_devices = decision$gpu_devices %||% character(0))
+  .store_update_step(db, job_id, step_index,
+    resource_json = as.character(jsonlite::toJSON(allocation,
+      auto_unbox = TRUE, null = "null")))
+  .scheduler_refresh_step_leases(db, job_id)
+}
+
+#' Release one DAG allocation without releasing its running siblings
+#' @keywords internal
+.scheduler_release_step_lease <- function(db, job_id, step_index) {
+  .store_update_step(db, job_id, step_index, resource_json = NA_character_)
+  .scheduler_refresh_step_leases(db, job_id)
+}
+
+#' Maintain the existing per-job resource lease projection for DAG allocations
+#' @keywords internal
+.scheduler_refresh_step_leases <- function(db, job_id) {
+  allocations <- .scheduler_step_allocations(db, job_id)
+  # Preserve the previous aggregate reservation until an unreconstructable
+  # legacy attempt settles. Admission fails closed while its usage is unknown.
+  if (any(vapply(allocations, function(x) !is.finite(x$plan$cpu_slots),
+      logical(1)))) return(invisible(FALSE))
+  .scheduler_release_leases(db, job_id)
+  if (length(allocations) == 0L) return(invisible(TRUE))
+  plan <- list(
+    memory_mb = sum(vapply(allocations, function(x) x$plan$memory_mb, numeric(1))),
+    cpu_slots = sum(vapply(allocations, function(x) x$plan$cpu_slots, numeric(1))))
+  devices <- unlist(lapply(allocations, `[[`, "gpu_devices"), use.names = FALSE)
+  .scheduler_acquire_leases(db, job_id,
+    list(plan = plan, gpu_devices = devices))
 }
 
 #' @keywords internal
@@ -642,20 +748,22 @@
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   details <- list(
     r_version = paste(R.version$major, R.version$minor, sep = "."),
-    pid = Sys.getpid()
+    pid = Sys.getpid(),
+    process_start_time = tryCatch(as.numeric(ps::ps_create_time(ps::ps_handle())),
+      error = function(e) NA_real_)
   )
   DBI::dbExecute(db,
     "INSERT OR REPLACE INTO worker_nodes
       (worker_id, cell_id, node_id, hostname, pid, state, started_at,
        last_heartbeat, resources_json, details_json)
      VALUES (
-       ?, ?, ?, ?, ?, COALESCE((SELECT state FROM worker_nodes WHERE worker_id = ?), 'running'),
+       ?, ?, ?, ?, ?, 'running',
        COALESCE((SELECT started_at FROM worker_nodes WHERE worker_id = ?), ?),
        ?, ?, ?
      )",
     params = list(worker_id, .scheduler_cell_id(settings),
       .scheduler_node_id(settings), Sys.info()[["nodename"]] %||% NA_character_,
-      as.integer(Sys.getpid()), worker_id, worker_id, now, now,
+      as.integer(Sys.getpid()), worker_id, now, now,
       as.character(jsonlite::toJSON(resources, auto_unbox = TRUE, null = "null")),
       as.character(jsonlite::toJSON(details, auto_unbox = TRUE, null = "null"))))
   invisible(TRUE)

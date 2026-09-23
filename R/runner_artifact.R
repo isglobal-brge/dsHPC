@@ -7,17 +7,33 @@
 
 #' @keywords internal
 .run_artifact_step <- function(db, job_id, step_index, step, step_dir, input_dir,
-                               settings = .dshpc_settings()) {
+                               settings = .dshpc_settings(), attempt_id = NULL) {
   prepared <- .prepare_artifact_command(db, job_id, step_index, step, step_dir, input_dir)
   backend <- .executor_backend_name(settings)
   if (!identical(backend, "embedded")) {
+    if (!is.null(attempt_id) && !.dag_attempt_current(db, job_id,
+        step_index, attempt_id)) {
+      return(.dag_abandon_launch(db, job_id, step_index, attempt_id))
+    }
     .backend_submit_artifact_step(db, job_id, step_index, step, step_dir,
       input_dir, prepared = prepared, settings = settings)
     return(invisible(TRUE))
   }
 
-  pid <- .launch_artifact_process(prepared, step_dir)
-  .store_update_job(db, job_id, worker_pid = pid)
+  # Embedded containers use the same command builder as external units.
+  if (!is.null(.backend_runner_container(prepared$runner_config, settings))) {
+    script <- file.path(step_dir, "run_step.sh")
+    prepared$script_path <- script
+    local_settings <- settings
+    local_settings$backend_path_mappings <- NULL
+    prepared <- .backend_map_prepared(prepared, local_settings)
+    .backend_write_step_script(script, prepared, local_settings)
+    prepared$command <- "/bin/sh"
+    prepared$args <- script
+  }
+  pid <- .launch_artifact_process(prepared, step_dir,
+    db = db, job_id = job_id, step_index = step_index, attempt_id = attempt_id)
+  if (is.null(attempt_id)) .store_update_job(db, job_id, worker_pid = pid)
   .db_log_event(db, job_id, "artifact_started",
     list(step_index = step_index, runner = step$runner, pid = pid,
          backend = "embedded"))
@@ -25,8 +41,14 @@
 
 #' Launch an embedded artifact process with explicit PID and exit-code files
 #' @keywords internal
-.launch_artifact_process <- function(prepared, step_dir) {
+.launch_artifact_process <- function(prepared, step_dir, db = NULL,
+                                      job_id = NULL, step_index = NULL,
+                                      attempt_id = NULL) {
   if (!identical(.Platform$OS.type, "unix")) {
+    if (!is.null(attempt_id)) {
+      stop("Embedded DAG artifact execution requires a Unix worker.",
+        call. = FALSE)
+    }
     proc <- processx::process$new(
       command = prepared$command, args = prepared$args,
       stdout = file.path(step_dir, "stdout.log"),
@@ -57,6 +79,13 @@
     "#!/bin/sh",
     "umask 007",
     "set +e",
+    if (!is.null(attempt_id)) c(
+      paste0("printf '%s\\n' \"$$\" > ", shQuote(file.path(step_dir, "runner.pid.tmp"))),
+      paste("mv", shQuote(file.path(step_dir, "runner.pid.tmp")),
+        shQuote(file.path(step_dir, "runner.pid"))),
+      "IFS= read -r launch_token || exit 125",
+      paste0("[ \"$launch_token\" = ", shQuote(attempt_id), " ] || exit 125"),
+      "exec 0</dev/null"),
     env_lines,
     sprintf("cd %s || exit 1", shQuote(step_dir)),
     sprintf("mkdir -p %s", shQuote(prepared$output_dir)),
@@ -90,6 +119,34 @@
   nohup_command <- Sys.which("nohup")
   if (!nzchar(env_command) || !nzchar(nohup_command)) {
     stop("A clean artifact runner environment is unavailable.", call. = FALSE)
+  }
+  if (!is.null(attempt_id)) {
+    if (!.dag_attempt_current(db, job_id, step_index, attempt_id)) {
+      .dag_abandon_launch(db, job_id, step_index, attempt_id)
+      return(NA_integer_)
+    }
+    proc <- .dshpc_with_private_umask(processx::process$new(
+      command = nohup_command, args = c("/bin/sh", script),
+      stdin = "|", stdout = "/dev/null", stderr = "/dev/null",
+      env = env_vars, cleanup = FALSE, cleanup_tree = FALSE))
+    released <- FALSE
+    on.exit(if (!released) proc$kill(), add = TRUE)
+    DBI::dbExecute(db, "BEGIN IMMEDIATE")
+    tryCatch({
+      if (!.dag_attempt_current(db, job_id, step_index, attempt_id)) {
+        stop("DAG launch claim is no longer current.", call. = FALSE)
+      }
+      .store_update_step(db, job_id, step_index, worker_pid = proc$get_pid())
+      DBI::dbExecute(db, "COMMIT")
+    }, error = function(e) {
+      tryCatch(DBI::dbExecute(db, "ROLLBACK"), error = function(e2) NULL)
+      stop(e)
+    })
+    .proc_registry[[paste0(job_id, "_", step_index)]] <- proc
+    proc$write_input(paste0(attempt_id, "\n"))
+    processx::processx_conn_close(proc$get_input_connection())
+    released <- TRUE
+    return(proc$get_pid())
   }
   clean_env <- paste(vapply(names(env_vars), function(nm) {
     shQuote(paste0(nm, "=", as.character(env_vars[[nm]])))
@@ -207,7 +264,8 @@
   inputs_json <- if (!is.null(input_dir)) file.path(input_dir, "inputs.json") else ""
   if (nzchar(inputs_json) && file.exists(inputs_json))
     env_vars <- c(env_vars, DSHPC_INPUTS_JSON = inputs_json)
-  gpu_devices <- .scheduler_job_gpu_devices(db, job_id)
+  gpu_devices <- .scheduler_job_gpu_devices(db, job_id,
+    step_index = if (!is.null(job_spec$dag_compiled)) step_index else NULL)
   if (length(gpu_devices) > 0) {
     gpu_csv <- paste(gpu_devices, collapse = ",")
     env_vars <- c(env_vars,
@@ -293,7 +351,7 @@
   status <- proc$get_exit_status()
   # Clean up handle
   rm(list = key, envir = .proc_registry)
-  status
+  if (length(status) == 1L) status else NA_integer_
 }
 
 #' @keywords internal

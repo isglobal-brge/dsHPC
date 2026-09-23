@@ -2,7 +2,8 @@
 # Synchronous in-process steps. Registers outputs in DB.
 
 #' @keywords internal
-.run_session_step <- function(db, job_id, step_index, step, step_dir, input_dir) {
+.run_session_step <- function(db, job_id, step_index, step, step_dir, input_dir,
+                               attempt_id = NULL) {
   result <- tryCatch(.dshpc_with_private_umask({
     switch(step$type,
       resolve_dataset = .session_resolve_dataset(step, step_dir, db, job_id, step_index),
@@ -17,6 +18,11 @@
       stop("Unknown session step type: ", step$type, call. = FALSE)
     )
   }), error = function(e) {
+    if (isTRUE(as.logical(.store_get_job(db, job_id)$dag))) {
+      .dag_fail_step(db, job_id, step_index, conditionMessage(e),
+        retry = FALSE, attempt_id = attempt_id)
+      return(NULL)
+    }
     .store_update_step(db, job_id, step_index, state = "failed",
       error_message = conditionMessage(e),
       finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
@@ -29,11 +35,24 @@
   })
 
   if (!is.null(result)) {
+    if (!is.null(attempt_id)) {
+      if (!.dag_reap_current(db, job_id, step_index, attempt_id)) {
+        return(invisible(FALSE))
+      }
+      if (isTRUE(as.logical(.store_get_job(db, job_id)$cancel_requested))) {
+        .dag_fail_step(db, job_id, step_index, "Cancelled", retry = FALSE,
+          attempt_id = attempt_id)
+        return(invisible(FALSE))
+      }
+    }
     output_ref <- file.path("artifacts", job_id,
                              sprintf("step_%03d", step_index), "output")
     .store_update_step(db, job_id, step_index, state = "done",
       output_ref = output_ref,
       finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
+    if (isTRUE(as.logical(.store_get_job(db, job_id)$dag))) {
+      .scheduler_release_step_lease(db, job_id, step_index)
+    }
     .db_log_event(db, job_id, "step_done", list(step_index = step_index))
     .executor_advance(db, job_id)
   }

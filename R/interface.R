@@ -877,7 +877,8 @@ hpcSubmitInternal <- function(spec_encoded, session_env = NULL,
       started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
     .db_log_event(db, job_id, "started")
     tryCatch(
-      .executor_run_step(db, job_id, 1L, spec),
+      if (!is.null(spec$dag_compiled)) .executor_run_dag(db, job_id, spec)
+      else .executor_run_step(db, job_id, 1L, spec),
       error = function(e) {
         .store_update_job(db, job_id, state = "FAILED",
           error_message = conditionMessage(e),

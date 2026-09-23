@@ -1372,15 +1372,74 @@
   workdir <- container$workdir %||% prepared$step_dir
   extra <- as.character(container$extra_args %||% character(0))
   extra <- extra[nzchar(extra)]
-  exec_args <- c("exec", "$gpu_args", extra,
+  isolated <- identical(as.character(settings$container_network %||% "none")[1],
+                        "none")
+  if (isolated && any(grepl("^--net($|=|work|ns-path)|^-n($|=)", extra))) {
+    stop("container_network='none' cannot be overridden by Apptainer/Singularity network arguments.",
+         call. = FALSE)
+  }
+  isolation_args <- if (isolated) c("--containall", "--net", "--network", "none")
+                    else character(0)
+  payload <- c(prepared$command, prepared$args)
+  if (isolated) {
+    # --containall cleans the environment. Pass admitted values as literal env
+    # arguments after verification, without runtime environment interpolation.
+    env <- prepared$env_vars
+    keep <- !is.na(names(env)) & nzchar(names(env))
+    assignments <- if (any(keep))
+      paste0(names(env)[keep], "=", as.character(env[keep])) else character(0)
+    payload <- c("/bin/sh", "-c", .backend_apptainer_network_guard(),
+      "dshpc-network-guard", '"$dshpc_host_netns"',
+      "/usr/bin/env", assignments, payload)
+  }
+  exec_args <- c("exec", "$gpu_args", extra, isolation_args,
     "--bind", paste0(mount$source, ":", mount$target),
     "--pwd", workdir,
     container$image,
-    prepared$command,
-    prepared$args)
-  paste(c(.backend_container_gpu_lines(runtime$name),
-    .backend_shell_join(c(runtime$command, exec_args), raw = "$gpu_args")),
-    collapse = "\n")
+    payload)
+  command <- .backend_shell_join(c(runtime$command, exec_args),
+    raw = c("$gpu_args", if (isolated) '"$dshpc_host_netns"'))
+  lines <- c(.backend_container_gpu_lines(runtime$name), command)
+  if (isolated) {
+    failure <- paste0("dsHPC: Apptainer/Singularity execution requires network isolation; ",
+      "enable permitted user/network namespaces or an administrator-approved setuid runtime. ",
+      "The image must provide /bin/sh, readlink, /usr/bin/env and Linux procfs. ",
+      "No network-enabled fallback was attempted.")
+    lines <- c("(",
+      paste0("dshpc_isolation_error() { printf '%s\\n' ", shQuote(failure), " >&2; }"),
+      "dshpc_host_netns=$(readlink /proc/self/ns/net) || { dshpc_isolation_error; exit 125; }",
+      "[ -n \"$dshpc_host_netns\" ] || { dshpc_isolation_error; exit 125; }",
+      lines,
+      "dshpc_container_status=$?",
+      "if [ \"$dshpc_container_status\" -ne 0 ]; then dshpc_isolation_error; fi",
+      "exit \"$dshpc_container_status\"",
+      ")")
+  }
+  paste(lines, collapse = "\n")
+}
+
+#' Verify isolation in the same container invocation that executes the runner
+#' @keywords internal
+.backend_apptainer_network_guard <- function() {
+  paste(c(
+    "fail_isolation() {",
+    "  printf '%s\\n' 'dsHPC: cannot verify container network isolation; refusing to execute runner.' >&2",
+    "  exit 125",
+    "}",
+    "host_netns=$1",
+    "shift",
+    "container_netns=$(readlink /proc/self/ns/net) || fail_isolation",
+    "[ -n \"$container_netns\" ] && [ \"$container_netns\" != \"$host_netns\" ] || fail_isolation",
+    "[ -r /proc/net/dev ] || fail_isolation",
+    "loopback_seen=0",
+    "while IFS=: read -r interface counters; do",
+    "  [ -n \"$counters\" ] || continue",
+    "  interface=${interface#\"${interface%%[![:space:]]*}\"}",
+    "  [ \"$interface\" = lo ] || fail_isolation",
+    "  loopback_seen=1",
+    "done < /proc/net/dev",
+    "[ \"$loopback_seen\" = 1 ] || fail_isolation",
+    "exec \"$@\""), collapse = "\n")
 }
 
 #' @keywords internal

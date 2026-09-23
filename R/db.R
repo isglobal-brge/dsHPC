@@ -1,7 +1,7 @@
 # Module: SQLite Database
 # Source of truth. WAL mode. Expanded schema with outputs, checkpoints.
 
-.DSHPC_DB_SCHEMA_VERSION <- 2L
+.DSHPC_DB_SCHEMA_VERSION <- 3L
 
 #' @keywords internal
 .db_connect <- function() {
@@ -44,6 +44,7 @@
     }
     if (current < .DSHPC_DB_SCHEMA_VERSION) {
       .db_create_schema(db)
+      if (current < 3L) .db_migrate_dag_state(db)
       DBI::dbExecute(db, paste0("PRAGMA user_version = ",
         .DSHPC_DB_SCHEMA_VERSION))
     }
@@ -85,7 +86,9 @@
 
   .db_ensure_columns(db, "jobs", list(
     name = "TEXT",
-    access_token_hash = "TEXT"))
+    access_token_hash = "TEXT",
+    dag = "INTEGER NOT NULL DEFAULT 0",
+    cancel_requested = "INTEGER NOT NULL DEFAULT 0"))
 
   DBI::dbExecute(db, "
     CREATE TABLE IF NOT EXISTS steps (
@@ -114,6 +117,11 @@
     )")
 
   .db_ensure_columns(db, "steps", list(
+    worker_pid = "INTEGER",
+    retry_count = "INTEGER NOT NULL DEFAULT 0",
+    attempt_id = "TEXT",
+    launch_owner_pid = "INTEGER",
+    resource_json = "TEXT",
     external_backend = "TEXT",
     external_id = "TEXT",
     external_status = "TEXT",
@@ -284,6 +292,53 @@
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_cell ON worker_nodes(cell_id)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_worker_nodes_heartbeat ON worker_nodes(last_heartbeat)")
   DBI::dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_scheduler_locks_expires ON scheduler_locks(expires_at)")
+}
+
+#' Preserve active v0.3.0 attempts before replacing DAG cursors with progress
+#' @keywords internal
+.db_migrate_dag_state <- function(db) {
+  DBI::dbExecute(db, "
+    UPDATE steps SET worker_pid = (
+      SELECT j.worker_pid FROM jobs j
+       WHERE j.job_id = steps.job_id AND j.step_index = steps.step_index)
+     WHERE state = 'running'")
+  DBI::dbExecute(db, "
+    UPDATE steps SET retry_count = COALESCE((
+      SELECT j.retry_count FROM jobs j
+       WHERE j.job_id = steps.job_id AND j.step_index = steps.step_index), 0)")
+  jobs <- DBI::dbGetQuery(db, "SELECT job_id, spec_json, step_index FROM jobs")
+  for (i in seq_len(nrow(jobs))) {
+    spec <- tryCatch(jsonlite::fromJSON(jobs$spec_json[i],
+      simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(spec$dag_compiled)) next
+    job_id <- jobs$job_id[i]
+    DBI::dbExecute(db,
+      "UPDATE steps SET state = 'retry_pending'
+        WHERE job_id = ? AND step_index = ? AND state = 'failed'
+          AND EXISTS (SELECT 1 FROM jobs
+                      WHERE job_id = ? AND state = 'PENDING')",
+      params = list(job_id, as.integer(jobs$step_index[i]), job_id))
+    devices <- DBI::dbGetQuery(db,
+      "SELECT details_json FROM resource_leases
+        WHERE job_id = ? AND resource = 'gpu_devices'",
+      params = list(job_id))
+    gpu_devices <- if (nrow(devices) == 1L) {
+      tryCatch(jsonlite::fromJSON(devices$details_json[1],
+        simplifyVector = FALSE)$devices, error = function(e) character(0))
+    } else character(0)
+    DBI::dbExecute(db,
+      "UPDATE steps SET resource_json = ?
+        WHERE job_id = ? AND step_index = ? AND state = 'running'",
+      params = list(as.character(jsonlite::toJSON(
+        list(gpu_devices = gpu_devices), auto_unbox = TRUE)),
+        job_id, as.integer(jobs$step_index[i])))
+    DBI::dbExecute(db,
+      "UPDATE jobs SET dag = 1, worker_pid = NULL,
+         step_index = (SELECT COUNT(*) FROM steps
+                       WHERE job_id = ? AND state = 'done')
+        WHERE job_id = ?", params = list(job_id, job_id))
+  }
+  invisible(TRUE)
 }
 
 #' @keywords internal

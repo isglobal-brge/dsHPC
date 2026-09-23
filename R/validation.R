@@ -65,6 +65,7 @@
       .validate_identifier(step$output_name, paste0("Step ", i, " output_name"))
   }
   spec$steps <- steps
+  if (!is.null(spec$dag_compiled)) .dag_dependencies(spec)
   if (is.null(spec$resource_class)) spec$resource_class <- "default"
   spec
 }

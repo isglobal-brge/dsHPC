@@ -478,12 +478,14 @@
         start_idx <- as.integer(job$step_index %||% 0L)
         if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
           start_idx <- 1L
-        if (!.step_cache_waiting_active(db, jid, start_idx)) {
+        if (isTRUE(as.logical(job$dag)) ||
+            !.step_cache_waiting_active(db, jid, start_idx)) {
           decision <- .scheduler_can_start_job(db, jid, spec, job_settings)
           if (isTRUE(decision$ok)) {
             .scheduler_acquire_leases(db, jid, decision)
             .store_update_job(db, jid, state = "RUNNING",
-              step_index = start_idx, error_message = NA_character_,
+              step_index = if (isTRUE(as.logical(job$dag))) 0L else start_idx,
+              error_message = NA_character_,
               started_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z",
                                    tz = "UTC"))
             .db_log_event(db, jid, "started",
@@ -523,8 +525,14 @@
       start_idx <- as.integer(job$step_index %||% 0L)
       if (!is.finite(start_idx) || is.na(start_idx) || start_idx < 1L)
         start_idx <- 1L
-      .executor_run_step(db, jid, start_idx, spec)
+      if (isTRUE(as.logical(job$dag))) .executor_run_dag(db, jid, spec)
+      else .executor_run_step(db, jid, start_idx, spec)
     }, error = function(e) {
+      if (isTRUE(as.logical(.store_get_job(db, jid)$dag))) {
+        .dag_record_failure(db, jid, paste("Dispatch failed:", conditionMessage(e)))
+        .dag_finish_job(db, jid)
+        return(invisible(FALSE))
+      }
       tryCatch(.scheduler_release_leases(db, jid), error = function(e2) NULL)
       .store_update_job(db, jid, state = "FAILED",
         error_message = paste("Dispatch failed:", conditionMessage(e)),
@@ -538,20 +546,29 @@
 #' @keywords internal
 .worker_reap <- function(db) {
   .recover_deduplicated_job_clones(db)
+  on.exit(.worker_advance_dags(db), add = TRUE)
   running <- DBI::dbGetQuery(db,
-    "SELECT j.job_id, j.worker_pid, j.step_index,
+    "SELECT j.job_id, j.dag,
+            CASE WHEN j.dag = 1 THEN s.worker_pid ELSE j.worker_pid END AS worker_pid,
+            s.step_index, s.launch_owner_pid, s.attempt_id,
             s.runner, s.state AS step_state, s.started_at AS step_started_at,
             s.external_backend, s.external_id,
             s.external_status AS step_external_status
      FROM jobs j
      LEFT JOIN steps s
-       ON s.job_id = j.job_id AND s.step_index = j.step_index
+       ON s.job_id = j.job_id AND
+         ((j.dag = 0 AND s.step_index = j.step_index) OR
+          (j.dag = 1 AND s.state = 'running'))
      WHERE j.state = 'RUNNING'")
   if (nrow(running) == 0) return()
 
   for (i in seq_len(nrow(running))) {
     jid <- running$job_id[i]
     sidx <- as.integer(running$step_index[i])
+    is_dag <- isTRUE(as.logical(running$dag[i]))
+    if (is_dag && is.na(sidx)) next
+    if (is_dag && !.dag_leader_allows(db)) next
+    if (is_dag) .dag_retire_launch_owner(db, running$launch_owner_pid[i])
     runner_name <- running$runner[i]
     step_state <- running$step_state[i]
     external_id <- running$external_id[i]
@@ -567,6 +584,11 @@
       NULL
     })
     if (!is.null(load_error)) {
+      if (is_dag && .worker_invalid_durable_spec_error(load_error)) {
+        .dag_record_failure(db, jid, "Durable job specification is invalid")
+        # Existing local attempts still have to settle before terminalization.
+        context <- list(spec = NULL, settings = .dshpc_settings())
+      } else {
       if (.worker_invalid_durable_spec_error(load_error)) {
         .worker_fail_invalid_durable_spec(db, jid)
       } else {
@@ -574,6 +596,7 @@
           "; retrying")
       }
       next
+      }
     }
     spec <- context$spec
     job_settings <- context$settings
@@ -611,8 +634,17 @@
     if (!is.na(external_id) && nzchar(external_id)) {
       status <- .backend_step_status(external_backend, external_id, step_dir,
         settings = job_settings)
+      if (is_dag && !.dag_reap_current(db, jid, sidx, running$attempt_id[i])) next
       cancel_requested <- identical(previous_external_status,
         "CANCEL_REQUESTED")
+      if (is_dag && !cancel_requested &&
+          isTRUE(as.logical(.store_get_job(db, jid)$cancel_requested)) &&
+          identical(status$state, "running")) {
+        cancel_requested <- isTRUE(.backend_cancel_step(external_backend,
+          external_id, settings = job_settings))
+        if (cancel_requested) .store_update_step(db, jid, sidx,
+          external_status = "CANCEL_REQUESTED")
+      }
       timeout_cancel_requested <- identical(previous_external_status,
         "TIMEOUT_CANCEL_REQUESTED")
       if ((cancel_requested || timeout_cancel_requested) &&
@@ -651,26 +683,51 @@
       }
       if (cancel_requested && !identical(status$state, "succeeded")) {
         .worker_finalize_external_cancellation(db, jid, sidx,
-          status$external_state %||% status$state)
+          status$external_state %||% status$state,
+          attempt_id = if (is_dag) running$attempt_id[i] else NULL)
         next
       }
       if (timeout_cancel_requested &&
           !identical(status$state, "succeeded")) {
         .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
-          external_status = "TIMEOUT", settings = job_settings)
+          external_status = "TIMEOUT", settings = job_settings,
+          attempt_id = if (is_dag) running$attempt_id[i] else NULL)
         next
       }
       exit_code <- as.integer(status$exit_code %||% 1L)
       .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code,
         external_status = status$external_state %||% status$state,
-        settings = job_settings)
+        settings = job_settings,
+        attempt_id = if (is_dag) running$attempt_id[i] else NULL)
       next
     }
 
+    # A durable wrapper writes this only after wait(child) has completed. Do
+    # not probe or signal a now-reusable child PID after acknowledged completion.
+    if (is_dag && file.exists(file.path(step_dir, "exit_code"))) {
+      durable_exit <- .read_exit_code(step_dir)
+      if (!is.na(durable_exit)) {
+        .proc_get_exit(jid, sidx)
+        .worker_finalize_artifact_step(db, jid, sidx, runner_name, durable_exit,
+          settings = job_settings, attempt_id = running$attempt_id[i])
+        next
+      }
+    }
+
+    if (is_dag && is.na(running$worker_pid[i])) {
+      marker_pid <- .dag_read_pid(file.path(step_dir, "runner.pid"))
+      if (!is.na(marker_pid)) {
+        running$worker_pid[i] <- marker_pid
+        .store_update_step(db, jid, sidx, worker_pid = marker_pid)
+      } else if (.pid_is_alive(running$launch_owner_pid[i])) {
+        next
+      }
+    }
     if (is.na(running$worker_pid[i])) {
       .worker_requeue_interrupted_step(db, jid, sidx,
         "Running job has no live worker or external backend id",
-        settings = job_settings)
+        settings = job_settings,
+        attempt_id = if (is_dag) running$attempt_id[i] else NULL)
       next
     }
     pid <- as.integer(running$worker_pid[i])
@@ -678,12 +735,16 @@
     # Use processx handle if available (reliable), fall back to PID check
     still_alive <- .proc_is_alive(jid, sidx)
     if (!still_alive) still_alive <- .pid_is_alive(pid)
+    if (is_dag && !.dag_reap_current(db, jid, sidx, running$attempt_id[i])) next
 
     if (still_alive && isTRUE(timed_out)) {
-      cancelled <- .executor_kill(db, jid, settings = job_settings)
+      cancelled <- if (is_dag) {
+        if (.dag_terminate_step(db, jid, sidx)) "terminated" else "failed"
+      } else .executor_kill(db, jid, settings = job_settings)
       if (identical(cancelled, "terminated")) {
         .worker_finalize_artifact_step(db, jid, sidx, runner_name, 124L,
-          external_status = "TIMEOUT", settings = job_settings)
+          external_status = "TIMEOUT", settings = job_settings,
+          attempt_id = if (is_dag) running$attempt_id[i] else NULL)
       } else {
         .store_update_step(db, jid, sidx,
           external_status = "TIMEOUT_CANCEL_FAILED")
@@ -697,16 +758,19 @@
     }
 
     if (!still_alive) {
+      if (is_dag && !.dag_terminate_child(step_dir)) next
       # Use processx exit status if available
       proc_exit <- .proc_get_exit(jid, sidx)
       exit_code <- if (!is.na(proc_exit)) proc_exit else .read_exit_code(step_dir)
       if (is.na(exit_code)) {
         .worker_requeue_interrupted_step(db, jid, sidx,
           "Artifact process disappeared without exit_code",
-          settings = job_settings)
+          settings = job_settings,
+          attempt_id = if (is_dag) running$attempt_id[i] else NULL)
       } else {
         .worker_finalize_artifact_step(db, jid, sidx, runner_name, exit_code,
-          settings = job_settings)
+          settings = job_settings,
+          attempt_id = if (is_dag) running$attempt_id[i] else NULL)
       }
     }
   }
@@ -724,7 +788,13 @@
 #' Mark a remotely cancelled job terminal only after backend reconciliation
 #' @keywords internal
 .worker_finalize_external_cancellation <- function(db, jid, sidx,
-                                                   external_status) {
+                                                   external_status,
+                                                   attempt_id = NULL) {
+  if (isTRUE(as.logical(.store_get_job(db, jid)$dag))) {
+    .dag_fail_step(db, jid, sidx, "Cancelled", exit_code = 143L,
+      external_status = external_status, retry = FALSE, attempt_id = attempt_id)
+    return(invisible(TRUE))
+  }
   now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
@@ -764,7 +834,13 @@
 #' Requeue or fail a running step whose process disappeared
 #' @keywords internal
 .worker_requeue_interrupted_step <- function(db, jid, sidx, reason,
-                                             settings = .dshpc_settings()) {
+                                             settings = .dshpc_settings(),
+                                             attempt_id = NULL) {
+  if (isTRUE(as.logical(.store_get_job(db, jid)$dag))) {
+    .dag_fail_step(db, jid, sidx, reason, settings = settings,
+      attempt_id = attempt_id)
+    return(invisible(TRUE))
+  }
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
     job <- .store_get_job(db, jid)
@@ -803,7 +879,11 @@
 .worker_finalize_artifact_step <- function(db, jid, sidx, runner_name,
                                            exit_code,
                                            external_status = NULL,
-                                           settings = .dshpc_settings()) {
+                                           settings = .dshpc_settings(),
+                                           attempt_id = NULL) {
+  is_dag <- isTRUE(as.logical(.store_get_job(db, jid)$dag))
+  if (is_dag && !is.null(attempt_id) &&
+      !.dag_reap_current(db, jid, sidx, attempt_id)) return(invisible(FALSE))
   output_validation_failed <- FALSE
   if (identical(as.integer(exit_code), 0L)) {
     output_ref <- file.path("artifacts", jid,
@@ -818,10 +898,25 @@
       output_validation_failed <- TRUE
     }
   }
+  if (is_dag && !identical(as.integer(exit_code), 0L)) {
+    .scheduler_record_runner_failure(db, runner_name, exit_code,
+      reason = "artifact_step_failed", settings = settings)
+    .dag_fail_step(db, jid, sidx,
+      if (output_validation_failed) "Artifact output failed validation"
+      else paste("Step", sidx, "failed (exit", exit_code, ")"),
+      exit_code = exit_code, external_status = external_status,
+      settings = settings, attempt_id = attempt_id)
+    return(invisible(TRUE))
+  }
   advance_after_commit <- FALSE
   committed <- FALSE
   DBI::dbExecute(db, "BEGIN IMMEDIATE")
   tryCatch({
+    if (is_dag && !is.null(attempt_id) &&
+        !.dag_reap_current(db, jid, sidx, attempt_id)) {
+      DBI::dbExecute(db, "COMMIT")
+      return(invisible(FALSE))
+    }
     if (identical(as.integer(exit_code), 0L)) {
       output_ref <- file.path("artifacts", jid,
                                sprintf("step_%03d", sidx), "output")
@@ -843,6 +938,10 @@
         finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"))
       if (!is.null(external_status)) updates$external_status <- external_status
       do.call(.store_update_step, c(list(db, jid, sidx), updates))
+      if (is_dag) {
+        .store_update_step(db, jid, sidx, worker_pid = NA_integer_)
+        .scheduler_release_step_lease(db, jid, sidx)
+      }
       .store_update_job(db, jid, worker_pid = NA_integer_)
       .db_log_event(db, jid, "step_done", list(step_index = sidx))
       advance_after_commit <- TRUE

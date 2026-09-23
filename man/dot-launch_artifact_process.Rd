@@ -4,7 +4,14 @@
 \alias{.launch_artifact_process}
 \title{Launch an embedded artifact process with explicit PID and exit-code files}
 \usage{
-.launch_artifact_process(prepared, step_dir)
+.launch_artifact_process(
+  prepared,
+  step_dir,
+  db = NULL,
+  job_id = NULL,
+  step_index = NULL,
+  attempt_id = NULL
+)
 }
 \description{
 Launch an embedded artifact process with explicit PID and exit-code files

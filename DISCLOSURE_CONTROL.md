@@ -1,7 +1,7 @@
 # dsHPC disclosure-control contract
 
-Reviewed: 2026-09-05. This document describes the analyst-facing DataSHIELD
-boundary in dsHPC 0.3.0. It is a release invariant, not a claim that every
+Reviewed: 2026-09-23. This document describes the analyst-facing DataSHIELD
+boundary in dsHPC 0.4.0. It is a release invariant, not a claim that every
 domain package consuming a server-side object is automatically disclosure-safe.
 
 ## Shared knowledge model
@@ -151,6 +151,21 @@ submissions create roots explicitly or automatically.
     jobs carrying `reuse_fingerprint` and a sealed `runtime_revision`; both are
     part of the reuse contract alongside resolved input contents, runner
     definition, and execution unit.
+
+12. Independent compiled DAG nodes may run concurrently within one execution
+    job. Step state, process identities, allocations, dependency fan-out,
+    retries, progress counters and timings remain private/operator data. A
+    failed branch does not terminalize the job while another branch is still
+    running. The shared `root_v1` projection and fixed output aliases are
+    unchanged; no per-node rows or intermediate failure details are exposed.
+    Schema version 3 adds execution bookkeeping only, and creates no new roots
+    or reusable output classifications for historical jobs.
+
+Container runners default to `container_network = "none"`. Docker/Podman use
+their network-none mode. Apptainer/Singularity request a contained network
+namespace and verify distinct namespace identity and loopback-only interfaces
+before executing the runner; unavailable or ignored isolation fails closed.
+Runtime requirements are documented in [container network requirements](docs/CONTAINER_NETWORK.md).
 
 ## Platform identity feasibility
 

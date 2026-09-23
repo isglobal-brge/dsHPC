@@ -33,6 +33,9 @@ For DAGs, `jobs.step_index` is a count of successful nodes (not an active node
 address); `total_steps` remains the fixed node count. Legacy linear jobs retain
 the old cursor semantics and job PID for compatibility. No spec, capability,
 tracking root, output classification, or runtime identity is rewritten.
+The existing seal includes the dsHPC package version. Operators should drain
+sealed v0.3.0 jobs before upgrading: active attempts can reconcile, but a fresh
+launch under the new package version requires resubmission under a new seal.
 
 Claims and resource reservations use SQLite's writer lock. The worker leader
 lease remains the dispatch authority; check it before claims and launches
@@ -48,6 +51,11 @@ within their individual retry allowance; completed branches are never rerun.
 Recovery is at-least-once, as in the existing durable artifact contract; runners
 must make external side effects idempotent. External submission retains its
 existing unavoidable submit/acknowledgement ambiguity and durable backend marker.
+On lease takeover, an expired local daemon still preparing a launch is retired
+before its attempt is reset. Retirement requires a running worker registration
+with matching PID, node and process birth time; ordinary sessions are not killed.
+Embedded durable DAG artifacts require a Unix worker and fail before launch on
+unsupported hosts.
 
 A permanent failure records the first observed error durably, stops fresh
 ready-node dispatch, and leaves the job `RUNNING` until all already in-flight
